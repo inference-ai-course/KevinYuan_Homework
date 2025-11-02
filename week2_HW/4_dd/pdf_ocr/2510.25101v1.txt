@@ -1,0 +1,1602 @@
+arXiv:2510.25101v1 [cs.AI] 29 Oct 2025
+
+KnowCoder
+
+=] KnowCoder-A1: Incentivizing Agentic Reasoning Capability
+with Outcome Supervision for KBQA
+
+Zhuo Chen!~?, Fei Wang!*, Zixuan Li!?*, Zhao Zhang’,
+Weiwei Ding!”, Chuanguang Yang!*, Yongjun Xu!”, Xiaolong Jin
+lnstitute of Computing Technology, Chinese Academy of Sciences
+State Key Laboratory of AI Safety
+
+3School of Computer Science, University of Chinese Academy of Sciences
+{wangfei@ict.ac.cn, lizixuan@ict.ac.cn}
+
+123, Jiafeng Guo!
+
+Abstract
+
+Knowledge Base Question Answering (KBQA) aims to answer natural-language
+questions over a structured Knowledge Base (KB). Recent work improves KBQA
+by adopting an agentic reasoning paradigm, in which Large Language Mod-
+els (LLMs) iteratively decompose a question, generate its corresponding logical
+queries, and interact with the KB to derive the answer. However, these methods
+typically fine-tune LLMs on reasoning trajectories synthesized via process super-
+vision, which offers weak incentives for exploration and thus fails to strengthen
+the agentic reasoning ability. In this paper, we propose KNOWCODER-AI, an
+LLM that can autonomously perform agentic reasoning on KBs to obtain answers.
+To incentivize autonomous exploration, KNOWCODER-A | trains the LLM under
+outcome-only supervision via a multi-stage curriculum reinforcement learning
+with an easy-to-hard curriculum. To establish foundational agentic capabilities,
+KNOWCODER-A| first fine-tunes the LLM on a small set of high-quality tra-
+jectories obtained through outcome-based rejection sampling. Then, to alleviate
+the reward sparsity inherent in outcome-only supervision, it applies multi-stage
+curriculum RL with reward schedules that progress from easy to hard. Trained
+with outcome-only supervision, KNOWCODER-A| exhibits powerful reasoning
+behaviors and consistently outperforms prior approaches across three mainstream
+datasets. Notably, on the zero-shot subset of GrailQA, KNOWCODER-A| achieves
+up to an 11.1% relative improvement while using only one-twelfth of the training
+data, demonstrating strong agentic reasoning capabilities.
+
+1 Introduction
+
+Knowledge Base Question Answering (KBQA) leverages the rich semantic information in Knowledge
+Bases (KB) to deeply understand natural language questions and provide precise answers. Since
+KBQA holds significant value in applications such as search engines, intelligent healthcare, and
+financial risk control (Jang et al., 2017; Wu et al., 2024; Chen et al., 2025), it has garnered extensive
+attention in recent years. Although KBQA performs well on simple questions, it still struggles with
+complex questions in real-world scenarios. This difficulty primarily arises from generalizing to a
+wide range of unseen complex questions and adapting to the heterogeneous structures of KBs.
+
+Existing semantic-parsing-based (Shu et al., 2022; Jiang et al.) and information-retrieval-based KBQA
+approaches (Liu et al., 2022; Sun et al., 2019) rely on predefined workflows (e.g., generate-then-
+retrieve or retrieve-then-rank pipelines), resulting in error propagation and adaptability limitations.
+Recently, a series of approaches has adopted an agentic reasoning paradigm. As illustrated in the
+middle of Fig. 1, under this paradigm, LLMs autonomously perform task planning, tool calling, and
+ultimately derive precise answers through multi-turn interactions with KBs. Specifically, existing
+agentic approaches fall into two categories, i.e., prompting-based (Xiong et al., 2024; Sun et al.) and
+finetuning-based approaches (Jiang et al., 2024; Fang et al., 2024; Zhu et al., 2025). The former uses
+
+*Corresponding authors
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Question: Which high school attended by Richard NIxon was founded first?                     &  SearchGraphPatterns       jwhen the question mentions |
+
+/ high school, I should call
+ooo             47 SearchGraphPatterns using |
+ey “notable types” sematic |
+Observation: [(?e,rel1,t),.]             param...                          \
+
+rell is what I need,    [=|Better options are:
+rea)   next, I will call.     1.Use SearchTypes(“high school”)
+=                       2.Use LLM’s commonsense
+
+Query Graph Grounded on KG          SPARQL-decomposed trajectory
+
+‘( Richard)!
+| Nixon}!
+
+SearchGraphPatterns(.., semantic="person education")
+
+Observation: [(?e, person.education )]               =
+
+unexplored
+
+SearchGraphPatterns(.., semantic=“edu institution”)
+
+Vopservation; T)         SPARQL can be ONLY written!
+
+Observation:[(?e, education. institution)]       =                    je TEE            Hd @2 Bi as “SELECT 2e WHERE LP]
+"rece nnn tenet 54 |! [Scorchoraphpatterns(.,semantic=“notable tyes”) || | Goceo~elAgG|| RO S---nrH-nN
+pet                          [ SearchGraphPatterns(..,semantic=“notable types”)    ]                    l observation: Error      |     SPARQL can be diverse:
+‘i                                                 oo                          (ser,          LTT   *— ASK{Subgraph} can verify if
+!                          '   [ ExecuteSPARQL(“SELECT ?x WHERE {...} LIMIT 1")     ]                     reg  What should I do???      the subgraph exist.
+'  2002 ||   ————              Limited                           + UNION, FILTER, OPTIONAL can...
+t                        servation: Fullerton Union Hit  choo                  .        tsi                  tes,      Shashi.
+en                              3               Ea     Exploration        Limited Robustness          Limited Flexibility
+
+Figure |: The key limitations of existing agentic approaches that rely on process supervision.
+
+hand-crafted few-shot prompts to guide reasoning, relying on the intrinsic reasoning ability of LLMs.
+However, few examples are inadequate for the model to understand complex questions, perceiving
+the KB structure, resulting in low performance. In response, finetuning-based approaches adapt
+open-source LLMs by constructing agentic reasoning trajectories and fine-tuning the model to follow
+them. However, most of them rely on process supervision. Since manually creating high-quality
+trajectories is labor-intensive, they typically synthesize reasoning trajectories by decomposing gold
+logical forms (e.g., SPARQL). Besides, they learn from trajectories via Supervised Fine-Tuning (SFT)
+to employ the model with agentic reasoning ability.
+
+Despite the progress, existing finetuning-based approaches rely heavily on process supervision both
+in data generation and model training. They encourage LLMs to exploit idea trajectories rather than
+autonomously exploring alternative ones. Consequently, they have two critical limitations:
+
+* Limited Robustness. Under process supervision, as shown in the left part of Fig. 1, training
+trajectories are typically decomposed from gold logical forms, with each step being idealized
+and error-free. However, such trajectories omit the noise and uncertainty inherent in real-world
+interactions. As a result, models always struggle when exposed to the noisy, such as tool-call
+failures and empty results, as they are trained on ideal trajectories.
+
+* Limited Flexibility. For many questions, there exists more than one correct trajectory, and in some
+cases, certain trajectories may even outperform the gold logical forms. Training on trajectories
+only derived from gold logical forms constrains the model to low-diversity behavioral patterns. As
+shown in Fig. 1, when the model is presented with an example problem containing a“high school”
+type constraint, it insists on finding a predicate with the meaning “notable type” and applies the
+type constraint. However, more efficient solutions exist, such as leveraging common sense to
+identify entities of a specific type from the candidate set, or using “SearchTypes” to more directly
+constrain the entity types.
+
+Motivated by this, in this paper, we propose KNOWCODER-A1, an LLM capable of autonomously
+performing task decomposition, invoking tools, refining formal queries, and executing them to obtain
+answers. To incentivize autonomous exploration, KNOWCODER-A1 adopts a multi-stage curriculum
+reinforcement learning approach that relies mainly on outcome supervision. First, to break free from
+the dependency on process annotation, it employs an outcome-based rejection sampling strategy to
+curate high-quality trajectories and perform to endow the model with a foundational exploration
+capability. To mitigate the reward sparsity induced by outcome-only signals, KNOWCODER-A 1
+employs multi-stage curriculum RL on reward schedules that progress from easy to hard, steadily
+strengthening autonomous exploration and complex reasoning. Trained with only around 6700
+outcome-supervised samples, KNOWCODER-A | consistently outperforms previous agentic KBQA
+approaches across three mainstream datasets, i.e., WebQSP, CWQ, and GrailQA. Using 12x less
+training data, it achieves an F1 score of 80.5% on GrailQA, achieving a 3.3% relative improvement
+over KBQA-ol, the previous SOTA agentic-based approach. Notably, on the zero-shot subset of
+GrailQA, KNOWCODER-AI achieves a relative improvement of up to 11.1% compared to KBQA-ol,
+demonstrating the strong generalization ability of the proposed approach.
+
+In summary, our contributions are as follows:
+¢ We propose KNOWCODER-AI, our first agentic reasoning model for KBQA. Relying
+
+mainly on outcome supervision, it learns to act as a robust and flexible agent, capable of
+recovering from errors and strategically exploring diverse reasoning trajectories.
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+¢ To address the reward sparsity inherent in outcome-only supervision, we propose a multi-
+stage curriculum reinforcement learning with an easy-to-hard curriculum, progressing from
+easy to hard reward criteria while discouraging reward hacking.
+
+¢ Extensive experiments on three mainstream datasets demonstrate that KNOWCODER-A |
+consistently outperforms previous agentic KBQA approaches, particularly in challenging
+zero-shot scenarios.
+
+2 Related Work
+
+2.1 Traditional KBQA methods
+
+Traditional KBQA methods can be categorized into two primary kinds of approaches: Information
+Retrieval-based (IR-based) and Semantic Parsing-based (SP-based) ones. IR-based methods (Miller
+et al., 2016; Liu et al., 2022; Sun et al., 2019; Saxena et al., 2020; Shi et al., 2021; Zhang et al.,
+2022) first retrieve query-relevant information from the KB and subsequently rank candidate answers.
+Among IR-based methods, some (Bordes et al., 2015; Chen et al., 2019a) incorporate a long-term
+memory component that can be read from and written to, or perform a path-walking process over the
+KB to derive the answer (Qiu et al., 2020; Ren et al., 2021). SP-based methods (Sun et al., 2020;
+Chen et al., 2019b; LAN & JIANG; Jiang et al.; Ye et al., 2022; Shu et al., 2022) transform the natural
+language question into a logical query, link the entities and relations, and execute the completed
+query to obtain the answer. With the advent of LLMs, they have been employed to enhance both
+approaches, serving as powerful subgraph retrievers (Zhao et al., 2024; Liu et al., 2024) or semantic
+parsers (Li et al., 2023; Nie et al., 2024). However, these enhancements do not fundamentally alter
+the predefined, multi-stage workflow, which brings inflexibility and error propagation.
+
+2.2 Agentic KBQA methods
+
+Recently, a new paradigm of agentic reasoning has emerged, which views the LLM as an agent
+that uses tools to interact with the KB, progressively reason, and finally find the answer. We call
+them agentic methods in this paper. They can be divided into two main categories: prompt-based
+and finetuning-based ones. The former methods, such as Interactive-KBQA (Xiong et al., 2024),
+QueryA gent (Huang et al., 2024), Readi (Cheng et al., 2024), and TOG (Sun et al.), leverage carefully
+designed interaction strategies and prompts to elicit the model’s reasoning capabilities. However, these
+methods struggle to equip the model with sufficient agentic capability to effectively perceive the KB
+and execute complex reasoning. Their success is also heavily dependent on the intrinsic capabilities of
+LLMs, most of which are closed-source and have an extremely large number of parameters. However,
+the limited number of examples is insufficient for the model to fully comprehend complex questions
+and capture the underlying KB structure, leading to suboptimal performance. Finetuning-based
+methods aim to distill reasoning abilities into smaller, open-source LLMs. Approaches (Gu et al.,
+2023; Jiang et al., 2024; Zhu et al., 2025; Fang et al., 2024) achieve this by constructing high-quality
+reasoning trajectories and finetuning on them. However, these trajectories, by decomposing and
+augmenting gold program annotations and the reliance on process supervision via SFT, limit the
+model’s capacity for autonomous exploration, resulting in poor robustness and flexibility. Although
+some recent works have used Monte Carlo Tree Search (MCTS) methods (Luo et al.; Xiong et al.,
+2025) to expand samples during inference for incremental fine-tuning, this is an indirect way to
+foster exploration and still operates within the confines of the process-supervised SFT paradigm.
+Overall, existing finetuning-based methods fall under SFT-based process supervision, which, as noted
+in Section 1, struggles to encourage autonomous exploration, leading to less robust and adaptable
+reasoning trajectories.
+
+3. Preliminaries
+
+Knowledge Base. A Knowledge Base (KB) is a structured knowledge graph G = (E, R, F), where
+E is the set of entities, 72 is the set of relations, and F is the set of factual triples. Each triple f € F
+takes the form (H,r,t), where h,t € € are the head and tail entities, and r € RF is the relation.
+
+KBQA. Given a natural-language question q, the KB G, and a set of topic entities E; C € mentioned
+in q, the objective of the KBQA task is to find the answer set that maximizes the conditional
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Stage 1: SFT-based Cold start             Stage 2: RL-based Exploration
+webasP || cwQ || Grailqa            (rocco enone nnn -----  Reward curriculum |,
+sampling Assistant :<answer> (A1)(A2)A3)[A4) </answer> || Ansi        Assistant :<answer> (A1)(A2)A3\A4)</answer> | Ansi
+Task Description                     {Golden answer:(A1)(A2)       Fys=0.55 17 =0.65  » Golden answer:{A1)(A2)       F, =0.66     11=0.76  |
+You are an expert in SPARQL programming...          ||Assistant :answer>(A1} </answer>            Ans2      Assistant :<answer>(A1}</answer>           Ans2 | |
+Tool Definition                        | Golden answer: (A1)(A2,       Fo5=0.83  r,=0.93       Golden answer: (Ai)(A2)       F,=0.66      12=0.76
+SearchGraphPatterns: This tool searches for         I                                     01                                              01        |
+relevant one-hop and two-hop...                         (oe Thormat OL horma 20-1
+
+High-quality Demos
+
+Trajectory
+
+Assistant: <think>...<think><tool_call>...<tool_call>
+
+Decompose|->|| Interact |->| Reflect bof answer         Observation: <tool_response>{“result”: [(?e,p,0), (h,p, ?e)]}</tool_response>
+
+Assistant: <think>...<think><tool_call>
+
+SearchGraphPatterns(sparql=“SELECT ?school WHERE { ?e unseen _p ?e1.}”, semantic=“xxx”)<tool_call>
+igs                               Observation: <tool_response> Timed Out Error </tool_response>
+
+Strong LLMs
+
+KnowCoder-A1          i. ~ oo  GRPO Training - stage    ;    C77 a  GRPO Training - stage2   ri
+
+>  Ww          cold-start             KnowCoder        Traj. |Ans nN   knowCoder role .   Traj. |Ans     Bie    (4)
+-Al                                               -Al
+
+CQ Osé& |                 (Te Jarome fa) | AE Era Jr) ome (4)
+
+Ignored Process Error
+
+Decompose ||! trteract >| Answer
+
+eS LL                                                                                                                at                                             Reward|
+
+|
+Ca} Traj. = Ans \eEM=1,(- Gy Ni Gustions   Traj. [Ans     (4c]! |(Cauestions |  (Frei. ax)
+
+SFT-based Cold start            RL curriculum: phase 1             RL curriculum: phase 2
+
+Figure 2: An overview of the training framework of KNOWCODER-A1 . Stage 1 (left): the SFT-based
+cold-start process, where high-quality trajectories are curated from strong LLMs to fine-tune an
+initial agent. Stage 2 (right): the multi-phase Reinforcement Learning curriculum, where the agent is
+progressively improved through exploration and a dynamic reward strategy.
+
+probability P(A,  \q, Ey, G). Notably, following prior work Luo et al., we assume entity mentions in
+q are linked to the knowledge graph G and given as an input.
+
+Agentic Reasoning Paradigm for the KBQA Task. In the agentic KBQA paradigm, the LLM
+is viewed as an agent learning a policy 7t to interact with the environment. At each step t, the
+agent chooses an action a; € ACTION based on the question q and its historical reasoning trajectory
+T = {(c1,41,01),.--, (Ct, at, 0+) }, where ACTION denotes the action space, c; denotes the explicit
+thinking process before the action, and 0; is the observation from the environment. This interactive
+process continues until the agent finds the final answer set A, or reaches the maximum number of
+steps.
+
+The objective is to learn an optimal policy 7t* that maximizes the probability of generating a trajectory
+T that leads to the gold answer set Aj. This can be expressed as maximizing the total probability of
+all successful trajectories:
+
+7" = arg max yi P(t|q, Eq, G; 7),        (1)
+
+TE Tsuccess
+
+where Tsuccess is the set of all trajectories that successfully yield the gold answers A; and the
+trajectory probability P(t|...; 70) is determined by the policy zz.
+
+4 Methodology
+
+4.1 Agentic Initialization
+
+KNOWCODER-A | follows a ReAct-style (Yao et al., 2023) agent paradigm that interleaves explicit
+reasoning and tool use over a KB environment, and terminates with a final answer.
+
+Environment. We view the KB and the tool executor as the environment: M = (G, Exec), where
+Exec executes tool calls against G and returns structured observations (including error diagnostics
+when execution fails). It is worth noting that error messages are retained to provide corrective signals
+to help LLM refine subsequent tool calls.
+
+Action Space. At each step, the agent first produces an explicit thinking process and then makes a tool
+call from a finite action set ACTION. We instantiate three tools based on Interactive-KBQA (Xiong
+et al., 2024):
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+¢ SEARCHTYPES(typename): Given a type name, retrieves and ranks candidate types in
+similarity order.
+
+e SEARCHGRAPHPATTERNS(sparql, semantic): Given a partial SPARQL sketch (assumed
+to start with SELECT DISTINCT ?x WHERE {...}), returns up to 10 one- and two-
+hop subgraphs in which the variable ?x appears as the head or tail object. An optional
+semantic parameter can be provided to rank the returned subgraphs in similarity order.
+
+¢ EXECUTES PARQL(sparql): Given a SPARQL query, executes it against a sandboxed
+endpoint over G and returns the result. This enables flexible query on the graph, such as
+hypothesis testing (e.g., subgraph existence) or end-to-end query execution.
+
+State and Trajectory. Let c; denote the explicit thinking process in natural language, a; € ACTION
+the action, and 0; the observation at step t. The trajectory, which also serves as the agent’s state, is
+the history of all past interactions. The trajectory at step ¢t is denoted as:
+
+Te = {(C1,41,01),-++/ (Ct, at, OF) f-                           (2)
+Interactive Process. Given a question q, the agent begins with an initial prompt
+
+Prompt = (Inst, q, Eq),                           (3)
+
+where the instruction consists of a brief task description, tool definitions, and the required interaction
+format, followed by the question q and its topic entities E,. The specific prompt is provided in the
+Appendix E.
+
+At each step f, the agent first generates a thought c;+ and a tool call a;,1 conditioned on the current
+trajectory and the initial prompt:
+
+Cr41, 4141 = LLM(t%;, Prompt).                                       (4)
+
+The tool call a;,1 is then passed to the executor, which returns an observation 0441 = Exec(dt41).
+The new interaction turn (c++1, 4141, 0141) is appended to the current trajectory to form the trajectory
+for the next step, T4 1. This iterative process continues until the agent determines it has gathered
+sufficient information and decides to output the final answer, or reaches T, the maximum number of
+steps.
+
+4.2 SET-based Cold-start Stage
+
+Due to the heterogeneous structures of KBs and the complexity of questions, employing a base
+model with insufficient reasoning and tool-use capabilities as an agent makes it difficult to guarantee
+the discovery of trajectories to the correct answer. To mitigate this issue, we introduce a cold-start
+stage where the agent is fine-tuned on reasoning trajectories to acquire foundational perception
+and reasoning capabilities. Instead of relying on program-decomposed trajectories, we generate
+trajectories via outcome-based rejection sampling. Moreover, to avoid overfitting while ensuring
+sufficient guidance, we adhere to the principle of constructing a dataset that is concise, yet high in
+quality and diversity. In the following, we will first describe this data curation process and then detail
+the model’s training procedure.
+
+4.2.1 Data Construction.
+
+As discussed in Sec. 1, program-decomposed trajectories used in existing approaches fundamentally
+lack exploration, resulting in the limited robustness and flexibility of the model. To overcome
+the limitations and obtain a high-quality and diverse dataset, we design an outcome-based data
+construction strategy, the overall pipeline is illustrated in the left panel of Fig. 2, which contains three
+core components:
+
+First, to ensure the model learns a diverse set of fundamental reasoning patterns, we curate a mixed
+question set using a principled sampling strategy across several sources. From WebQSP, we balance
+one- and two-hop questions to teach varied reasoning depths. From CWQ, we up-sample infrequent
+question types to guarantee exposure to complex compositional structures. Finally, from GrailQA,
+we up-sample questions without topic entities to improve the model’s ability to generalize.
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Next, to endow the model with stronger exploratory abilities and expand its exploration space, we
+use a prompt designed to encourage trial-and-error. As the yellow block in Fig. 2 shows, the prompt
+contains three parts: task description, tool definition, and high-quality demos: a few manually crafted
+exemplars that demonstrate a general agentic reasoning process, including planning, interacting, and
+self-correction after errors. Then, we prompt strong models (e.g., Gemini 2.5 Flash (Comanici et al.,
+2025) and DeepSeek-V3 (Guo et al., 2025)) to generate multiple candidate trajectories for each
+question.
+
+After that, to ensure the correctness of the trajectories, we apply an outcome-based rejection sampling,
+filtering the generated trajectories using two criteria, retaining only those that are both correct and
+fully grounded in evidence:
+
+¢ Exact-match Correctness. The Exact Match (EM) score (Talmor & Berant, 2018) between
+the predicted and gold answers must be 1. This ensures that at least one of the predicted
+answers appears in the gold answers, which largely guarantees the correctness of the
+trajectory.
+
+* Evidence Grounding. All predicted answers must appear in the observation history
+{o0,...,or}, ensuring that the agent does not rely on internal parametric knowledge that
+could lead to hallucinations during training.
+
+Finally, we apply a final filtering step to these trajectories. We ensure that each question has a
+maximum of three trajectories and that the number of trajectories is equal or balance across the
+aforementioned question types. The statistics of the resulting cold-start dataset can be found in
+Table 8 in Appendix C, where the size of the dataset is less than most of the existing methods.
+
+4.2.2 Multi-Turn Finetuning
+
+In the fine-tuning stage, we aim to teach the agent to reason over long, complex interaction histories.
+To achieve this efficiently without losing critical long-term context, we fine-tune the agent on complete
+trajectories. This approach avoids the disadvantage of alternative methods, which split the trajectory
+into multiple input-output steps: retaining the full context for each step is computationally inefficient,
+while using only a limited history window risks severing crucial long-term dependencies.
+
+Specifically, we use the entire history as input but compute the loss only on the agent’s generated
+tokens, masking out the observation part returned by tools during training. This prevents these
+external tokens from affecting the loss calculation, ensuring that the retrieved results do not interfere
+with the model’s internal reasoning and generation processes. The process can be formalized as
+follows:
+
+We define the input prompt as x and the expert trajectory as T. Here the trajectory T is represented as
+a sequence of M tokens, T = (y1,..., Ym), which comprise the expert’s thoughts and actions. The
+agent is fine-tuned by maximizing the likelihood of generating this expert trajectory conditioned on
+the input x. During training, we specifically mask out observation tokens, computing the loss only on
+the expert’s thought and action tokens. This objective is formulated as:
+
+M
+Lr(0) = — )o log Pa(yj|x,y<j),                          (5)
+j=l
+
+where 6 represents the model’s parameters, M is the total number of tokens in the sequence, yj; is the
+j-th token, and y <; denotes the sequence of preceding tokens (Y1,---, Yj-1):
+
+4.3 RL-based Exploration Stage
+
+Based on the cold-start model, in the RL stage, we aim to further promote autonomous exploration
+and eliminate the reliance on process supervision. To achieve this, we employ the outcome-based
+Group Relative Policy Optimization (GRPO) method (Shao et al., 2024), where any trajectory leading
+to a correct answer receives a positive incentive, thereby encouraging the agent to explore and acquire
+stronger reasoning capabilities. Moreover, to ensure the RL training is both balanced and effective,
+we implement two key strategies.
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+First, to balance the agent’s exploration across question types (e.g., simple vs. complex), we sample
+a balanced set of questions for the RL training, following a similar principle as in the cold-start
+stage. Second, to mitigate the reward sparsity induced by outcome-only signals and refine the training
+process, we introduce a curriculum strategy on the reward, scheduling the reward strictness, guiding
+the learning process from easy to hard and effectively suppressing reward hacking.
+
+In this section, we first introduce the GRPO method, followed by the design of our data selection and
+reward curriculum strategies.
+
+4.3.1 Policy Optimization via GRPO
+
+Inspired by the recent success of policy gradient methods on reasoning tasks (Jin et al., 2025; Xue
+et al., 2025; Luo et al., 2025), we employ the GRPO method for optimization. GRPO estimates the
+baseline using the rewards from a group of rollouts for the same query to compute the advantage. In
+this paper, we adopt a fully on-policy variant of GRPO, which is demonstrated as an effective way to
+incentivize exploration (He et al., 2025). Its objective function can be expressed as follows:
+
+()
+
+a
+
+1 1      a          n
+Jcrro(?) = E  — qeDo    Nu Bole  min(p; ;(0) A; ;, clip(p; (8), 1 + €) Ai ;)
+{tO }N ~709,4(-19)   i=1    j=l
+(6)
+— BDxi (76 || tre),
+R(t) — mean ({ R(t  N
+A,, =  (t\’’)      ({ C  ) 1)               (7)
+std({R(t)}§_,)
+(i) ;_@)
+m9(T; "|T;)
+pi;(0) = —L,+                     (8)
+
+Tota (x i")
+
+Here, q is the question from the train set Dg , and t) is the i-th trajectory generated by the policy
+model 719,,,for q. R(t) is a scalar reward derived solely from the final outcome of the trajectory.
+A,,j tepresents the group-wise relative advantage, which is estimated by normalizing the group-level
+rewards for the same query, normalized by the standard deviation std(-) to stabilize training. 9;,;()
+
+denotes the token-level importance ratio. 7T;e¢ is a reference policy (i.e., the model after the cold-start
+stage), and 6 controls the strength of the KL loss Dxz_(-||-) towards the reference policy.
+
+4.3.2 Reward and Curriculum strategy
+
+During the earlier phases of RL training, the cold-start model often lack the capability to generate
+complete and correct reasoning trajectories for complex questions. This results in reward sparsity
+when relying solely on final outcomes, and meanwhile hinders effective exploration. Thus, we
+introduce a composite reward function that mitigates reward sparsity by providing denser feedback
+signals, while guiding the exploration process through a carefully designed easy-to-hard curriculum.
+The reward is specifically composed of a Format Reward and a multi-phase Answer Reward.
+
+Format Reward (Rg). To discourage invalid trajectories and ensure that answers can be reliably
+parsed for reward calculation, we introduce a format reward. This component checks whether a
+trajectory adheres to the required format, specifically the presence of the answer box \boxed{ }. If
+the format is correct, we set Rfm = 0.1; otherwise, Rem = 0.0.
+
+Answer Reward (Rans). To verify the correctness of the predicted answer and avoid a sparse reward
+signal, we evaluate the agreement between the predictions inside \boxed{ } and the gold answers
+using Fg score. Compared with a simple EM score, the Fg score balances precision and recall via an
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+adoptable hyperparameter 6, which prevents agents from trivially obtaining a high score by returning
+a large, low-precision candidate set. Concretely, the Fg score is computed as:
+
+An Ay]
+|.A|
+
+|Anas|
+|Aj|
+
+(1 + B?) - Precision - Recall
+
+,  R   ll —                        7.
+eca                                B2 - Precision + Recall
+
+Precision =
+
+Fg =             (9)
+
+where A denotes the de-duplicated set of answers produced by the model and Aj denotes the set of
+gold answers, and | - | denotes multiset cardinality.
+
+Based on the answer reward, we employ a curriculum learning strategy by adapting the 6 parameter.
+This gradually adjusts the reward difficulty from easy to hard, as illustrated in the top-right part of
+Figure 2.
+
+¢ Phase 1: Precision-focused Reward. In early training, we set 6 = 0.5 in the answer
+reward. This precision-leaning objective grants relatively high reward for correct items even
+when recall is incomplete. As the Fig. 2 shows, if the golden answer is {Al, A2}, a precise
+but partial prediction {A1} achieves a high reward (rz = 0.83). Conversely, an prediction
+that includes extraneous items, such as {Al, A2, A3, A4}, is penalized with a lower reward
+(r, = 0.55), encouraging accurate predictions and preventing the model from hacking the
+reward by emitting large candidate sets.
+
+Phase 2: Balanced Reward. Once the model achieves stable precision, we switch the
+objective to the F; score (6 = 1), which balances precision and recall. Under this balanced
+metric, a partial prediction is less rewarded than in Phase 1, incentivizing the agent to
+explore more thoroughly and recover the full set of correct answers.
+
+The total reward is the sum of the two parts, capped at a maximum value of 1.0:
+
+Rtotal = min(Reme + Rans, 1.0).                  (10)
+
+5 Experiments
+
+To prove the effectiveness of KNOWCODER-A1, we conduct comprehensive experiments and present
+the setup, main results, and analysis in this section. Specifically, we focus on the following research
+questions (RQ): RQ1: Does KNOWCODER-A1 outperform other directly comparable methods? RQ2:
+Does the main components of KNOWCODER-A1 work effectively? RQ3: How does KNOWCODER-
+Al progressively enhance the agent’s reasoning capability for the KBQA task with outcome-only
+supervision? RQ4: Does KNOWCODER-A| generates flexible and robust reasoning trajectories?
+
+5.1 Experiment Setup
+
+Dataset and Metrics. We evaluate KNOWCODER-A| on three widely-used KBQA datasets: We-
+bQSP, CWQ, and the generalization-focused GrailQA, using a subset of the official testing data.
+Following existing work (Xiong et al., 2024), we primarily evaluate the F1 metrics, supplemented by
+Random Hits@ 1(RHits@1) and EM score. As our approach does not rely on semantic parsing, we
+do not report logical form accuracy (Gu et al., 2021).
+
+Baselines. We compare KNOWCODER-A| against two main categories of methods: prompting-
+based and fine-tuning-based methods. For the former, we include a diverse range of prompting
+strategies, from direct prompting, such as IO, CoT, etc., and agent-based reasoning method Interactive-
+KBQA (Xiong et al., 2024). To ensure a fair comparison and reproducibility, we report the scores
+for these methods directly from their original publications. For the fine-tuning-based methods, we
+select SOTA methods finetuned on full data, include RnG-KBQA (Ye et al., 2022) and TIARA (Shu
+et al., 2022), and the directly comparable low-source methods, which are finetuned on low-source
+data, includes agentic approaches like SFT-traj. (Xiong et al., 2024), KBQA-ol (Luo et al.), and
+MCTS-KBQA (Xiong et al., 2025).
+
+Further details on the datasets, baselines, evaluation protocol, and implementation are provided in
+Appendix A.
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Table 1: Experiment Results (in percentage) on WebQSP, CWQ, and GrailQA. The Bold and
+underlined numbers indicate the best and second-best low-resource performance.
+
+Method                             Backbone                        WebQSP                         CWQ                                            GrailQA
+Overall Fl RHits@1 OverallFl EM IID. Compositional Zero-shot Overall
+Prompting Methods
+10                               GPT-4-turbo                39.3              45.5              33.9          45.7       —                —                    _—             29.4
+CoT                              GPT-4-turbo                39.7              47.5              33.7          43.7       —                —                    _—             28.1
+CoT+SC                           GPT-4-turbo                39.0              47.1              36.6          47.5       —                —                    _—             29.6
+KB-BINDER                  Codex-davinci-002           52.6               —                —             — 43.3              36.6                 44.0           42.2
+KB-Coder                        GPT-3.5-turbo              55.7               —                —             — 455              38.6                 47.3            44.9
+ARG-KBQA            GPT-3.5-turbo        58.8        —         —       — 515        41.8         52.1       48.5
+Interactive-KBQA                      GPT-4-turbo                  71.2                72.5                49.1            59.20 —                   —                       _—                 _—
+Fine-tune-based Methods
+
+RnG-KBQA                  BERT-base-uncased          75.6               —                —             — 89.0              68.9                 T4.7            76.9
+TIARA                         BERT-base-uncased           78.9                75.2                  —               — 91.2                74.8                    80.7              81.9
+SFT-traj.                           Llama2-7B                 57.5              59.9              42.2          48.8 54.2              45.8                 44.2           48.5
+MCTS-KBQA                     Llama-3.1-8B               76.0              76.2              66.8          75.20 —                —                    _—              _—
+KBQA-ol                          Qwen2.5-7B                57.8               —                —             — 844              77.0                 75.7            719
+KNOWCODER-A|I-cold start Qwen2.5-Coder-7B      56.1        66.3        54.8     59.8 60.6        63.5         67.2      63.1
+KNOWCODER-AIL             Qwen2.5-Coder-7B          77.2              80.1              68.3          75.7 81.1              10.6                 84.1            80.5
+
+Table 2: Training instances (Train) and evaluation result with consumption (Evaluation), where
+*Time’ represents the average number of rollouts required per question at inference, normalized to
+our method (1x).
+
+Train                                                                        Evaluation
+Model                     PS
+#Inst.                         O.S.#Inst.                                 CWQ                   WebQSP               GrailQA
+WebQSP CWQ_ GrailQA Time         Fl         Time         Fl        Time Fl
+MCTS-KBQA        750            2743           2843             —            3.24x 66.8 2.91x 76.0         —          —
+KBQA-ol        240     2929      —     43851      —     —     6x     57.8    6x    77.9
+Ours                       0            2414         4699         3563           1x        68.3        1x        77.2       1x       80.5
+
+5.2. Main Results - RQ1
+
+To evaluate the performance of KNOWCODER-A1, we conducted comprehensive experiments on
+three datasets, with the results presented in Table 1. For additional context on the efficiency of
+our method, we compare the number of samples used during training with the number of rollouts
+used during inference in Table 2. Taken together, these results demonstrate that KNOWCODER-
+A lestablishes a new state-of-the-art for low-resource KBQA across all benchmarks. This shows the
+effectiveness of our approach, which can be analyzed from three key aspects.
+
+First, KNOWCODER-A| significantly outperforms all directly comparable low-resource baselines,
+particularly on the more complex CWQ and the generalization-focused GrailQA datasets. Meanwhile,
+it nearly closes the gap with fully-supervised methods while using only a fraction of the data ( 10k
+outcome-supervised samples vs. 60k fully-annotated queries), highlighting its exceptional data
+efficiency.
+
+Second, results prove that the outcome-supervised multi-stage training strategy is effective than the
+process-supervised SFT strategy. Results in the last two blocks of Table 1 indicate that KNOWCODER-
+A our approach consistently outperforms leading process-supervised SFT baselines. On GrailQA,
+KNOWCODER-AI achieves an F1 score of 80.5%, which represents a 3.3% relative improvement over
+the prior state-of-the-art method KBQA-o1 while using 12x less training data (3.5k vs. 43.8k samples).
+While performance is slightly lower on GrailQA’s LI.D. and compositional subsets, which favor
+extensive training data to cover specific patterns, our method demonstrates a relative improvement of
+up to 11.1% on the zero-shot subset. This proves its superior ability to reason effectively on truly
+unseen questions.
+
+Furthermore, beyond higher overall scores, KNOWCODER-A 1 is more efficient in both supervision
+and inference. In terms of supervision, as detailed in the “Train” columns of Table 2, KNOWCODER-
+Al uses zero process-supervised (P.S.) instances and a comparable or smaller number of outcome-
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Table 3: Ablation Study on Three KBQA Datasets.
+
+Model                                          GrailQA                          WebQSP           CWQ
+IID Comp. Zero-shot OverallFl Fl  Hits@l1 Fl EM
+KNOWCODER-A1        81.1 70.6         84.1           80.5        77.2      80.1      68.3 75.7
+w/o reward curriculum
+EM as Reward          45.5 50.6         73.6           62.8        73.8      76.1      50.2 55.0
+Fl as Reward          68.7 77.6        78.6          76.0       71.9     77.0     58.3 59.8
+FO0.5 as Reward        79.1 68.2        82.6          78.7       76.3      80.9      67.2 74.7
+F1+F0.5 as Reward 74.9 65.5        82.6          76.1       73.8      77.0      64.6 66.1
+w/o RL (cold-start)       60.6 63.5         67.2           63.1        56.7      64.9      50.5 59.8
+w/o upsampling           52.5 53.0         62.3           60.2        56.1      66.3      54.8 52.7
+
+supervised (O.S.) samples than MCTS-based competitors. As montioned before, KNOWCODER-A |
+outperforms KBQA-ol on GrailQA while using much fewer supervised samples. In terms of
+inference, as shown in the “Evaluation” columns of Table 2, KNOWCODER-A1 employs a single
+linear reasoning pass and avoids the costly sampling required by MCTS, reducing latency by 3.2-6
+times. These results support outcome supervision as a more effective and efficient alternative to
+incremental SFT on pre-defined or explored paths.
+
+Finally, KNOWCODER-AI unlocks SOTA reasoning capabilities in smaller models. As shown in
+the first block of Table 1, KNOWCODER-A1 consistently outperforms prompting-based methods
+that rely on significantly larger models like GPT-4-turbo by at least 6% at Fl. This demonstrates an
+essential improvement in the model’s intrinsic reasoning ability.
+
+5.3 Ablation Study - RQ2
+
+To verify the effectiveness of our key designs, we conduct a comprehensive ablation study, and the
+results are presented in Table 3. First, we assess the reward curriculum by replacing our proposed
+easy-to-hard (Fo5-then-F,) strategy, give the result using EM, F,, Fo.5, and revered strategy F,-then-
+Fo.5 as reward, respectively. Next, we evaluate the contribution of the entire RL stage by removing it
+altogether. Finally, we remove the data sampling strategy from the initial cold-start phase. The results
+confirm that each component is integral to the model’s performance, as removing or modifying any
+of them leads to a noticeable degradation.
+
+Effectiveness of the Easy-to-Hard Reward Curriculum. The first block of Table 3 shows the
+effectiveness of the Easy-to-Hard Reward Curriculum. Take the GrailQA dataset as an example, we
+observe that an overly simplistic signal like EM is insufficient for exploration; it induces "over-recall
+reward hacking," resulting in a massive drop in the F; score on GrailQA. Meanwhile, a stricter Fl
+reward is too punishing early on, leading to a -4.5% F1 drop. Notably, reversing the curriculum to a
+hard-to-easy schedule (F,-then-Fo.5) also degrades performance (-4.4% F1 drop). This confirms our
+hypothesis: starting with an “easy task” encourages broad exploration to discover correct reasoning
+paths, while the subsequent “hard task” refines the agent’s ability to achieve a better balance between
+precision and recall.
+
+Critical Contribution of the RL Stage. From the second block of Table 3, we can observe that
+removing the entire RL-stage causes at least 17.4% absolute drop in the F1 score. This large gap
+suggests that RL-based exploration is essential for refining the agent’s reasoning capability beyond
+initial supervised learning.
+
+Importance of Upsampling in the Cold-Start Stage. Finally, as the last row shows, removing the
+up-sampling of infrequent question types leads to poor performance on those specific categories. This
+underscores the importance of our sampling strategy for building a model that can generalize across a
+diverse range of reasoning patterns.
+
+10
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+(a) Training Reward                            (b) Response Length                          (c) Turns of Interaction                          (d) Invalid Tool Calls
+
+800
+1400
+
+4.0
+
+Turns
+Numbers
+a
+S
+8
+
+1200
+
+Mean Reward
+Response Length
+
+35                                                        400
+
+1000
+
+200
+
+0 20 4o 60 80 100 120 140    0 20 4o 60 80 100 120 140    0 20 4o 60 80 100 120 140    0 20 40 60 80 100 120 140
+step              step              step              step
+
+Figure 3: Training curves for KNOWCODER-A I, illustrating: (a) training reward, (b) response length,
+(c) interaction turns, and (d) the number of invalid tool calls.
+
+(a) Composition of Rollout Trajectories During Training.                    (b) Number of Unique SPARQL Queries Per Question During Training.
+
+»
+a
+
+a
+°
+
+a
+a
+
+ad
+°
+
+-
+a
+
+Directly Hit
+100                                         Recovered after Error/Empty
+
+Number of Trajectories
+
+oa
+°
+
+Incorrect
+
+Number of Unique SPAROL Queries
+
+w
+a
+
+20        40        60        80        100       120       140                  20        40        60        80        100       120       140
+
+Step                                                                                                               Step
+
+Figure 4: Evolution of Robustness and Flexibility during training: (a) Robustness, shown by the
+composition of rollout trajectories, and (b) Flexibility, shown by the number of unique SPARQL
+queries per question.
+
+5.4 Analysis - RQ3
+
+To answer the RQ3 and investigate how KNOWCODER-AI progressively enhances the agent’s
+reasoning capability under the outcome-only supervision, we analyze from the train dynamics,
+the evolution of its reasoning robustness and diversity, and the comparative performance against
+process-supervised methods.
+
+5.4.1 Analysis of Training Dynamics with Outcome-Only Supervision
+
+As shown in Fig. 3, to track the evolution of the model’s capabilities during training, we present
+the curves of (a) training reward, (b) response length (token), (c) turns of interaction, and (d) the
+number of invalid tool calls along the training step. It can be seen that the agent’s strategy clearly
+transitions from broad exploration to efficient exploitation: initially, the agent explores inefficiently,
+which is reflected in high response lengths and turn counts for a low reward. As training progresses,
+these trends reverse: the reward consistently rises while the metrics for response length, turns, and
+invalid tool calls all significantly decrease. This dynamic illustrates a fundamental improvement in
+the agent’s complex question-solving process, not just a superficial optimization of rewards.
+
+5.4.2 Analysis of Reasoning Capability
+
+To provide a deeper analysis of whether the model’s reasoning ability is enhanced, particularly
+concerning the robustness and flexibility lacking in SFT methods, we examine the evolution of the
+agent’s reasoning behavior. Fig. 4(a) illustrates its robustness by showing the composition of rollout
+trajectories, categorized as: "Directly Hit," for trajectories where the final prediction hits at least
+one gold answers; "Recovered after Error/Empty," for those that hit at least one gold answers after
+encountering an intermediate error or empty observation; and "Incorrect," for trajectories where the
+final prediction fails to find any gold answerss. The figure shows that the proportion of successful
+trajectories ("Directly Hit" and "Recovered") steadily increases during training, This confirms that
+the agent learns to effectively recover from imperfect feedback, a direct advantage of our outcome
+supervision approach. In contrast, process supervision encourages the model to simply replicate
+pre-defined trajectories from the training data, and thus fails to incentivize this type of recovery
+behavior.
+
+11
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Fig. 4(b) measures flexibility by plotting the diversity of trajectories, which we define as the number of
+unique final SPARQL queries generated for the same question across the rollouts. It can be seen that
+the agent initially broadens its search for a wide range of solutions before consolidating on a compact
+set of the most reliable ones, which is consistent with the process discussed in Sec. 5.4.1. This
+indicates that outcome-only supervision naturally fosters an exploration-then-convergence behavior,
+where the agent ultimately retains sufficient solution diversity to effectively address the lack of
+flexibility inherent in process-supervised methods.
+
+5.4.3 Analysis of Process Reward
+
+To explore whether incorporating process supervision in addition to outcome-only supervision benefits
+model performance, we experimented by incorporating necessary process-level penalties for behaviors
+including hallucinations and timeouts. Specifically, we define a hallucination as a tool call containing
+a relation or type that is not present in the observation history, while a timeout query denotes a call
+that results in a 300 second timeout. We applied a negative reward of -0.2 for each occurrence of these
+behaviors, with the total accumulated penalty capped at -0.5. We then compared our full model against
+two variants incorporating these Process Rewards (P.R.): one applying the penalties throughout the
+entire RL training (P.R.@RL-phase-1&2), and another applying them only during the second stage
+(P.R.@RL-phase-2). The results clearly demonstrate that introducing penalties for any intermediate
+behaviors, even for intuitively negative ones, degrades final performance. We hypothesize that in
+KBQA tasks, where the correctness of answers can be explicitly verified, process-level rewards may
+interfere with the agent’s capacity to form a robust trial-and-error exploration strategy, as they tend to
+prematurely penalize exploratory trajectories that could eventually achieve correct results.
+
+Table 4: Performance comparison of different models and training stages on the WebQSP, CWQ, and
+GrailQA.
+
+WebQSP               CWQ             GrailQA
+Fl Hit@i Fl EM Fi EM
+
+P.R.@RL-phase-1&2 71.5 75.3       64.9 72.7 73.0 76.2
+P.R.@RL-phase-2         73.3 78.2 68.0 74.8 78.1 81.0
+KNOWCODER-AI1       77.2     80.1      68.3. 75.7 80.5 83.7
+
+Model
+
+5.5 Case Study - RQ4
+
+To concretely demonstrate the advanced reasoning capabilities of KNOWCODER-A1, we present
+a qualitative case study with two detailed examples in Appendix F. These examples highlight the
+agent’s ability to: (1) robustly recover from erroneous feedback; (2) flexibly use tools to find correct
+answers via reasoning trajectories that differ from the gold SPARQL. These cases serve as strong
+evidence of the robustness and flexibility fostered by the proposed KNOWCODER-A| approach.
+
+In addition, we conduct error analysis, which is presented in Appendix D.
+
+6 Conclusion
+
+In this paper, we focused on a key limitation of existing agentic KBQA paradigms: their reliance
+on process supervision, which provides weak incentives for autonomous exploration. To overcome
+this, we proposed KNOWCODER-A1I, our first agentic reasoning model for KBQA. It is trained
+by a multi-stage curriculum reinforcement learning framework that effectively leverages outcome-
+only supervision through a carefully designed learning curriculum. Specifically, KNOWCODER-A 1
+first establishes foundational reasoning capabilities via a cold-start fine-tuning stage on a small,
+high-quality dataset created through outcome-based rejection sampling. It then enhances the agent’s
+exploratory capacity through curriculum RL, employing a progressive reward schedule that transitions
+from easy to hard tasks. Extensive experiments demonstrate the effectiveness of our approach.
+Further analyses reveal that KNOWCODER-A| learns to act as a robust and flexible agent, capable of
+recovering from errors and strategically exploring diverse reasoning trajectories. Future work may
+
+12
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+investigate more advanced reflection mechanisms to mitigate remaining error types and extend this
+curriculum strategy to other complex, agent-based reasoning tasks.
+
+References
+
+Antoine Bordes, Nicolas Usunier, Sumit Chopra, and Jason Weston. Large-scale simple question
+answering with memory networks. arXiv preprint arXiv: 1506.02075, 2015.
+
+Fangshu Chen, Yilin Huang, Jiahui Wang, Chengcheng Yu, and Xiankai Meng. Ifqa-IIm: intelli-
+gent intention-driven financial question-answering with large language models. The Journal of
+Supercomputing, 81(13):1-32, 2025.
+
+Yu Chen, Lingfei Wu, and Mohammed J Zaki. Bidirectional attentive memory networks for question
+answering over knowledge bases. In Proceedings of NAACL-HLT, pp. 2913-2923, 2019a.
+
+Zi-Yuan Chen, Chih-Hung Chang, Yi-Pei Chen, Jijnasa Nayak, and Lun-Wei Ku. Uhop: An
+unrestricted-hop relation extraction framework for knowledge-based question answering. In
+Proceedings of the 2019 Conference of the North American Chapter of the Association for Com-
+putational Linguistics: Human Language Technologies, Volume I (Long and Short Papers), pp.
+345-356, 2019b.
+
+Sitao Cheng, Ziyuan Zhuang, Yong Xu, Fangkai Yang, Chaoyun Zhang, Xiaoting Qin, Xiang Huang,
+Ling Chen, Qingwei Lin, Dongmei Zhang, et al. Call me when necessary: Llms can efficiently and
+faithfully reason over structured environments. In Findings of the Association for Computational
+Linguistics ACL 2024, pp. 4275-4295, 2024.
+
+Gheorghe Comanici, Eric Bieber, Mike Schaekermann, Ice Pasupat, Noveen Sachdeva, Inderjit
+Dhillon, Marcel Blistein, Ori Ram, Dan Zhang, Evan Rosen, et al. Gemini 2.5: Pushing the frontier
+with advanced reasoning, multimodality, long context, and next generation agentic capabilities.
+arXiv preprint arXiv:2507.06261, 2025.
+
+Haishuo Fang, Xiaodan Zhu, and Iryna Gurevych. Dara: Decomposition-alignment-reasoning
+autonomous language agent for question answering over knowledge graphs. In Findings of the
+Association for Computational Linguistics ACL 2024, pp. 3406-3432, 2024.
+
+Yu Gu, Sue Kase, Michelle Vanni, Brian Sadler, Percy Liang, Xifeng Yan, and Yu Su. Beyond iid:
+three levels of generalization for question answering on knowledge bases. In Proceedings of the
+web conference 2021, pp. 3477-3488, 2021.
+
+Yu Gu, Xiang Deng, and Yu Su. Don’t generate, discriminate: A proposal for grounding language
+models to real-world environments. In Proceedings of the 61st Annual Meeting of the Association
+for Computational Linguistics (Volume 1: Long Papers), pp. 4928-4949, 2023.
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+Shirong Ma, Peiyi Wang, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in Ilms
+via reinforcement learning. arXiv preprint arXiv:2501.12948, 2025.
+
+Jujie He, Jiacai Liu, Chris Yuhao Liu, Rui Yan, Chaojie Wang, Peng Cheng, Xiaoyu Zhang, Fuxiang
+Zhang, Jiacheng Xu, Wei Shen, et al. Skywork open reasoner | technical report. arXiv preprint
+arXiv:2505.22312, 2025.
+
+Xiang Huang, Sitao Cheng, Shanshan Huang, Jiayu Shen, Yong Xu, Chaoyun Zhang, and Yuzhong
+Qu. Queryagent: A reliable and efficient reasoning framework with environmental feedback based
+self-correction. In Proceedings of the 62nd Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pp. 5014-5035, 2024.
+
+Heewon Jang, Yeongtaek Oh, Seunghee Jin, Haemin Jung, Hyesoo Kong, Dokyung Lee, Dongkyu
+Jeon, and Wooju Kim. Kbqa: Constructing structured query graph from keyword query for
+semantic search. In Proceedings of the International Conference on Electronic Commerce, pp. 1-8,
+
+2017.
+
+13
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Jinhao Jiang, Kun Zhou, Xin Zhao, and Ji-Rong Wen. Unikgqa: Unified retrieval and reasoning
+for solving multi-hop question answering over knowledge graph. In The Eleventh International
+Conference on Learning Representations.
+
+Jinhao Jiang, Kun Zhou, Wayne Xin Zhao, Yang Song, Chen Zhu, Hengshu Zhu, and Ji-Rong Wen.
+Kg-agent: An efficient autonomous agent framework for complex reasoning over knowledge graph.
+CoRR, 2024.
+
+Bowen Jin, Hansi Zeng, Zhenrui Yue, Jinsung Yoon, Sercan Arik, Dong Wang, Hamed Zamani, and
+Jiawei Han. Search-r1: Training Ilms to reason and leverage search engines with reinforcement
+learning. arXiv preprint arXiv:2503.09516, 2025.
+
+Yunshi LAN and Jing JIANG. Query graph generation for answering multi-hop complex questions
+from knowledge bases.(2020). In Proceedings of the 58th Annual Meeting of the Association for
+Computational Linguistics, pp. 969-974.
+
+Tianle Li, Xueguang Ma, Alex Zhuang, Yu Gu, Yu Su, and Wenhu Chen. Few-shot in-context
+learning on knowledge base question answering. In Proceedings of the 61st Annual Meeting of the
+Association for Computational Linguistics (Volume 1: Long Papers), pp. 6966-6980, 2023.
+
+Biyang Liu, Huimin Yu, and Guodong Qi. Graftnet: Towards domain generalized stereo matching
+with a broad-spectrum and task-oriented feature. In Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition, pp. 13012-13021, 2022.
+
+Guangyi Liu, Yongqi Zhang, Yong Li, and Quanming Yao. Dual reasoning: A gnn-llm collaborative
+framework for knowledge graph question answering. arXiv preprint arXiv:2406.01145, 2024.
+
+Haoran Luo, E Haihong, Yikai Guo, Qika Lin, Xiaobao Wu, Xinyu Mu, Wenhao Liu, Meina Song,
+Yifan Zhu, and Anh Tuan Luu. Kbqa-ol: Agentic knowledge base question answering with monte
+carlo tree search. In Forty-second International Conference on Machine Learning.
+
+Haoran Luo, Guanting Chen, Qika Lin, Yikai Guo, Fangzhi Xu, Zemin Kuang, Meina Song, Xiaobao
+Wu, Yifan Zhu, Luu Anh Tuan, et al. Graph-r1: Towards agentic graphrag framework via end-to-
+end reinforcement learning. arXiv preprint arXiv:2507.21892, 2025.
+
+Alexander Miller, Adam Fisch, Jesse Dodge, Amir-Hossein Karimi, Antoine Bordes, and Jason
+Weston. Key-value memory networks for directly reading documents. In Proceedings of the 2016
+Conference on Empirical Methods in Natural Language Processing. Association for Computational
+Linguistics, 2016.
+
+Zhijie Nie, Richong Zhang, Zhongyuan Wang, and Xudong Liu. Code-style in-context learning
+for knowledge-based question answering. In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 38, pp. 18833-18841, 2024.
+
+Jie Ouyang, Ruiran Yan, Yucong Luo, Mingyue Cheng, Qi Liu, Zirui Liu, Shuo Yu, and Daoyu
+Wang. Training powerful llm agents with end-to-end reinforcement learning, 2025. URL https:
+//github.com/Orusswest0/Agent-RI1.
+
+Yunqi Qiu, Yuanzhuo Wang, Xiaolong Jin, and Kun Zhang. Stepwise reasoning for multi-relation
+question answering over knowledge graph with weak supervision. In Proceedings of the 13th
+international conference on web search and data mining, pp. 474-482, 2020.
+
+Hongyu Ren, Hanjun Dai, Bo Dai, Xinyun Chen, Michihiro Yasunaga, Haitian Sun, Dale Schuurmans,
+Jure Leskovec, and Denny Zhou. Lego: Latent execution-guided reasoning for multi-hop question
+answering on knowledge graphs. In International conference on machine learning, pp. 8959-8970.
+PMLR, 2021.
+
+Apoorv Saxena, Aditay Tripathi, and Partha Talukdar. Improving multi-hop question answering over
+knowledge graphs using knowledge base embeddings. In Proceedings of the 58th annual meeting
+of the association for computational linguistics, pp. 4498-4507, 2020.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+Mingchuan Zhang, YK Li, Yang Wu, et al. Deepseekmath: Pushing the limits of mathemat-
+ical reasoning in open language models. arXiv preprint arXiv:2402.03300, 2024.
+
+14
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng,
+Haibin Lin, and Chuan Wu. Hybridflow: A flexible and efficient rlhf framework. arXiv preprint
+arXiv: 2409.19256, 2024.
+
+Jiaxin Shi, Shulin Cao, Lei Hou, Juanzi Li, and Hanwang Zhang. Transfernet: An effective and
+transparent framework for multi-hop question answering over relation graph. In Proceedings of the
+2021 Conference on Empirical Methods in Natural Language Processing, pp. 4149-4158, 2021.
+
+Yiheng Shu, Zhiwei Yu, Yuhan Li, Bérje Karlsson, Tingting Ma, Yuzhong Qu, and Chin-Yew
+Lin. Tiara: Multi-grained retrieval for robust question answering over large knowledge base. In
+Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing, pp.
+8108-8121, 2022.
+
+Haitian Sun, Tania Bedrax-Weiss, and William Cohen. Pullnet: Open domain question answering
+with iterative retrieval on knowledge bases and text. In Proceedings of the 2019 Conference on
+Empirical Methods in Natural Language Processing and the 9th International Joint Conference on
+Natural Language Processing (EMNLP-IJCNLP), pp. 2380-2390, 2019.
+
+Jiashuo Sun, Chengjin Xu, Lumingyuan Tang, Saizhuo Wang, Chen Lin, Yeyun Gong, Lionel Ni,
+Heung- Yeung Shum, and Jian Guo. Think-on-graph: Deep and responsible reasoning of large
+language model on knowledge graph. In The Twelfth International Conference on Learning
+Representations.
+
+Yawei Sun, Lingling Zhang, Gong Cheng, and Yuzhong Qu. Sparqa: skeleton-based semantic parsing
+for complex questions over knowledge bases. In Proceedings of the AAAI conference on artificial
+intelligence, volume 34, pp. 8952-8959, 2020.
+
+Alon Talmor and Jonathan Berant. The web as a knowledge-base for answering complex questions.
+In Proceedings of the 2018 Conference of the North American Chapter of the Association for
+Computational Linguistics: Human Language Technologies, Volume 1 (Long Papers), pp. 641-651,
+2018.
+
+Yuhang Tian, Dandan Song, Zhijing Wu, Changzhi Zhou, Hao Wang, Jun Yang, Jing Xu, Ruanmin
+Cao, and Haoyu Wang. Augmenting reasoning capabilities of Ilms with graph structures in
+knowledge base question answering. In Findings of the Association for Computational Linguistics:
+EMNLP 2024, pp. 11967-11977, 2024.
+
+Junde Wu, Jiayuan Zhu, Yunli Qi, Jingkun Chen, Min Xu, Filippo Menolascina, and Vicente Grau.
+Medical graph rag: Towards safe medical large language model via graph retrieval-augmented
+generation. arXiv preprint arXiv:2408.04187, 2024.
+
+Guanming Xiong, Junwei Bao, and Wen Zhao. Interactive-kbqa: Multi-turn interactions for knowl-
+edge base question answering with large language models. In Proceedings of the 62nd Annual
+Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pp. 10561-
+10582, 2024.
+
+Guanming Xiong, Haochen Li, and Wen Zhao. Mcts-kbqa: Monte carlo tree search for knowledge
+base question answering. arXiv preprint arXiv:2502.13428, 2025.
+
+Zhenghai Xue, Longtao Zheng, Qian Liu, Yingru Li, Xiaosen Zheng, Zejun Ma, and Bo An. Sim-
+pletir: End-to-end reinforcement learning for multi-turn tool-integrated reasoning. arXiv preprint
+arXiv:2509.02479, 2025.
+
+Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, and Yuan Cao.
+React: Synergizing reasoning and acting in language models. In International Conference on
+Learning Representations (ICLR), 2023.
+
+Xi Ye, Semih Yavuz, Kazuma Hashimoto, Yingbo Zhou, and Caiming Xiong. Rng-kbqa: Generation
+augmented iterative ranking for knowledge base question answering. In Proceedings of the 60th
+Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pp.
+6032-6043, 2022.
+
+15
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Jing Zhang, Xiaokang Zhang, Jifan Yu, Jian Tang, Jie Tang, Cuiping Li, and Hong Chen. Subgraph
+retrieval enhanced model for multi-hop knowledge base question answering. In Proceedings of the
+60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),
+pp. 5773-5784, 2022.
+
+Ruilin Zhao, Feng Zhao, Long Wang, Xianzhi Wang, and Guandong Xu. Kg-cot: chain-of-thought
+prompting of large language models over knowledge graphs for knowledge-aware question answer-
+ing. In Proceedings of the Thirty-Third International Joint Conference on Artificial Intelligence,
+pp. 6642-6650, 2024.
+
+Yaowei Zheng, Richong Zhang, Junhao Zhang, Yanhan Ye, Zheyan Luo, Zhangchi Feng, and
+Yongqiang Ma. Llamafactory: Unified efficient fine-tuning of 100+ language models. In Pro-
+ceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 3:
+System Demonstrations), Bangkok, Thailand, 2024. Association for Computational Linguistics.
+URL http: //arxiv.org/abs/2403.13372.
+
+Yuqi Zhu, Shuofei Qiao, Yixin Ou, Shumin Deng, Shiwei Lyu, Yue Shen, Lei Liang, Jinjie Gu, Huajun
+Chen, and Ningyu Zhang. Knowagent: Knowledge-augmented planning for Ilm-based agents. In
+Findings of the Association for Computational Linguistics: NAACL 2025, pp. 3709-3732, 2025.
+
+7 Appendices
+
+A Experiment Setup
+
+A.1_ Datasets
+
+We evaluate the reasoning performance on three widely-used datasets: WebQSP (Talmor & Berant,
+2018), CWQ (Talmor & Berant, 2018), and GrailQA (Gu et al., 2021). These datasets are constructed
+based on Freebase and consist of natural language questions paired with their corresponding SPARQL
+queries. Specifically, WebQSP features questions where the topic entity and answer entities are
+at most 2 relation hops apart. CWQ extends WebQSP by incorporating more complex entities
+and constraints, with relation paths up to 4 hops. In contrast to WebQSP and CWQ, GrailQA is
+designed for a more comprehensive evaluation of generalization capabilities across three settings:
+independently and identically distributed (I.I.D.), compositional, and zero-shot.
+
+To ensure consistent results and reduce evaluation overhead, we follow the setting of previous
+work Xiong et al. (2024), which uniformly sample questions across different types in WebQSP and
+Cwa. For the GrailQA dataset, we randomly sample 600 instances for evaluation.
+
+A.2. Baselines
+
+Our experiments compare KNOWCODER-A| against two categories of methods.
+
+Fine-tuning-based Methods. We consider two settings: fine-tuning on partial data (low-source
+setting) and on full data. In the low-source setting, we select the agentic approaches, includes the
+SFT model in Interactive-KBQA (Xiong et al., 2024), which uses the same toolset as our method
+(abbreviated as SFT-traj.), two MCTS-based agentic methods, KBQA-o1 (Luo et al.) and MCTS-
+KBQA (Xiong et al., 2025). Notably, since our method is trained on only a subset of the data and uses
+no SPARQL annotations, its performance is directly comparable to this category of baselines. For
+the full-data setting, which serves as a secondary point of reference, we include the SOTA SP-based
+methods RnG-KBQA (Ye et al., 2022) and TIARA (Shu et al., 2022).
+
+Prompting-based Methods. We selected a diverse set of prompting strategies for comparison. These
+include methods based on direct prompting, Chain-of-Thought (CoT), and self-consistency with
+CoT; approaches that use an LLM to enhance semantic parsing (KB-BINDER(Li et al., 2023) and
+KB-Coder (Nie et al., 2024)) and subgraph retrieval (Tian et al., 2024); and Interactive-KBQA (Xiong
+et al., 2024) that prompts an LLM to reason as an agent. For a fair comparison, we report the
+scores for these methods directly from their official papers, as the specific API versions used in their
+experiments are no longer accessible.
+
+16
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+A.3 Evaluation Metrics
+
+We primarily report the F1 score since the answers are returned as an unordered list. Following
+previous work (Xiong et al., 2024), we also report Random Hits@1 (RHits@1) and Exact Match
+(EM) for reference. As our method is not fully based on semantic parsing, we do not report the
+semantically equivalent of logical forms (another score commonly abbreviated as EM) in Gu et al.
+(2021).
+
+A.4_ Implementation Details
+
+We use the Qwen2.5-Coder-7B-Base as our backbone LLM. For the cold-start stage, our implemen-
+tation is based on the LlamaFactory framework (Zheng et al., 2024); we use a cosine learning rate
+schedule with an initial learning rate of 2e-5, a batch size of 8, and a maximum sequence length of
+4096. We fine-tune the model for 8 epochs. In the RL stage, our implementation is based on Agent-R1
+framework (Ouyang et al., 2025) (a verl-based (Sheng et al., 2024) agentic training framework); we
+set the number of rollouts to N=8, use a batch size of 64 for rollout, and a global batch size 512
+for training. We train the model for 1 epoch. At validation, we set the temperature to 0 to ensure
+deterministic outputs. The detail parameters can be found in 5. All experiments were conducted on 8
+x NVIDIA H100 (80GB) GPUs and 8 x NVIDIA A100 (80GB) GPUs.
+
+Table 5: Key parameters during the training process.
+
+Parameter                                        Value
+
+SFT settings
+
+Batch size                                   8
+Learning Rate                            2e-5
+Max Response Length                  4096
+Algorithm                                   LoRA
+Epoch                                            8
+RL settings
+
+Rollout Batch Size                         64
+Rollout N                                       8
+Global-batch Size                              512
+Learning Rate                             le-6
+Learning Rate Warmup Steps -1 (disabled)
+Max Prompt Length                      4096
+Max Response Length                  8192
+KL Loss Coefficient                    0.001
+Algorithm                                  GRPO
+Epoch                                            1
+Validation Temperature                   0.0
+Rollout Temperature                       1.0
+
+B_ Further Analysis
+
+In this section, we provide several supplementary analyses. First, we examine the impact of different
+backbone models on performance and discuss our method’s token efficiency. These results justify
+our model selection and highlight the efficiency advantages of our approach. Second, we present a
+joint distribution of error frequency versus sample accuracy across training stages, which serves to
+supplement our main analysis of training dynamics (Section 5.4.1) and offers a more comprehensive
+view of how the agent’s capabilities evolve.
+
+B.1_ Analysis of the Impact of Different Backbones
+
+We compared the impact of different backbone models on performance during the cold-start stage.
+As shown in Table 6, our results indicate that Qwen2.5-Coder-7B-Base delivers the strongest overall
+
+17
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Table 6: Performance comparison of various backbone models across three benchmark datasets.
+
+WebQSP     CWQ    GrailQA
+Fl Hits@l1 Fl EM Fl EM
+Qwen?2.5-Coder-3B-Base 58.4   63.9   36.7 41.2 58.4 68.2
+Qwen?2.5-Coder-7B-Base 56.7   64.9   50.5 59.8 63.1 68.4
+
+Qwen3-4B-Base    63.9  69.4  38.4 39.0 55.0 59.1
+Qwen3-8B-Base    65.3  71.6 44.6 45.8 60.1 63.1
+
+Model
+
+performance. Although Qwen3-8B-Base performs better on the simpler WebQSP dataset, we
+selected Qwen2.5-Coder-7-Base for its superior performance on CWQ, which contains more complex
+questions. Furthermore, our task involves numerous code-style tool calls, where a coder-specialized
+model has a natural advantage.
+
+B.2 Analysis of token efficiency
+
+To evaluate the inference efficiency of our method, we conducted a computational cost analysis against
+prompting-based baselines, including the single-round inference method CoT and the multi-round
+interactive method ToG. As shown in Table 7, the comparison covers LLM call frequency, token
+usage, and overall cost. The results reveal that KNOWCODER-A 1 achieves performance comparable
+to the complex ToG, while maintaining a computational budget similar to the much simpler CoT. This
+efficiency stems from outcome-based supervision: the model learns to recover from empty results or
+intermediate errors in a single pass, obviating the need to generate multiple branches to find a solution
+at significant computational expense. Overall, KNOWCODER-A| shifts the efficiency frontier toward
+lower cost while maintaining strong effectiveness, making it more predictable and easier to deploy in
+real-world scenarios.
+
+Table 7: Cost and effectiveness on CWQ and WebQSP.
+
+CWQ
+Model #Avg. LLM Call Total Token      Total Cost      Hit@1
+CoT            1.0             409.7      8.00x 10-5 = 43.7
+ToG            9.2            11468.5 2.30x10-3 69.5
+Ours             5.0               660.6             0           75.7
+WebQSP
+Model #Avg. LLM Call Total Token      Total Cost      Hit@1
+CoT            1.0             397.6      8.00x 10-5 47.5
+ToG            8.8            10189.4     2.10 x 1073     82.6
+
+Ours                       3.9                         439.6                       0                   80.1
+
+B.3 Analysis on Overall Robustness Capability Shift
+
+To further investigate how the agent’s robustness evolves, we analyze the association between
+intermediate errors and final rewards throughout training. As illustrated in Figure 5, we plot the joint
+distribution of the mean frequency of empty results/errors per question against the mean reward. This
+visualization reveals a clear progression. Early in training, the distribution forms a downward-sloping
+triangle, where higher error rates are strongly correlated with lower rewards. As training advances,
+this shape flattens into a rectangle, indicating that high rewards are achieved even with a non-trivial
+frequency of errors. Concurrently, the density increases in the upper-left corner, reflecting a growing
+number of questions being solved directly and perfectly. The transformation provides compelling
+evidence of our method’s superiority: the agent not only learns to avoid mistakes but also develops
+the crucial ability to recover from them, transitioning from a brittle execution policy to a robust,
+high-scoring one.
+
+18
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Evolution of Question Rollouts' Distribution across Training
+
+Steps 1-35                                                       Steps 36-70
+
+»
+
+Mean Score
+
+Steps 71-105                                                     Steps 106-140
+
+Mean Score
+
+2              3              4              50              1              2              3             4
+Mean Empty Result/Error Frequency                                       Mean Empty Result/Error Frequency
+
+Figure 5: Joint distribution of mean empty-result/error frequency and mean reward across training
+phases.
+
+C Statistics
+We give the statistic of training samples used in cold-start-stage and RL stage on three datasets.
+
+Table 8: Number of samples for different training stages across the WebQSP, CWQ, and GrailQA
+datasets.
+
+Stage               WebQSP CWQ_ GrailQA
+
+RL-Phase-1          1265           2400           1800
+RL-Phase-2          709            1600          1200
+Cold-Start              440              699             563
+
+D_ Error Analysis
+
+To identify the limitations of our method, we conducted an error analysis by manually inspecting ran-
+dom sampled cases where the F; score was less than 1. The results are categorized in Fig. 6, with the
+primary error types being Hallucination, Constraint Application Error, and Relation Recall/Selection
+Error. Hallucinations often result from flawed self-correction attempts. While intuitively detrimental,
+our prior experiments show that penalizing such behavior actually stifles the model’s capacity for
+self-correction. The other two error types generally stem from incorrect decisions during complex
+reasoning. These errors highlight the space for future work: enhancing the model’s ability to handle
+complex questions within a linear decision-making process. Notably, the high rate of constraint errors
+on WebQSP is due to the model failing to identify implicit temporal constraints (e.g., the KB’s 2015
+cutoff date) in present-tense questions.
+
+19
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+cwa                                  GrailOA                               WebOSP
+
+Error Types
+Hallucination
+Relation Recall / Selection Error
+Constraint Apply Error
+SPARQL Error
+Query Timeout
+Resoning Error
+Incorrect or Ambiguous Answer
+Answer Reduce Error
+
+Too long Answer
+
+Figure 6: Analysis of sampled failure cases per dataset. We visualize the proportion of factors
+contributing to errors.
+
+E_ Prompts
+
+In our experiments, the same prompt was used for both training and evaluation, which is composed
+of a system prompt and a user prompt.
+
+System Prompt
+
+#Tools
+
+You are an expert in knowledge base query language SPAROL
+programming. The user gives a question, and you need to
+iteratively call the tool to continuously improve the
+SPARQL query until it can get the answer to the question.
+
+You are provided with function signatures within <tools></
+tools> XML tags:
+<tools>
+{'type': 'function', 'function': {'name': '
+SearchGraphPatterns', 'description': 'This tool searches
+for relevant one-hop and two-hop subgraphs tied to a
+specified variable. It queries subgraphs where the chosen
+variable (?x, assuming the SPAROL query begins with "
+SELECT DISTINCT ?x WHERE") appears as the head or tail
+entity and returns them collectively. The semantic
+parameter indicates the expected predicate semantics.
+When provided, the tool ranks the subgraphs based on
+these semantics. If unspecified, it returns the complete
+subgraph.', 'parameters': {'type': 'object', 'properties!':
+{'spargl': {'type': 'string', 'description': 'SPARQL
+query'}, 'semantic': {'type': 'string', 'description': '
+The semantic parameter represents the expected predicate
+semantics.'}}, 'required': ['spargql']}}}
+
+{'type': 'function', 'function': {'name': 'ExecuteSPAROL', '
+description': 'This tool executes a SPAROQL query and
+returns the results.', 'parameters': {'type': 'object', '
+properties': {'sparql': {'type': 'string', 'description':
+
+"SPAROL query'}}, 'required': ['spargl']}}}
+
+{'type': 'function', 'function': {'name': 'SearchTypes', '
+description': 'Search the knowledge base for matching
+semantic types, used to initiate queries from a type when
+
+no topic entities are available, or to find a type to
+
+20
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+refine the query when multipl   ntities are returned.
+When use the type, please give the spargl as: SELECT
+DISTINCT ?x WHERE { ?x ns:type.object.type ns:<type_name>
+}', 'parameters': {'type': 'object', 'properties': {'
+query': {'type': 'string', 'description': 'the semantic
+of type to search for'}}, 'required': ['query']}}}
+</tools>
+
+For each function call, return a json object with function
+name and arguments within <tool_call></tool_call> XML
+tags:
+
+<tool_call>
+
+{{"name": <function-name>, "arguments": <args-—json-object>}}
+
+</tool_call>
+
+User Prompt
+
+When you encounter a complex question, you should break it
+down into several sub-questions and answer them step by
+step. You can use the tools provided. You can use the
+tool as many times as you want.
+
+You must first conduct reasoning inside <think>...</think>.
+If you need to use the tool, you can use the tool call <
+tool_call>...</tool_call> to call the tool after <think
+>...</think>.
+
+When you have the final answer, you can output the answer in
+the python list format inside <answer> tag, such as: <
+answer> the answer is \\boxed{{[...]}} </answer>.
+
+Output format for tool call:
+<think>
+
+</think>
+
+<tool_call>
+
+</tool_call>
+
+Output format for answer:
+<think>
+
+</think>
+
+<answer>
+
+</answer>
+
+Question: {question}
+
+Topic Entities: {topic entities}
+Assistant:
+
+F Case Study
+
+To illustrate the flexibility and robustness of our agent’s reasoning process, we present two represen-
+tative case studies. The first case demonstrates robustness: when faced with two consecutive empty
+query results, the agent successfully recovers by leveraging a more distant observation from its history
+
+21
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Table 9: Example of robust reasoning of KNOWCODER-AI.
+
+Question: who plays london tipton in suite life on deck?
+
+<think> I need to find the actor who plays London Tipton in "The Suite Life on Deck". I will
+start by searching for predicates related to "actor" or "performance" for the entity "London
+Tipton(m.07g8r3)". </think>
+
+<tool_call1> SearchGraphPatterns(sparql="SELECT ?e WHERE { VALUES ?e
+{ns:m.07g8r3} }", semantic="actor/performer") </tool_call>
+
+<tool_response> [..., (?e, film.film_character.portrayed_in_films -> film.performance.actor,
+"Brenda Song"),...] </tool_response>
+
+<think> (Fail Try 1)... </think>
+
+<tool_call1> ExecuteSPARQL(sparql="SELECT ?actor WHERE { VALUES ?e1
+{ns:m.07g8r3} . VALUES ?e2 {ns:m.03mj4jm} . ?e1 ns:film.film_character.portrayed_in_films
+?evt . ?cvt ns:film.performance.actor ?actor . ?cvt ns:film.performance.film ?e2 . }")
+</tool_call>
+
+<tool_response> [] </tool_response>
+
+<think> The previous query returned no results. This might be due to the structure of the
+predicates or the way the entities are linked. I will try a different approach by searching for
+predicates related to ''actor" or "performance"... </think>
+
+<tool_call1> SearchGraphPatterns(sparql="SELECT ?e WHERE { VALUES ?e
+{ns:m.03mj4jm} }", semantic="actor/performer/character") </tool_call>
+<tool_response> [...,(?e, award.award_nominated_work.award_nominations ->
+award.award_nomination.award, "Kids’ Choice Award for Favorite TV Actor"), ...]
+</tool_response>
+
+<think> (Fail Try 2)... </think>
+
+<tool_call1> ExecuteSPARQL(sparql="SELECT ?actor WHERE { VALUES ?e1
+{ns:m.07g8r3} . VALUES ?e2 {ns:m.03mj4jm} . ?e2
+ns:award.award_nominated_work.award_nominations ?cvt . ?cvt
+ns:award.award_nomination.award_nominee ?actor . ?cvt ns:award.award_nomination.character
+?el . }") </tool_call>
+
+<tool_response> [] </tool_response>
+
+<think> The previous queries have not yielded the correct result. I need to refine my
+approach. The question asks for... I will try a different strategy...I will try to find the actor who
+played London Tipton in any film and then filter for "The Suite Life on Deck". </think>
+<tool_call1> ExecuteSPARQL(sparql="SELECT ?actor WHERE { VALUES ?e
+{ns:m.07g8r3} . ?e ns:film.film_character.portrayed_in_films ?cvt . ?cvt ns:film.performance.actor
+?actor . }") </tool_call>
+
+<tool_response> ["Brenda Song"] </tool_response>
+
+<answer> Brenda Song </answer>
+
+to try a new, promising relation, ultimately finding the correct answer. The second case highlights
+flexibility and self-correction, showing the agent’s ability to identify an illogical query result (e.g.,
+receiving a high school when a university was expected) and adapt its strategy by employing a novel
+action to resolve the issue.
+
+22
+
+
+===== PAGE BREAK =====
+
+KnowCoder
+
+Table 10: Example of flexible reasoning of KNOWCODER-AI.
+
+Question: Where did Charles Drew attend college that has the latest founding date?
+
+<think> I need to find the colleges that Charles R. Drew attended and then find the college with
+the latest founding date. </think>
+
+(Omit for space...)
+
+<tool_call1> ExecuteSPARQL(sparql="SELECT DISTINCT ?college WHERE { VALUES
+2e {ns:m.018t67} . ?e ns:people.person.education ?edu . ?edu ns:education.education. institution
+?college . ?college ns:organization.organization.date_founded ?founded_date . } ORDER BY
+DESC (xsd:date(?founded_date)) LIMIT 1") </tool_call1>
+
+<tool_response> ["Dunbar High School"] </tool_response>
+
+<think> The result is "Dunbar High School", but the question asks for the college, not
+high school. I need to re-evaluate the search. ... I will search for the type "College/University".
+</think>
+
+<tool_call1> SearchTypes(query="College/University") </tool_call>
+<tool_response> ["education.university", ...] </tool_response>
+
+<think> The "SearchTypes" results include "education.university" ... I will find the colleges
+attended by Charles R. Drew and their founding dates, then order by founding date in descending
+order and limit to | to get the college with the latest founding date. </think>
+
+<tool_call> ExecuteSPARQL(sparql="SELECT DISTINCT ?college WHERE { VALUES
+2e {ns:m.018t67} . ?e ns:people.person.education ?edu . ?edu ns:education.education. institution
+?college . ?college ns:type.object.type ns:education.university . ?college
+ns:organization.organization.date_founded ?founded_date . } ORDER BY
+
+DESC (xsd:date(?founded_date)) LIMIT 1") </tool_call1>
+
+<tool_response> ["McGill University Faculty of Medicine"] </tool_response>
+<answer> McGill University Faculty of Medicine </answer>
+
+23

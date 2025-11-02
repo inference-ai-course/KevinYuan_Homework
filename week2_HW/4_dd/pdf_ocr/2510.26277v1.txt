@@ -1,0 +1,1015 @@
+arX1v:2510.26277v1 [cs.CL] 30 Oct 2025
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+Do LLMS SIGNAL WHEN THEY’ RE RIGHT?
+EVIDENCE FROM NEURON AGREEMENT
+
+Kang Chen", Yaoning Wang'', Kai Xiong”, Zhuoka Feng', Wenhe Sun’,
+Haotian Chen", Yixin Cao!*
+
+‘Institute of Trustworthy Embodied AI, Fudan University
+
+Harbin Institute of Technology
+
+Kchen24@m.fudan.edu.cn, yxcao@fudan.edu.cn
+
+ABSTRACT
+
+Large language models (LLMs) commonly boost reasoning via sample-evaluate-
+ensemble decoders, achieving label free gains without ground truth. However,
+prevailing strategies score candidates using only external outputs such as token
+probabilities, entropies, or self evaluations, and these signals can be poorly cali-
+brated after post training. We instead analyze internal behavior based on neuron
+activations and uncover three findings: (1) external signals are low dimensional
+projections of richer internal dynamics; (2) correct responses activate substantially
+fewer unique neurons than incorrect ones throughout generation; and (3) activa-
+tions from correct responses exhibit stronger cross sample agreement, whereas
+incorrect ones diverge. Motivated by these observations, we propose Neuron
+Agreement Decoding (NAD), an unsupervised best-of-N method that selects can-
+didates using activation sparsity and cross sample neuron agreement, operating
+solely on internal signals and without requiring comparable textual outputs. NAD
+enables early correctness prediction within the first 32 generated tokens and sup-
+ports aggressive early stopping. Across math and science benchmarks with verifi-
+able answers, NAD matches majority voting; on open ended coding benchmarks
+where majority voting is inapplicable, NAD consistently outperforms Avg @64.
+By pruning unpromising trajectories early, NAD reduces token usage by 99% with
+minimal loss in generation quality, showing that internal signals provide reliable,
+scalable, and efficient guidance for label free ensemble decoding.
+
+1 INTRODUCTION
+
+Large language models (LLMs) have demonstrated remarkable reasoning capabilities
+2022; 2024). To further boost their performance, sample-evaluate-ensemble methods
+
+have been widely adopted. These methods leverage answer consistency by selecting the best re-
+sponse through majority voting (2022), often yielding higher quality than single re-
+sponses. Notably, this approach requires no ground truth labels, essentially providing a “free lunch”
+improvement. Beyond inference-time applications, this paradigm has also been integrated into un-
+supervised reinforcement learning, enabling models to train at larger scales without ground truth,
+thereby raising the performance ceiling.
+
+Beyond majority voting, recent sample-evaluate-ensemble methods have developed more sophis-
+ticated ensemble strategies. Instead of treating all responses as equally important like majority
+voting, {Chen et al.|(2023) prompts the model to self-evaluate before ensemble and select the most
+consistent answer among candidates. Another line of work explores the model’s response confi-
+dence, leveraging output states from the forward pass (e.g., token probabilities) to evaluate and
+ensemble responses. Typically, high-confidence responses exhibit better quality and low-confidence
+ones shall be pruned (Fu et al.|[2025). However, these methods rely solely on model outputs, with
+confidence or entropy metrics based on token probabilities — what we define as the external be-
+haviors of LLMs. This raises critical questions: Do models inherently encode response quality
+
+“Corresponding Author
+Equal Contribution
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+signals in their outputs? How reliable are such assessments? According to GPT-4 reports, LLMs
+lose calibration capabilities after post-training, showing no clear linear relationship between token
+probability and response correctness. This appears to contradict the effectiveness demonstrated in
+existing work.
+
+In this paper,  we further investigate the model’s       What We See vs. What’s Inside a Large Language Model
+internal behaviors, neuron activation vectors, to
+explore their relationships with external behav-
+
+Activation
+
+iors and response correctness. Through ex-   mm le      «Influence   &  cue
+
+.      .                                                ctivation
+tensive experiments, we reveal that: 1) Ex-
+
+External Behaviors                           Internal Behaviors
+
+ternal behaviors (e.g., entropy) represent low-     @ Entropy   Low-dimensional | ({OO0@ 0 Nowa.
+dimensional projections of internal behaviors.             <—Pwection _'QO 0 O5
+
+rrr se                   sqegs              lala Confidence           ic foxe)  Activations:
+This is intuitive, as token probabilities deter-                      ©)
+
+Neuron- comer ae
+Decoding (ours)
+
+mine output tokens and are themselves deter- | Sample-Evaluate-Ensemble
+mined by neuron activations across layers. 2)
+Consequently, internal behaviors contain richer
+signals, leading to our discovery of their relation-
+ship with response quality — correct responses
+activate significantly fewer neurons compared to
+incorrect ones. 3) Finally, through visualization,
+we observe patterns among correct responses. They tend to activate similar unique neurons. These
+novel patterns in LLMs’ internal behaviors inspire better evaluation methods and more efficient
+assessment of sampled response correctness, ultimately yielding superior ensemble results.
+
+Figure 1: Comparison between NAD and other
+ensemble methods. Our approach relies solely on
+internal signals during the sampling process, with-
+out requiring comparable textual outputs.
+
+Building on these insights, we propose Neuron-Agreement Decoding (NAD), an unsupervised
+method that selects high-quality reasoning trajectories solely based on internal neuron activations.
+Specifically, NAD favors either responses with minimal neuron activations or those that exhibit the
+greatest agreement with other sampled responses. Leveraging such signals also enables us to predict
+response correctness at a very early stage of generation (e.g., within the first 32 tokens), rather than
+requiring full sequences as in external ensemble methods, thereby substantially improving the effi-
+ciency and effectiveness of sample-then-ensemble decoding. The distinction between our approach
+and existing ensemble methods is illustrated in Figure[l]
+
+For evaluation, we consider tasks with easily verifiable correctness (with ground truth, suitable for
+majority voting) and more challenging scenarios (without ground truth or with multiple valid solu-
+tions, e.g., code generation), validating our method’s effectiveness. Moreover, when combined with
+an early-stopping strategy, NAD reduces token consumption in parallel sampling by up to two orders
+of magnitude while delivering superior performance. Our contributions are summarized as follows:
+
+e We conduct a deep investigation into the relationships among internal neuron activation,
+external behaviors, and response correctness in LLMs.
+
+e We design a Neuron-Agreement Decoding (NAD) method for scalable best-of-N sampling.
+
+e Experimental results validate the effectiveness of our findings and method, while the effi-
+ciency gains are also achieved through the early-stopping strategy.
+
+2 RELATED WORK
+
+Outputs-based Voting. Self-consistency is a test-time ensemble technique
+that samples multiple chain-of-thought (CoT) solutions from an LLM and selects the final answer by
+majority vote. This method significantly improved performance on arithmetic and commonsense QA
+benchmarks, revealing that while any single chain might be incorrect, aggregating eee solutions
+can correct errors. Variants of this idea include Soft Self-Consistency  , which
+gives partial credit to similar answers rather than exact match voting.  reas sks well
+when outputs are relatively constrained (e.g., numerical or factual answers), but is less applicable to
+open-ended generation, where answers cannot be easily compared for voting.
+
+Confidence-Based Selection. Another line of work exploits internal confidence or uncertainty
+metrics. |Kang et al.|(2025) introduced self-certainty, which uses the model’s token-level probabil-
+ities to estimate the confidence of each reasoning chain. In their best-of-N selection framework,
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+self-certainty scores guided the choice of the final answer, achieving better scaling with N.
+ proposed DeepConf, which monitors token prediction entropy during generation to prune
+low-confidence reasoning paths on the fly, thereby saving computation while maintaining accuracy.
+These approaches require access to the model’s probability distribution at each step. However, these
+approaches still rely on the availability of comparable answers, which limits their applicability.
+
+3. PILOT STUDY OF INTERNAL BEHAVIORS
+
+Existing ensemble methods still rely heavily on external signals, overlooking internal dynamics in
+LLMs. Inspired by the model utility law 2025), in this section, we investigate how
+internal signals in the model (i.e., neuron activations) correlate with these external signals (e.g.
+certainty and entropy), and whether we can leverage them to guide the selection of the highest-
+quality trajectory in the early stage of generation. In Section 3.1] we first introduce the definition
+of activated neurons; in Section[3.2| we demonstrate the correlation between neuron activations and
+external signals; in Section 3.3] we present preliminary experiments about the correlation between
+neuron activation patterns and model performance, which highlight two key insights to serve as the
+main basis for our proposed method.
+
+3.1 NEURON ACTIVATION SET
+
+Neuron activation patterns can reveal the internal dynamics of LLMs, which are closely associated
+
+with specific types of abilities in LLMs (Pan et al.|/2024{/Templeton et al.|/2024). Here, we adopt the
+definition of activated neurons o (2025): Given an LLM with an input «, it can generate an
+Chowdhery
+
+output token sequence y = (yi, y2,---, yz) froma single sampling, the SwiGLU-based (
+ 2023) contribution of neuron ¢ in layer / to output token y; as:
+
+Faeuron (2, l, Yj | Y<;) = (Wu Wea ° SiLU(x,W,)) «>                   (1)
+
+the Swish activation (Shazeer 2020), Wout» Ww) are the output/ gate projections in FFN, W,, is the
+unembedding matrix fransforming the hidden states into distributions over the vocabulary, o is an
+element-wise product with broadcasting, and xi 4 denotes the hidden input of token y;—; to the
+
+FEN at [-th layer. For a given threshold 77, the activated neuron set for a sample (x, y) is defined as:
+
+where ye; = (Y1, Y2, ++; ae  denotes the response sequence before the j-th token y;, SiLU is
+
+Nactivatea(@, Y) = {(i,0 | dy; € Y, fneuron (i, 0, Uj | xD Y<j) > nt,            (2)
+
+where | = 1,2,..., L represents the layer index, and 2 = 1,2,...,. N indicates the neuron index in
+each layer. The implementation of the threshold function 7 can be found in Appendix [B]
+
+In this work, we refine the definition into a more fine-grained form to better capture activations
+throughout the reasoning process. Specifically, we divide the entire reasoning process into B-sized
+chunks y = (yi, y2,---; Y[t/Bl ), compute the activation set for each chunk using the definition in
+Eq.(2), and then take their union:
+
+[t/B]
+Nactivatea(&, y) =  U  Nactivatea(©, yi)                         (3)
+
+i=l
+This modification allows us to better capture localized information within the reasoning process.
+
+3.2 NEURON ACTIVATIONS: APPROXIMATE PREIMAGES OF CONFIDENCE METRICS
+
+We hypothesize (operationally) that a model’s internal dynamics during inference—captured as the
+set of activated neurons—can be viewed as giving rise to approximate low-dimensional summaries
+such as self-certainty; reducing behavior to such scalars discards much of the underlying high-
+dimensional information. We test this via two complementary findings: (1) activated neurons can,
+to some extent, aggregate into those scalar metrics, i.e., the set of activated neurons contains
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+“| Pearson r = -0.605                                 Pearson r = 0.633
+Spearman r = -0.631                                 Spearman r = 0.660
+>                          12
+
+Average Self-Certainty
+Average Entropy
+
+Activated Neuron Count
+
+Figure 2: Scatter plots of the number of activated neurons versus confidence-based metrics (Self-
+Certainty and Entropy). The neuron counts show significant correlations with both metrics, in-
+dicating that the activated neuron states provide a high-dimensional representation of traditional
+confidence measures.
+
+the information needed to compute those metrics; and (2) activated neurons exhibit patterns that
+scalar metrics cannot capture.
+
+Concretely, we use QWen3—4B-Think to generate 64 responses per instance on AIME24, record-
+ing for each response both several scalar metrics and its corresponding set of activated neurons.
+For (1), we count the number of activated neurons per chunk and compute each chunk’s mean
+self-certainty and entropy, then measure the correlation between neuron counts and the conven-
+tional scalar metrics. The results, shown in Fig. 2] demonstrate significant correlations (with p-value
+less than 0.05): neuron count correlates positively with entropy and negatively with self-certainty,
+thereby supporting (1). For (2), to uncover structure in how different samples activate neurons, we
+embed samples with t-SNE using the Jaccard index between activated-neuron sets as the similarity
+measure, i.e.
+
+_   | Nactivated (a, yi) () Nactivated (x, Yj ) |
+| Nactivated (a, yi) U Nactivated (a, Yj ) | :
+
+Where y;,y; are different responses. The t-SNE visualization in Fig. |3]colors each sample by
+the sequence’s average entropy. The plot reveals clear clustering of responses by their activated-
+neuron patterns; importantly, samples within the same cluster do not necessarily share similar en-
+tropy values, and samples from different clusters can exhibit similar entropy. This indicates that
+the activated-neuron patterns encode high-dimensional structure that scalar metrics such as entropy
+cannot represent.
+
+Si                                                                (4)
+
+Taken together, these results suggest that confidence-type scalar metrics are effectively low-
+dimensional projections of high-dimensional activated-neuron stated!  This observation naturally
+raises the question: if scalar confidence can guide answer selection, can we exploit richer, higher-
+dimensional state information to guide selection more effectively? To explore this possibility, in the
+next section we conduct a deeper analysis of the relationship between neuron activation patterns and
+response correctness.
+
+3.3, PRELIMINARY EXPERIMENTS
+
+To investigate the correlation between neuron activation patterns and model performance, we con-
+tinue with the same experimental setup, while recording both the correctness of each response and
+its corresponding set of activated neurons.
+
+Figure [4{a) shows the visualization of multiple samples for selected instances, where green points
+correspond to correct responses and red points to incorrect ones. We observe two clear patterns: 1)
+Neuron activation patterns across different responses tend to form natural clusters, indicating a form
+of consensus; 2) Incorrect responses tend to lie at the margins of clusters, farther from neighbor-
+
+'We cannot exhaust all possible activated neuron patterns and their mappings to scalar metrics. In future
+work, we aim to explore more combinations.
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+Neuron Activation Evolutior                                                  .      Token-wise Neuron Activation   =~ Income
+
+t-SNE Dimensionality Reduction                                                                                       First: By Euler's formula ...
+
+Alright, so I want AB \cdot
+AC... Wait,..., Maybe... a
+answer=104.
+
+0.00016
+
+First: The condition IA.LOI ... second... ,~~@s                    0.00014
+next, a=2\sqrt{30}... answer=624.        b    F    .\
+3                   ~ 9       .,           i         eo
+°      i        o                          X          iN           ,
+reg g &             x         +87
+
+0.00012
+°
+s          o         a.                                                0.00010
+ote      eos 4      2
+s           First: Using Euler's
+ere, ¢       formula ... So         3
+oS 5 _AANsgrtl30} .. answer=468. 6 9995
+
+2
+2 0.00008
+
+ee
+
+/
+'
+i
+' Be
+4   s
+&  cs =
+\
+ e   2° eg
+First: Using Euler's
+o °)- formula ... Hence     0.00002
+és     -7” a=d\sqrt {30} ... answer=468.
+
+t-SNE-2
+
+,                                                                                                                                                                                                    “© First: By Euler's Formula, ...
+
+e     Second, Equate the two area
+
+0                                     expressions ... Final output
+/                                                answer=468.
+
+0.00004
+
+oaonn                                                                            7        00        00        00
+Token Position (Chunk ID)
+
+5000 10000 15000 20000-25000 3000035000 40000
+t-SNE-1                                             Unique Neuron Count
+
+(a)                                                                                        (b)                                                                                       (c)
+
+Figure 4: Preliminary AIME24 results. (a) t-SNE of responses to one prompt: center clusters share
+similar reasoning; outliers diverge. (b) Correct answers activate far fewer neurons than incorrect
+ones. (c) Token-wise trajectories show incorrect responses repeatedly shift strategies, engaging
+more neurons. These observations motivate Insight 1 and Insight 2 presented in Section 3.3}
+
+ing samples, whereas correct reasoning trajectories align more tightly with the central distribution.
+These lead to our first key insight:
+
+Insight 1. By leveraging neuron activation patterns across responses, we can define consensus and
+identify reasoning trajectories more likely to be correct without requiring text-level matching.
+
+Complementing the clustering result, we compare    t-SNE projection of Jaccard distance matrix
+neuron activations for correct vs. incorrect samples
+during generation (Fig. [4{b,c)). In Fig. (b), correct
+samples consistently exhibit substantially fewer acti-
+vated neurons than incorrect ones, consistent with the       10   a,
+
+12
+
+C0 OS
+5
+g
+5
+
+11
+
+view that successful trajectories balance exploration g | %%                         one
+and exploitation—reaching answers with fewer trial- 2%         °                             oa2
+and-error steps—whereas failures over-explore. Fig.      8         ®
+
+(c) tracks the growth of unique activated neurons with        3             @° o6e8
+
+generated tokens for each sampling; correct trajecto-                    S009   °     fe     0.38
+ries activate fewer neurons throughout. This pattern      °             vs
+
+0.36
+
+N
+s
+
+6               10      12
+
+aligns with the overall statistics and suggests using ac-
+tivation signals to terminate low-quality generations
+early. These observations lead to our second key in- Figure 3: t-SNE representation of activated
+sight:                                                       neurons, with point colors indicating the av-
+erage entropy of the corresponding samples.
+No clear consistency is observed between
+entropy and the resulting clusters, suggest-
+ing that the activated neurons contain high-
+dimensional structural information not cap-
+tured by entropy.
+
+Aligned by generation step (Fig. [4[c)), correct chains
+
+activate fewer neurons at matched tokens, indicating a non-length effect and motivating chunk-
+conditioned early stopping.
+
+8
+t-SNE-1
+
+Insight 2. The number of activated neurons in the
+early stage of generation can serve as a signal to dis-
+tinguish high-quality answers from low-quality ones.
+Specifically, high-quality answers tend to activate
+fewer neurons.
+
+Building on these two insights, we can design corresponding algorithms that leverage neuron acti-
+vation patterns across samples to uncover consensus and identify higher-quality answers.
+
+4 METHODOLOGY
+
+Building on the insights from above preliminary experiments (Section[3.3), we aim to operationalize
+two key observations regarding neuron activations in sampled reasoning trajectories. These obser-
+vations suggest two complementary strategies for selecting high-quality reasoning trajectories. In
+the following, we introduce two independent methods that correspond to these insights.  Figure [5]
+illustrates the overall framework.
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+JA sim. matrix                   ? i?               Selector             ‘ N             Continue
+selected ONE path
+
+Generate
+n paths in parallel                                                                                   [Ri fa) R,|
+
+|R, UR;|
+
+JA(R;, Rj) =
+
+prior
+calibration _
+
+Figure 5: Framework of Neuron Agreement Decoding (NAD). NAD selects high-quality answers by
+leveraging the consensus of internal neuron activations during the sampling process, without relying
+on canonical textual outputs. This consistency can be identified using the proposed kKNN-based
+approach, among others. Moreover, this procedure can be applied at an early stage of sequence
+generation, pruning low-quality responses in advance and reducing token usage.
+
+4.1 NEURON-AGREEMENT DECODING (NAD)
+
+To operationalize the notion of consensus, we build directly on Insight 1. Samples of the same
+input exhibiting similar neuron activation patterns tend to correspond to correct reasoning, while
+incorrect ones deviate substantially. We capture consensus by exploiting these internal dynamics of
+the model.
+
+Concretely, for a given input x, we generate n sampled trajectories {(x, y;)}?_,, and obtain their
+activated neuron sets {Nactivated (x, yi) bry as defined in Section [3.1] Pairwise similarities among
+samples, already formalized by the Jaccard index in Section}3.3} provide a relational structure over
+the sampled responses. The resulting consensus matrix S € |0,1]"*” captures agreement among
+samples at the level of neuron activations.
+
+Building upon this representation, our goal is to identify consensus samples — those most consistent
+with others in their neuron activations — and thereby select trajectories that are more likely to be
+correct. We propose the following structure discovery methods:
+
+kKNN-Agreement. For each sample i, compute the sum of its top-k pairwise similarity scores to
+other solutions, denoted as s;. Select the solution 2 with the highest s;.
+
+Global Medoid. The medoid denotes the point that minimizes the total distance to all other samples.
+Under the Jaccard Index metric, this corresponds to maximizing the sum of similarities:
+
+n
+i = arg max y  Sij.
+au
+
+j=l
+
+DBSCAN. We apply the clustering algorithm to the distance matrix D = 1 — S to identify clusters.
+Select the largest cluster C’, then find the medoid within this cluster:
+
+i= argmax ) S- Sq:
+
+pEC qEC
+
+Building on Insight 2, we propose an alternative selection strategy: since correct reasoning trajec-
+tories tend to activate relatively fewer neurons, we choose the trajectory with the fewest activated
+neurons among the n samples:
+
+t= arg min | Nactivated (a, Yi) | :
+This approach does not rely on pairwise similarities between samples; instead, it treats the number
+
+of activated neurons in a single sample as a proxy for its quality, allowing us to select trajectories
+that are more likely to be correct efficiently. We denote this approach as MinAct.
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+4.2 EARLY STOPPING STRATEGY
+
+Early stopping in parallel sampling improves LLM inference by terminating weak reasoning traces
+and reallocating compute to stronger ones, reducing redundancy. Based on preliminary experi-
+ments, we hypothesize that a trace’s correctness can be predicted early from its neuron activation
+patterns. We apply these methods to prune low-quality traces. Specifically, for a partial output
+Y<; = (y1, y2,---, yz), We compute the set of neurons activated by x up to the current position j as
+Nactivated(X, Y< 7) by Eq.(3), employ the selection schemes from Section and resume generation
+from the selected trace by itself. We set 7 equal to the chunk size, B =      or the experiments. The
+choice of the early stopping position will be further discussed in Section[5.3]
+
+5 EXPERIMENTS
+
+5.1 SETUP
+
+Models. We evaluate NAD on three models: Qwen3-4B-thinking-0527, Qwen3-4B-Instruct-
+0527 2025) and DeepSeek-R1-0528-Qwen3-8B (DeepSeek-Al] (2025). For each input, we
+
+generate n = 64 samples with a temperature of 0.6 and a top-p value of 0.9.
+
+Datasets. We evaluate NAD on two settings: (1) scientific reasoning with canonical answers, in-
+
+cluding AIME24, AIME25 (Art of Problem Solving} |2024a\b} |2025a|b) and GPQA (Rein et al.
+2024)); and (2) open-ended code generation, including LiveCodeBench v5 2024), Hu-
+
+manEval (Chen et al.|/2021) and MBPP 2021), where majority voting is inapplicable.
+
+Protocol & Baselines. Under this protocol we report two baselines: (i) Avg@64 (mean accuracy
+over all n samples); (ii) Cons@64 majority vote for tasks with canonical answers (ties count as
+failure). We evaluate under a fixed sampling budget n = 64 and a low-interaction regime that
+mirrors deployments where repeated environment calls are expensive; for code, we adopt a single-
+execution protocol (only the finally selected candidate is executed once).
+
+Model                  Method             Math Reasoning                Code Generation             Avg.
+AIME24425. GPQA HumanEval LCBv5 MBPP
+
+Avg@64    74.6   66.3   96.0   61.9 846 76.7
+
+Cons @64    86.7   68.2    -     -    -   -
+
+    NAD-kNN    85.0   68.7   98.2   61.7 86.0 79.9
+
+Qwen3-4B-Think N/a Medoid   81.7   66.2   97.0   593 85.2 77.9
+
+NAD-DBSCAN   83.4   66.2   97.6   599 85.0 78.4
+
+NAD-MinAct   85.0   66.7   92.7   58.1 838 7723
+
+Ave@64    70.6   58.1   92.1   58.5. 83.7 72.6
+
+Cons @ 64    78.3   62.6    -     -    -   -
+
+RI-Qwen3-8B   NAD-kNN    78.3   62.6   89.6   57.5 844 745
+
+NAD-Medoid   75.0   61.1   91.5   55.1 854 73.6
+
+NAD-DBSCAN   BS    60.1   90.9   55.7 85.4 73.1
+
+NAD-MinAct   75.0   61.1   90.2   593 79.0 72.9
+
+Ave@64    51.7   59.2   90.8   34.1 754 62.2
+
+Cons @ 64    66.7   61.1    -     -    -   -
+
+NAD-kNN    55.0   61.1   91.5   371 74.2 «63.8
+
+Qwen3-4B-Instruct aD Medoid   55.0   61.1   92.1   365 75.2 ~—«64.0
+
+NAD-DBSCAN   60.0   61.1   92.1   365 75.8 65.1
+
+NAD-MinAct   61.7   60.6   91.5   31.1 75.0 64.0
+
+Table 1: Main results of our experiments. Our methods achieve performance competitive with
+majority voting and consistently surpass sampling average.
+
+5.2 RESULTS
+
+The main results are summarized in Table |1| which indicate that: 1) Our approach substantially
+outperforms baselines in terms of overall performance, with the kNN variant yielding consistently
+strong performance; 2) On math reasoning datasets with extractable ground-truth answers, our meth-
+ods demonstrate clear advantages over sampling average while remaining competitive with majority
+voting. On code generation benchmarks, where existing sample-evaluate-ensemble methods are not
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+AIME24+25    GPQA
+Acc. Token(A%) Acc. Token (A%)
+
+Avg@64        74.6         55.2         66.3        102.2           70.4
+
+NAD-KNN 80.0 1.3 (-97.6%) 67.2 2.0(-98.0%) 73.6
+Qwen3-4B-Think | NAD-Medoid 81.7 1.3 (-97.6%) 68.2 2.0(-98.0%) 75.0
+NAD-DBSCAN 81.7 1.3 (-97.6%) 65.7 2.0(-98.0%) 73.7
+NAD-MinAct 80.0 1.2 (-97.8%) 67.7 1.8(-98.2%) 73.9
+
+Avg @64        70.6         48.1         58.1         99.6            64.4
+NAD-kNN       78.4 1.0 (-97.9%) 56.1 1.8 (-98.2%)       67.3
+R1-Qwen3-8B       NAD-Medoid 75.0 1.1 (-97.7%) 54.0 1.9 (-98.1%)      64.5
+NAD-DBSCAN 75.0 — 1.1 (-97.7%) 54.5 1.9 (-98.1%)      64.8
+NAD-MinAct 76.7 0.9 (-98.1%) 58.1 — 1.7 (-98.3%)       67.4
+
+Avg @64      51.7      32.0      59.2      41.6         55.5
+NAD-kNN       55.0 0.4 (-98.8%) 58.6 0.9 (-97.8%)       56.8
+Qwen3-4B-Instruct | NAD-Medoid     55.0 0.6 (-98.1%) 56.6 1.0 (-97.6%)       55.8
+NAD-DBSCAN 55.0 0.6 (-98.1%) 56.6 1.0 (-97.6%)       55.8
+NAD-MinAct 61.7 0.4 (-98.8%) 63.1 0.9 (-97.8%)       62.4
+
+Model                        Method                                                                                               Avg. Acc.
+
+Table 2: Accuracy and total token consumption of different methods on scientific reasoning bench-
+marks after applying early stopping introduced in Section [4.2]  Token consumption is reported in
+millions (M). Our method achieves a two-order-of-magnitude reduction in token usage while main-
+taining accuracy advantages over random sampling.
+
+Accuracy(%)                     R1-Qwen3-8B                                        Accuracy(%)                    Qwen3-4B-Think
+100                                                                                                        100
+80                                                                                80
+60                         '                          !                                              60
+AIME24     AIME25      GPQA       LCBv5       MBPP     HumanEval             40
+AIME24        AIME25         GPQA          LCBv5           MBPP       HumanEval
+Min-Activation © Max-Activation                                            Min-Activation © Max-Activation
+
+Figure 6: Comparison between minimizing and maximizing activated neurons. On scientific reason-
+ing benchmarks, responses with minimal activated neurons are significantly better; while on coding
+benchmarks, the performance gap narrows or even reverses.
+
+applicable, our methods still yield performance gains over our curated baseline on most tasks; 3)
+Compared to alternative methods that leverage the global structure across n samples, the minimum-
+activation method relies solely on the number of activated neurons, which limits its effectiveness;
+nevertheless, it still significantly surpasses baselines.
+
+Table [2] reports performance changes and token savings on scientific benchmarks under the early-
+stopping scheme in Section|4.2| code results appear in Appendix Table 3] Relative to parallel sam-
+pling, our method permits stopping after the first chunk, sharply reducing tokens while consistently
+surpassing random sampling in accuracy. These gains show that early internal neuron activations
+provide reliable signals of answer quality.
+
+5.3. ANALYSIS
+
+Different implementations for activated neuron computation. In Section 3.1] we aggregate ac-
+tivated neurons by simply taking the union of all chunks, treating them equally. To investigate the
+effect of this aggregate method, we adopt top-k operation to
+merge neurons across sequences. Specifically, we retain only the neurons with the top-é contri-
+bution scores, where / ranges from 2K to 200K, and eventually no top-k filtering is applied (our
+method). The corresponding distributions of activated neurons are shown in Figure[7| We observe
+that as & increases: (1) the distribution of activated neurons for correct samples gradually shifts to
+the left, while that for incorrect samples shifts to the right; (2) the distribution of incorrect samples
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+0.00040:                                                                                         0.000167
+
+0.00035
+
+== Correct
+== Incorrect!
+
+== Correct
+== Incorrect
+
+m= Correct
+
+== Incorrect                                                                                                 0.00014)
+
+0.00030!
+
+0.00025
+
+“B 0.00020
+
+0.00012}
+2B 0.00010)
+“Z o.00008)
+© 0.00015                                      © 0.00006;
+0.00010                                                                                    0.00004
+
+0.00005                                                                                         0.00002}
+
+0.00000!                                                                                         0.00000:
+
+4000 60008000 10000 12000 14000 16000 18000
+
+100   150-200-250 300350400                                               5000 10000 15000 20000 25000 30000 35000 40000
+
+Unique Neuron Count                       Unique Neuron Count                        Unique Neuron Count
+(a)                                                  (b)                                                  (c)
+
+Figure 7: Effect of different top-& settings on the distribution of activated neurons for correct and
+incorrect responses. From left to right: top-k = 2K, 200K, and no top-k. The no-top-k setting
+achieves the best separation.
+
+becomes increasingly uniform. Overall, the distinction between the two distributions becomes more
+pronounced. We hypothesize that when k is small, the activated neurons focus on high-contribution
+reasoning paths, losing some finer details. As & increases, more detailed information is incorporated,
+providing a more comprehensive and discriminative view of the model’s internal states.
+
+The Effect of Early Stopping Position. In the main
+experiments, we fix the early stopping position at
+B = 32. Intuitively, the later the truncation point
+in generation, the richer the information conveyed by
+activated neurons. In this section, we investigate how
+different early stopping positions affect model perfor-
+mance and token consumption. Results across posi-
+tions ranging from 32 to 16384 are shown in Figure[8|          16
+Interestingly, we find that later stopping does not nec-
+essarily yield better answer quality (For more results,                  :       -       7       iL       .
+please refer to Figure [9}Figure[10]in the Appendix).          Early Stopping Position (log scale)
+For example, on the AIME24+25 dataset, the kNN
+method achieves higher accuracy when stopping at
+the 4096th token compared to using the full response
+(86.7 vs. 85.0). This phenomenon may be attributed
+to noise accumulation and signal dilution: as gener-
+ation proceeds, additional activations may introduce
+redundancy or errors that obscure the earlier, more re-
+liable signals, leading to degraded answer selection
+despite longer reasoning traces.
+
+NAD-kNN
+
+ry
+N
+
+r 10
+
+Accuracy
+2
+8
+
+3
+Token Consumption (M)
+
+imo
+
+Figure 8: Accuracy and token consump-
+tion as a function of early stopping position.
+The results show that performance does not
+monotonically improve as the stopping posi-
+tion is delayed, suggesting that token gener-
+ation may introduce noise; stopping at 32 to-
+kens achieves relatively good performance.
+
+Relationship between neuron activation and performance. In Section  we observed on
+AIME24 that correct responses activate fewer neurons than incorrect ones. To further examine this
+phenomenon, we compare it against the opposite strategy: selecting the reasoning trajectory that
+maximizes neuron activations. The results are reported in Figure|6] On math and science reasoning
+benchmarks, our hypothesis is confirmed: responses selected based on minimal activations achieve
+significantly higher accuracy than those based on maximal activations; whereas on code generation
+tasks, the difference is much less pronounced, and in some cases, the maximal-activation strategy
+even outperforms the minimal-activation ones. We suggest that this is because (1) code generation is
+more open-ended, with multiple valid ways to implement the same functionality, and (2) it inherently
+requires the model to draw upon a broader range of knowledge, including programming languages,
+libraries, and domain-specific conventions, which thereby weakens the relationship between neuron
+activations and performance. We hope that further exploration of this line of research can facilitate
+extending parallel reasoning to more general domains.
+
+6 CONCLUSION
+
+In this work, we analyze LLM internals via neuron-activation patterns in correct vs. incorrect out-
+puts. Correct outputs activate fewer neurons and align more, a reliable quality signal. We propose
+Neuron-Agreement Decoding (NAD), selecting responses from internal activations. On math, sci-
+ence, and coding, NAD matches majority voting on well-defined tasks and beats average sampling
+on open-ended coding. Early pruning cuts tokens up to 99% without quality loss. These results
+show that neuron-level signals improve efficiency and reliability, motivating the ensemble decoding
+based on internal dynamics.
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+REFERENCES
+
+Ju.
+
+Art of Problem Solving. 2024 aime i. https://artofproblemsolv
+index.php/2024 AIME 1) 2024a. Accessed: 2025.
+
+ng.com/wiki/
+
+Art of Problem Solving. 2024 aime ii. https://artofproblemsolving.com/wiki/
+
+ 20240. Accessed: 2025.
+
+Art of Problem Solving. 2025 aime i. https://artofproblemsolving.com/wiki/
+index.php/2025_AIME_ 1) 2025a. Accessed: 2025.
+
+Art of Problem Solving. 2025 aime ii. https://artofproblemsolving.com/wiki/
+index.php/2025_AIME_ ITI) 2025b. Accessed: 2025.
+
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk Michalewski, David Dohan,
+Ellen Jiang, Carrie Cai, Michael Terry, Quoc Le, et al. Program synthesis with large language
+models. arXiv preprint arXiv:2108.07732, 2021.
+
+Yixin Cao, Jiahao Ying, Yaoning Wang, Xipeng Qiu, Xuanjing Huang, and Yugang Jiang. Model
+utility law: Evaluating llms beyond performance through mechanism interpretable metric. arXiv
+preprint arXiv:2504.07440, 2025.
+
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, Jared
+Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri,
+Gretchen Krueger, Michael Petrov, Heidy Khlaaf, Girish Sastry, Pamela Mishkin, Brooke Chan,
+Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz Kaiser, Mohammad Bavarian,
+Clemens Winter, Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias Plappert, Fo-
+tios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex Nichol, Alex
+Paino, Nikolas Tezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain, William Saunders,
+Christopher Hesse, Andrew N. Carr, Jan Leike, Josh Achiam, Vedant Misra, Evan Morikawa, Alec
+Radford, Matthew Knight, Miles Brundage, Mira Murati, Katie Mayer, Peter Welinder, Bob Mc-
+Grew, Dario Amodei, Sam McCandlish, Ilya Sutskever, and Wojciech Zaremba. Evaluating large
+language models trained on code, 2021.
+
+Xinyun Chen, Renat Aksitov, Uri Alon, Jie Ren, Kefan Xiao, Pengcheng Yin, Sushant Prakash,
+Charles Sutton, Xuezhi Wang, and Denny Zhou. Universal self-consistency for large language
+model generation. arXiv preprint arXiv:2311.17311, 2023.
+
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav Mishra, Adam
+Roberts, Paul Barham, Hyung Won Chung, Charles Sutton, Sebastian Gehrmann, et al. Palm:
+Scaling language modeling with pathways. Journal of Machine Learning Research, 24(240):
+1-113, 2023.
+
+DeepSeek-AI. Deepseek-r1: Incentivizing reasoning capability in lms via reinforcement learning,
+
+2025. URL|https://arxiv.org/abs/2501.12948
+
+Yichao Fu, Xuewei Wang, Yuandong Tian, and Jiawei Zhao. Deep think with confidence (deepconf).
+arXiv preprint arXiv:2508.15260, 2025.
+
+Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando
+Solar-Lezama, Koushik Sen, and Ion Stoica. Livecodebench: Holistic and contamination free
+evaluation of large language models for code. arXiv preprint arXiv:2403.07974, 2024.
+
+Zhewei Kang, Xuandong Zhao, and Dawn Song. Scalable best-of-n selection for large language
+models via self-certainty. arXiv preprint arXiv:2502.18581, 2025.
+
+Haowen Pan, Yixin Cao, Xiaozhi Wang, Xun Yang, and Meng Wang. Finding and editing multi-
+modal neurons in pre-trained transformers. In Lun-Wei Ku, Andre Martins, and Vivek Srikumar
+(eds.), Findings of the Association for Computational Linguistics: ACL 2024, pp. 1012-1037,
+Bangkok, Thailand, August 2024. Association for Computational Linguistics. doi: 10.18653/
+v1/2024.findings-acl.60. URL nttps://aclanthology .org/2024. findings=acl
+
+10
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+David Rein, Betty Li Hou, Asa Cooper Stickland, Jackson Petty, Richard Yuanzhe Pang, Julien Di-
+rani, Julian Michael, and Samuel R Bowman. Gpqa: A graduate-level google-proof q&a bench-
+mark. In First Conference on Language Modeling, 2024.
+
+Noam Shazeer. Glu variants improve transformer. arXiv preprint arXiv:2002.05202, 2020.
+
+Zhengyang Tang, Xingxing Zhang, Benyou Wang, and Furu Wei. Mathscale: scaling instruction
+tuning for mathematical reasoning. In Proceedings of the 41st International Conference on Ma-
+chine Learning, pp. 47885-47900, 2024.
+
+Qwen Team. Qwen3 technical report, 2025. URL/https://arxiv.org/abs/2505.09388
+
+Adly Templeton, Tom Conerly, Jonathan Marcus, Jack Lindsey, Trenton Bricken, Brian Chen,
+Adam Pearce, Craig Citro, Emmanuel Ameisen, Andy Jones, Hoagy Cunningham, Nicholas L
+Turner, Callum McDougall, Monte MacDiarmid, C. Daniel Freeman, Theodore R. Sumers,
+Edward Rees, Joshua Batson, Adam Jermyn, Shan Carter, Chris Olah, and Tom Henighan.
+Scaling monosemanticity: Extracting interpretable features from claude 3 sonnet.  Trans-
+former Circuits Thread, 2024. URL
+
+Han Wang, Archiki Prasad, Elias Stengel-Eskin, and Mohit Bansal. Soft self-consistency improves
+language model agents. In Proc. ACL, 2024.
+
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdh-
+ery, and Denny Zhou. Self-consistency improves chain of thought reasoning in language models.
+arXiv preprint arXiv:2203.11171, 2022. ICLR 2023.
+
+Yaoning Wang, Jiahao Ying, Yixin Cao, Yubo Ma, and Yugang Jiang. Effieval: Efficient and general-
+izable model evaluation via capability coverage maximization. arXiv preprint arXiv:2508.09662,
+2025.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny
+Zhou, et al. Chain-of-thought prompting elicits reasoning in large language models. Advances in
+neural information processing systems, 35:24824—24837, 2022.
+
+LLM ASSISTANCE DISCLOSURE
+
+We used large language model (LLM) tools for grammar and wording refinement during manuscript
+preparation. We also used image-generation tools to create a stylized alpaca illustration to aid reader
+understanding. All technical content, analyses, and citations were authored, verified, and remain the
+sole responsibility of the authors.
+
+A LIMITATIONS
+
+Despite efficient early selection, open issues remain: (1) Selector impact: we introduced several se-
+lectors but did not determine which is most effective under different sampling patterns. (2) Storage
+overhead: compute cost is small, yet storing neuron activations requires substantial disk and mem-
+ory; more space-efficient representations of internal dynamics are a key direction. Our comparisons
+use a fixed budget n = 64 and a single-execution protocol for code; approaches with many more
+samples or multiple executions target a different resource regime. Engineering-wise, storage can be
+non-trivial, but bitset or bitmap encodings and parallel Jaccard under early stopping (@32 token)
+keep added overhead small.
+
+B IMPLEMENTATION FOR THRESHOLD FUNCTION
+
+In this paper, we adopt a top-k threshold function for key neuron selection, which can be calculated
+as follows:
+
+11
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+NAD-kNN                                   NAD-Medoid                                NAD-DBSCAN                                 NAD-MinAct
+
+Token Consumption (M)
+
+Token Consumption (M)
+
+Token Consumption (M)
+
+Token Consumption (M)
+
+Accuracy
+
+a on --E                        aaa                        nao --                        woo
+
+Fg             2     Pn     Pia               Fg      Fa     qe     Pn     Pa               Fg      Fa     qe     Pn     Pa               Fa             2      r      Pi
+Early Stopping Position (log scale           Early Stopping Position (log scale)           Early Stopping Position (log scale}           Early Stopping Position (log scale}
+
+Figure 9: Accuracy and token consumption as a function of early stopping position of
+R1-Qwen3-8B on AIME24.
+
+1. Calculate the highest activations on the j-th token y; in each layer /:
+
+where A(y,;,/) € R% denotes the contribution score matrix on token y; in layer 1, with [A(y;,1)]; =
+Ffneuron(2, 1, yj | © ® yc). Here, topk(A, k) returns the k largest values in A.
+
+2. Find the threshold by aggregating activations across the sequence:
+
+nj, k) = min{topk([Fy1; Fy; ...; Fy], &)}.                      (6)
+
+In all experiments, we set k = 500. Note that the threshold is equivalent to taking the top-k across
+all activation values on token y; when 64 in Eq. (5) is scaled up to N. We choose to use 64 instead
+of N for computational efficiency considerations. This token-level thresholding is always applied
+in our main method. Unless otherwise noted (Sec. 5.3), we do not apply any sequence-level global
+top-k across tokens; when we do, it is clearly marked as an ablation.
+
+C DETAILED EXPERIMENT RESULTS
+
+Model                         Method                     HumanEval                         LCBv5                             MBPP                  Avg. Acc.
+Acc. Token(A%) Acc. Token(A%) Acc. Token (A%)
+Avg @64       97.0       52.2        58.7       191.9       85.6       169.8          80.4
+
+NAD-KNN 97.6 —-1.1(-97.9%) 63.5 3.2(-98.3%) 85.2 3.5(-98.0%)        82.1
+
+Qwen3-4B-Think | NAD-Medoid 97.6 1.1(-97.9%) 59.9 3.3(-98.3%) 85.0 3.5(-98.0%)        80.8
+NAD-DBSCAN 97.6 1.1(-97.9%) 61.1 3.3(-98.3%) 85.2 3.6 (-97.9%)        81.3
+
+NAD-MinAct 96.3 1.0(-98.1%) 65.9 3.2(-98.3%) 85.2 3.1(-98.2%)       $2.4
+
+Avg @64         92.1         49.3         61.1         190.4        84.6         171.6            79.3
+NAD-KNN 94.5 (0.9(-98.2%) 56.9  3.2(-98.3%) 83.2 3.3(-98.1%)        78.2
+
+R1-Qwen3-8B        NAD-Medoid 91.5 1.0(-98.0%) 58.7 3.2(-98.3%) 84.0 3.5(-98.0%)       78.1
+NAD-DBSCAN 91.5 1.0(-98.0%) 61.7 3.2(-98.3%) 83.0 3.5(-98.0%)        18.7
+
+NAD-MinAct 93.9 0.9(-98.2%) 58.7 2.9(-98.4%) 82.4 3.0(-98.2%)        783
+
+Avg @64      89.6       6.0       31.1       26.6      74.9       37.1         65.2
+
+NAD-kNN       90.2 0.4(-93.3%) 35.9 0.6(-97.7%) 73.9  1.4(-96.2%)        66.7
+
+Qwen3-4B-Instruct NAD-Medoid 90.9  0.4(-93.3%) 36.5 0.7(-97.4%) 74.7  1.5(-96.0%)        67.4
+NAD-DBSCAN 90.9 0.4(-93.3%) 35.9 0.7(-97.4%) 76.2  1.5(-96.0%)        67.7
+
+NAD-MinAct 92.1 0.4(-93.3%) 31.7 0.6(-97.7%) 77.0  1.4(-96.2%)        66.9
+
+Table 3: Accuracy and total token consumption of different methods on code benchmarks after
+applying early stopping introduced in Section [4.2] Token consumption is reported in millions (M).
+Our method achieves a two-order-of-magnitude reduction in token usage while maintaining accuracy
+advantages over random sampling.
+
+12
+
+
+===== PAGE BREAK =====
+
+Do LLMs Signal When They’re Right? Evidence from Neuron Agreement
+
+ns                NAD-kNN                                           NAD-Medoid                                        NAD-DBSCAN                                        NAD-MinAct
+25       80                                  25       80                                  25      aos                                  25
+20                                          20
+Rs                                    5                                          5                                          5                                          5
+P00                    3B 3”                    =z 3”                    pes                    3
+8                  BE Bia                BE Ba                BE B                  BE
+3 ors                                 @ 3                                   @ 3                                   @ gee                                 a
+g                        w5 ¥”                      ws 2”                      105 Zo25                      ws
+65.0
+5     70                                    5     70                                    S                                          €
+625                                  5g                                        5g                                        5s § 600                                  ss
+e     68                 2                  e     68                 =                eos                                    e
+60.0                                  °           w--e-                 °           we-e--                 °                                           °
+Fg     Fa     ye                ¥     Pu     ye                ¥     3     ye                ¥     Pa     ye
+Early Stopping Position (log scale)           Early Stopping Position (log scale)           Early Stopping Position (log scale)           Early Stopping Position (log scale)
+
+Figure 10: Accuracy and token consumption as a function of early stopping position
+R1-Qwen3-8B on AIME25.
+
+13
+
+of

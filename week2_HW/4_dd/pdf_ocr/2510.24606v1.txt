@@ -1,0 +1,1166 @@
+arX1v:2510.24606v1 [cs.CL] 28 Oct 2025
+
+Long-Context Modeling with Dynamic Hierarchical
+Sparse Attention for On-Device LLMs
+
+2
+
+Siheng Xiong!?* Joe Zou” Faramarz Fekri! Yae Jee Cho”
+
+'Georgia Institute of Technology *Google
+
+sxiong45@gatech.edu zouj@google.com fekri@ece.gatech.edu yaejeecho@google.com
+
+Abstract
+
+The quadratic cost of attention hinders the scalability of long-context LLMs, es-
+pecially in resource-constrained settings. Existing static sparse methods such as
+sliding windows or global tokens utilizes the sparsity of attention to reduce the
+cost of attention, but poorly adapts to the content-dependent variations in atten-
+tion due to their staticity. While previous work has proposed several dynamic
+approaches to improve flexibility, they still depend on predefined templates or
+heuristic mechanisms. Such strategies reduce generality and prune tokens that re-
+main contextually important, limiting their accuracy across diverse tasks. To tackle
+these bottlenecks of existing methods for long-context modeling, we introduce
+Dynamic Hierarchical Sparse Attention (DHSA), a data-driven framework that
+dynamically predicts attention sparsity online without retraining. Our proposed
+DHSA adaptively segments sequences into variable-length chunks, then computes
+chunk representations by aggregating the token embeddings within each chunk. To
+avoid the bias introduced by varying chunk lengths, we apply length-normalized
+aggregation that scales the averaged embeddings by the square root of the chunk
+size. Finally, DHSA upsamples the chunk-level similarity scores to token level simi-
+larities to calculate importance scores that determine which token-level interactions
+should be preserved. Our experiments on Gemma2 with Needle-in-a-Haystack
+Test and LongBench show that DHSA matches dense attention in accuracy, while
+reducing prefill latency by 20-60% and peak memory usage by 35%. Compared
+to other representative baselines such as block sparse attention, DHSA achieves
+consistently higher accuracy (6—18% relative gains) with comparable or lower cost,
+offering an efficient and adaptable solution for long-context on-device LLM¢7|
+
+1 Introduction
+
+Long-context modeling is crucial for real-world applications [Yang et al  2024]. However, the
+quadratic complexity of attention [Vaswani et al | [Vaswani et al.|{2017] makes Smee ong to Tone sequences prohibitively
+expensive, especially in resource-constrained scenarios like on-device applications. While prior work
+has explored sparsity-based methods to tackle the high cost of implementing long sequencer, OL
+
+rely on static sparse patterns (e.g., Longformer [Beltagy et al.|/2020], BigBird [Zaheer et al.| poz0))
+
+failing to generalize across tasks or recent cynamic methods (e.g., Minference [J Hiang ota
+
+LM-Infinite [Han et al. [Han et al.|/2023],  H2o [Zhang et al. (Zhang et al.| {2023},  Scissorhands [Liu et al. SOD ae on
+
+oversimplified jemplates or heuristic cache-eviction rules, restricting adaptability ne accuracy.
+
+In this paper, we propose Dynamic Hierarchical Sparse Attention (DHSA), a lightweight plug-in
+module that dynamically predicts attention sparsity during both prefill and decode stages. Unlike prior
+
+“Work done during internship at Google.
+Code and data available at https : //github. com/xiongsiheng/DHSA
+
+39th Conference on Neural Information Processing Systems (NeurIPS 2025) Workshop: Efficient Reasoning.
+
+
+
+===== PAGE BREAK =====
+
+Dynamic Hierarchical Sparsity Prediction
+
+Output embeddings
+
+i                                                 Token-level                                                   t
+: 5) TopK                                                Sparsity M                              Nv                                   |
+:                                                                                x
+M = TopK(S;, Np)                                  —> Add & Norm
+4
+t                                                                      Feed
+Forward
+i                                                Token-level                                                    ;
+  4) Upsampling                                 Similarity S;                           eerie
+i                                           S; _ fapsample (Sc, B)  i
+:                                   Attention
+
+:  3 ) Dot-product                           Chunk-level              :                                 4     4      +
+i       Similarity                                     Similarity S,                  i     Ne
+
+,          |   <
+                                                                        :        Positional Encoding            OD
+: 2) Chunk               Co||cx|| calles cal] cs   Chunk                 ;                                       4
+i     Aggregation                              Representation         :
+
+t         to|| ti |] to]| ts]] ta]] ts || te}] te      tig | tia] |tig]t.
+:                    bo by           by     bs       ba     bs     be    :          0   1   2   3   4   5   6   7   8  ty   ‘1   14°14   13
+| 1) Boundary   Hep Hts |[to [fs |]ta Hes [te Hey {le    tro ftaaltts||t-
+
+Prediction     |  0   1   2   3   4  5   6   7   8 EO   10) | 114g*12)  “I                          Inpu  Tokens  T = [to, we, ti
+1
+
+Figure 1: Overview of the proposed Dynamic Hierarchical Sparse Attention (DHSA) framework.
+
+approaches that rely on hand-crafted sparsity patterns, DHSA learns to infer sparsity through chunk-
+level similarity and adaptive boundary prediction. This makes DHSA fully data-driven, enabling it to
+adapt across tasks without retraining the base model or manually tuning sparsity patterns.
+
+Our contributions are summarized as follows:
+
+* Hierarchical sparsity prediction. We estimate chunk-level similarity and upsample it to token-
+level importance scores, enabling DHSA to focus on the most impactful attention weights and
+thereby reduce latency and memory while preserving accuracy (see Section[2. Ip.
+
+¢ Dynamic chunking. We introduce our proposed boundary-prediction method that adaptively
+segments input sequences into variable-length chunks, overcoming the limitations of fixed-size
+chunking and enabling efficient long-sequence processing (see Section [2.2).
+
+* Robust chunk representation. We propose a length-normalized aggregation strategy that
+mitigates the pitfalls of naive average pooling and better captures chunk-level representations
+
+(see Section [2.3).
+
+Our experiments on Needle-in-a-Haystack Test and LongBench show that DHSA
+matches dense attention in accuracy while reducing prefill latency by 25-45% and peak memory
+usage by 30-35%, and consistently outperforms other dynamic sparsity baselines with
+6-18% relative gains.
+
+2 Proposed Method: Dynamic Hierarchical Sparse Attention (DHSA)
+
+Our proposed DHSA is a plug-in module integrated into each of the N Transformer layers of an LLM
+(see Fig. [Ip. It takes the token embeddings at the current layer as the input and outputs a sparsity
+mask to prune unimportant token pairs. The core idea is to leverage chunk-level similarity to inform
+token-level sparsity prediction. This requires addressing two key challenges: (1) fixed-size chunking
+is too rigid to capture content shifts, and (2) average pooling poorly handles variable-length chunks.
+We resolve these with the solutions detailed in Sections[2.2]and[2.3]
+
+2.1 Hierarchical Sparsity Prediction
+
+Given a sequence of tokens T = [to, t1,...,t~—1] of total length L, its token-level sparsity mask is
+denoted as M € {0, 1pexe, where if the 7” row and gth column element of M is equal to 1, i.e.,
+
+
+===== PAGE BREAK =====
+
+Needle in A Haystack Gemma-2-2b dense attention                                      Needle in A Haystack Gemma-2-2b w/ DHSA
+
+1.0                                                                                         :
+
+0.8                                                                                :
+
+0.6                                                                                :
+
+0.4                                                                                :
+100                                                                               100
+
+0.0                                                                               0.0
+
+Depth Percent (%)
+Depth Percent (%)
+
+SEEK EEE PEE SESE EKE       SEE EEE KEKE EAE HSE
+Snr ae a? wo wo   X98 Or OP AOA? Oe              rn? yO pF Pe? OP OP ALAM BP
+content Length                                                                          Context Length
+(a) Dense Attention                                           (b) DHSA (budget = 1k)
+
+Figure 2: Needle-in-a-haystack results on Gemma2-2b-it (maximum context length = 8k). The budget is
+specified per query per layer.
+
+Single-Document QA           Multi-Document QA                      Summarization               Few-shot Learning
+Method     NrtvQA Qasper Mf-en HotpotQA 2WikiMQA Musique GovReport QMSum MultiNews TriviaQA SAMSum
+Dense        22.37 35.32 37.32 41.63      32.05      19.05     27.08     21.08     25.48      87.00     41.26
+Block sparse 16.74 26.15 32.83 35.74         31.93        14.44       26.20       19.54       25.30        86.12       40.38
+DHSA                  20.69 30.20 34.98 38.78               31.96             15.90            26.75           20.74            25.38             87.03            41.46
+
+DHSA (+bs) 19.64 28.67 31.20 39.50  32.97  14.39  26.72  20.12  25.57  87.74  40.68
+
+Table 1: Performance comparison of DHSA, dense attention, and block sparse attention on LongBench using
+Gemma2-2b-it. DHSA (+bs) denotes a variant with boundary sharing across layers. For sparse method, the
+budget is set as 2k. Block size and query chunk size are both set to 256 for block sparse and DHSA, respectively.
+
+M;,; = 1, it indicates that the interaction between t; and t;, 1,7 € [0, L — 1] should be preserved.
+Conversely, M;,; = 0 implies that the interaction between t; and t; can be skipped.
+
+Predicting the full matrix M directly would require scoring all LZ x L token pairs, which is com-
+putationally prohibitive for long contexts. Instead, we adopt a two-step hierarchical approach (see
+Section[A]for the detailed workflow):
+
+Step 1 Chunk-level prediction: We partition the entire token sequence T into NV. non-overlapping
+chunks {Co, Ci, ..., Cv,-1}, defined by the boundary indices B = {bo, bi, ..., bw, }, where
+= bo < by) < ... < by, = L. Each chunk Cy, k € [0,...,N- — 1] contains the
+consecutive tokens indexed from b;, to 441. We then construct a chunk-level similarity matrix
+S. € RNe*Ne, where the J'” row and k*” column element of S,, i-e., (S_)i,, represents the
+predicted importance of interactions between chunks C; and Cx. The procedure for obtaining
+
+S. will be described in Section[2.3]
+
+Step 2 Token-level selection: Starting from S,, we upsample it to obtain the token-level similarity
+matrix S, € R’*", which encodes the predicted importance of attending from each query
+token to every key token. Concretely, for each chunk pair (C;,C;,), {1,k} © [0, NM. — 1], the
+
+corresponding submatrix (S¢)j1,:5,,1],{bg:b441] 18 assigned the same value (S_.);,,. We define
+
+such mapping function as _fupsample(S-, 8) = S;. Given the token-level similarity matrix S;,
+
+we generate the token-level sparsity mask M by applying a TOPK selection with a per-query
+
+token budget defined as N,. Here N; is a hyperparameter, which may be set dynamically
+based on available computational or memory resources.
+
+2.2 Dynamic Boundary Detection
+
+To better estimate S; from S., we propose a dynamic chunking strategy that adaptively determines
+boundary indices 6 based on the input sequence. We formulate chunking as a boundary detection
+problem, where the goal is to decide whether each token position marks the end of a chunk. Formally,
+for each position ¢ € [0, L — 1], we define a boundary indicator function 5(7) = 1 if i = b;, for some
+k; Otherwise, 6(z) = 0. We estimate this indicator using a neural network with three components:
+
+Encoder. For each candidate position 7, we extract two local windows:
+
+ker = fa ([Ki-w41,°-- > kil),  krigne = fina ([kig1, °°: » ki+w])            (1)
+
+where w is the window size and k; denotes the key vector of token 7. Each window is processed by a
+Multi-Head Attention (MHA) module defined as fmua with pooling.
+
+3
+
+
+===== PAGE BREAK =====
+
+Attn.          Method    Acc. Latency Peak Mem.      Context Attn.          Method    Lavency    Peak Mem.
+
+Implem.           (%)     (s)      (GB)     Len     Implem.                   (GB)
+Dense 21.15 1.65             10.72             ek           eager             pis, 248            Sou
+eager       Block    17.04    1.00       9.08                torch.sd    Dense     3.37       8.38
+DHSA 20.12 1.19     6.91             oren-ScP2 DHSA _1.98     9.69
+Dense     -      OOM
+
+Dense   22.37   1.10      6.33            eager
+torch.sdpa Block 16.74 0.88      9.88     32k    DHSA    i607     1o78
+DHSA 19.37.—-0.91      6.99            torchsdpa DHSA 4.13     16.99
+
+Table 2: Comparison on NarrativeQA with Gemma2. Table 3: Comparison at varying context lengths with
+Both block-sparse and DHSA use a 2k budget Gemmaz2 on a single 24 GB GPU. DHSA uses a 2k
+(block/query chunk size = 256, max context = 8k).       budget with a query chunk size of 256.
+
+Feature Fusion. Given kjeg and kyient, we construct the feature vector:
+hy = [kiert, krignt, [Kiet — Kright], Kiet © Krignt, sim(kieft, Krignt)]              (2)
+
+where © is element-wise multiplication and sim(-,-) is cosine similarity. Further rationale and
+analyses of this fusion choice are provided in Section|B]
+
+MLP. The fused feature h; is passed through two linear layers defined as fp:
+
+yielding the probability that position 2 is a boundary. The training and inference details for our
+boundary predictor are provided in Section|B]
+
+2.3. Robust Chunk Representation
+
+Now that we have the boundaries, we aggregate token embeddings to form chunk representations. We
+identify two main challenges in this process: (1) average pooling after padding is problematic, as zero
+embeddings from padding dilute the average, and (2) average pooling is sensitive to chunk length. To
+address these issues, we compute the sum of embeddings and divide by the actual (unpadded) chunk
+length, followed by length normalization:
+
+q.= VIC|-q, ke = V|C|-k              (4)
+
+where |C]| denotes the number of tokens in chunk C, and q and k is the average of token queries and
+keys within the chunk respectively. We then compute the dot product similarity between each chunk
+query and chunk key using S, = Q.K! where Q. and K, are the respective query and key matrices.
+
+3 Evaluation
+
+Experiment setup. We implement our method in PyTorch with Hugging Face Transformers and
+run all experiments on a single NVIDIA RTX 3090 GPU. We use Gemma2-2b-it
+ and Gemma3- |b-it with torch. bfloat16 precision and
+batch size 1. Comparisons are mainly against dense and block sparse attention [Han] |2024], the latter
+lacking dynamic chunking and improved chunk representations. Further implementation details and
+additional results are in Sections[C]and|[D]
+
+Results. We evaluate DHSA on Needle-in-a-Haystack and LongBench against dense and block
+sparse attention. (1) Needle-in-a-Haystack Test: On Gemma?2-2b-it, retaining the top 1k tokens
+per layer, DHSA matches dense attention while substantially outperforming baselines (see Fig. [2|
+Fig. (6p. (2) LongBench: With a 2k budget, DHSA performs close to dense attention and clearly
+surpasses block sparse attention (see Table [Ip. (3) Latency/Memory Usage: On NarrativeQA (from
+LongBench), DHSA reduces latency and memory relative to dense attention. While slightly slower
+than block sparse, it achieves higher accuracy with lower memory usage (see Table[2|and[3).
+
+4 Conclusion
+
+We presented Dynamic Hierarchical Sparse Attention (DHSA), a method that combines dynamic
+chunking with hierarchical sparsity prediction to efficiently focus on the most relevant tokens in long-
+context language modeling. Experiments on Needle-in-a-Haystack Test and LongBench demonstrate
+that DHSA achieves accuracy on par with dense attention while substantially reducing latency and
+memory usage. Unlike static sparsity or conventional block-sparse approaches, DHSA adapts to
+input-dependent attention patterns, enabling more effective use of the attention budget and offering a
+practical solution for efficient long-context modeling.
+
+
+===== PAGE BREAK =====
+
+Limitations
+
+The primary goal of DHSA is to accelerate LLM inference. Although extending the maximum
+context length could further enhance its utility, we found no reliable implementation for the Gemma
+family, and our initial adaptation produced unexpected behavior. Debugging this was beyond the
+scope of the current work, so we leave context-length extension for future exploration. Moreover,
+although DHSA is fully data-driven, its performance still depends on hyperparameters such as the
+chunk budget and chunk size. Developing adaptive or learned strategies for budget allocation remains
+an important direction for future work.
+
+References
+
+Yuan Yang, Siheng Xiong, Ehsan Shareghi, and Faramarz Fekri. The compressor-retriever architecture
+for language model os. arXiv preprint arXiv:2409.01495, 2024.
+
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz
+Kaiser, and Illia Polosukhin. Attention is all you need. Advances in neural information processing
+systems, 30, 2017.
+
+Iz Beltagy, Matthew E Peters, and Arman Cohan. Longformer: The long-document transformer.
+arXiv preprint arXiv:2004.05150, 2020.
+
+Manzil Zaheer, Guru Guruganesh, Kumar Avinava Dubey, Joshua Ainslie, Chris Alberti, Santiago
+Ontanon, Philip Pham, Anirudh Ravula, Qifan Wang, Li Yang, et al. Big bird: Transformers for
+longer sequences. Advances in neural information processing systems, 33:17283-17297, 2020.
+
+Huiqiang Jiang, Yucheng Li, Chengruidong Zhang, Qianhui Wu, Xufang Luo, Surin Ahn, Zhenhua
+Han, Amir Abdi, Dongsheng Li, Chin- Yew Lin, et al. Minference 1.0: Accelerating pre-filling
+for long-context Ilms via dynamic sparse attention. Advances in Neural Information Processing
+Systems, 37:5248 1-525 15, 2024.
+
+Chi Han, Qifan Wang, Hao Peng, Wenhan Xiong, Yu Chen, Heng Ji, and Sinong Wang. Lm-
+infinite: Zero-shot extreme length generalization for large language models. arXiv preprint
+arXiv:2308.16137, 2023.
+
+Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong Chen, Lianmin Zheng, Ruisi Cai, Zhao Song,
+Yuandong Tian, Christopher Ré, Clark Barrett, et al. H2o0: Heavy-hitter oracle for efficient
+generative inference of large language models. Advances in Neural Information Processing
+Systems, 36:3466 1-347 10, 2023.
+
+Zichang Liu, Aditya Desai, Fangshuo Liao, Weitao Wang, Victor Xie, Zhaozhuo Xu, Anastasios
+Kyrillidis, and Anshumali Shrivastava. Scissorhands: Exploiting the persistence of importance
+hypothesis for Ilm kv cache compression at test time. Advances in Neural Information Processing
+Systems, 36:52342-52364, 2023.
+
+Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu, Jiankai Tang, Zhidian Huang, Zhengxiao Du, Xiao
+Liu, Aohan Zeng, Lei Hou, et al. Longbench: A bilingual, multitask benchmark for long context
+understanding. arXiv preprint arXiv:2308. 14508, 2023.
+
+Lab Han. Block-sparse attention. https: //hanlab.mit .edu/blog/block-sparse-attention
+
+2024. Accessed: 2025-08-27.
+
+Gemma Team, Morgane Riviere, Shreya Pathak, Pier Giuseppe Sessa, Cassidy Hardin, Surya
+Bhupatiraju, Léonard Hussenot, Thomas Mesnard, Bobak Shahriari, Alexandre Ramé, et al.
+Gemma 2: Improving open language models at a practical size. arXiv preprint arXiv:2408.00118,
+2024.
+
+Gemma Team, Aishwarya Kamath, Johan Ferret, Shreya Pathak, Nino Vieillard, Ramona Merhej,
+Sarah Perrin, Tatiana Matejovicova, Alexandre Ramé, Morgane Riviére, et al. Gemma 3 technical
+report. arXiv preprint arXiv:2503.19786, 2025.
+
+
+===== PAGE BREAK =====
+
+Mandar Joshi, Eunsol Choi, Daniel Weld, and Luke Zettlemoyer. triviaqa: A Large Scale Distantly
+Supervised Challenge Dataset for Reading Comprehension. arXiv e-prints, art. arXiv:1705.03551,
+2017.
+
+Peng Xu, Wei Ping, Xianchao Wu, Zihan Liu, Mohammad Shoeybi, and Bryan Catanzaro. Chatqa
+2: Bridging the gap to proprietary Ilms in long context and rag capabilities. arXiv preprint
+arXiv:2407. 14482, 2024.
+
+Alexander Neubeck and Luc Van Gool. Efficient non-maximum suppression. In /8th international
+conference on pattern recognition (ICPR’06), volume 3, pages 850-855. IEEE, 2006.
+
+Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song Han, and Mike Lewis. Efficient streaming
+language models with attention sinks. arXiv preprint arXiv:2309.17453, 2023.
+
+Zefan Cai, Yichi Zhang, Bofei Gao, Yuliang Liu, Yucheng Li, Tianyu Liu, Keming Lu, Wayne Xiong,
+Yue Dong, Junjie Hu, et al. Pyramidkv: Dynamic kv cache compression based on pyramidal
+information funneling. arXiv preprint arXiv:2406.02069, 2024.
+
+
+===== PAGE BREAK =====
+
+A DHSA Workflow
+
+DHSA applies to both the prefill and decode stages. Specifically,
+
+Prefill stage: When all tokens in the prompt sequence of length L are available, we first predict
+the boundary indices 6 for the entire prompt. We then perform chunk-level prediction to obtain
+S., upsample it to produce the token-level similarity matrix S, with fupsampie, and apply TOPK
+selection with budget N;, to obtain the token-level sparsity mask M for all tokens in the prompt.
+
+Decode stage: In autoregressive generation, we adapt the approach to handle the incremental arrival
+
+of new tokens. Let L’ be the total sequence length at the current decoding step (including both
+
+prompt and generated tokens). We extend the existing chunk boundaries B = [bo, ..., bw], bv, = L
+
+to B’ = [bo, ..., bw, L’ — 1, L’]. Here we have that
+
+— The total number of chunks becomes N, + 2.
+
+- The chunk Cy, = [tz,...,tz/_2] contains all previously generated tokens in the current decod-
+ing session.
+
+— The chunk Cy,41 = [tz/_1] contains only the current query token.
+
+We then compute only the interactions between Cy, and all its preceding chunks to obtain last
+row of the updated chunk-level similarity matrix S¢ new. This row is upsampled to the token level to
+produce the corresponding row of the updated token-level similarity matrix S; new, from which we
+derive the last row of the sparsity mask Mypew by applying TOPK selection with token budget Np.
+
+We present the pseudocode of our approach for the prefill and decode stages (Algorithms [T]and[2)
+and analyze the associated computational cost. Dense attention is the most expensive, as each
+token attends to all L keys, leading to a cost of O(L7). Block sparse attention is more efficient
+because each token attends to only N; keys, reducing the cost to O(L - Nj), while the routing term
+is typically sub-dominant for realistic sequence lengths. DHSA lies in between: it retains most of
+the efficiency gains of block sparse attention but introduces an additional O(L) pass for boundary
+prediction, which identifies chunk boundaries. For sequence lengths where attention is the primary
+bottleneck (thousands of tokens), the general cost ordering is: Block sparse attention < DHSA <
+Dense attention.
+
+B_ Boundary Detection
+
+We formulate the chunking task as a boundary detection problem, where the objective is to determine
+whether each token position marks the end of a chunk. Formally, for each position i € [0, L — 1], we
+define a boundary indicator function
+
+5(i) =   1 ift = b; for some k,
+~ (0 otherwise,
+
+indicating that the token at position 2 is the last token of a chunk. This end-boundary prediction
+approach aligns naturally with the way sequences are segmented, as it allows the model to determine
+when a coherent segment of context has concluded. By framing the task this way, we can leverage
+binary classification methods to adaptively segment sequences in DHSA.
+
+This probability, denoted as Pr(d(¢) = 1), is predicted based on the local key representations
+surrounding 7, using a boundary prediction function that takes as input two windows centered at 7:
+
+(ki-w44, a ki],    (ki4s, a wki4ul,
+
+where w is a hyperparameter that determines the receptive field and k; denotes the key vector
+corresponding to token 7.
+
+Local context is sufficient for boundary prediction because chunk boundaries are determined by
+local changes in semantic similarity. Intuitively, if the left window (preceding tokens) and the
+right window (succeeding tokens) are highly similar, the two regions likely belong to the same
+chunk, and no boundary should be placed. Conversely, a sharp drop in similarity between these
+windows indicates a topic or context shift, suggesting the end of a chunk. Moreover, focusing on
+local context rather than the full sequence significantly reduces computation. Evaluating boundaries
+requires processing only tokens per position which is essential for efficiency. To further validate the
+
+
+===== PAGE BREAK =====
+
+Algorithm 1 DHSA: Prefill Stage
+
+Algorithm 2 DHSA: Decode Stage
+
+Input: prompt tokens {t;};"5
+
+r-" of length L; prompt
+
+chunk boundaries {b; } of length N. + 1; per-
+query token budget Nz
+
+Output: token-level sparsity mask M
+
+1:
+
+2:
+
+Define chunks C; < [ts,,-.-,ts;,,], for j = 0
+to N.-—1
+
+Obtain chunk-level queries Q..[j, :] and keys Ke|j, :
+] for each C;
+
+Input: prompt tokens {t; }/~,'; prompt chunk bound-
+
+aries   {bj} No   and chunks {C; yo   cur-
+rent total length L’; previous generated tokens
+{t,}E5?; current query token t/_1; per-query
+token budget Np
+
+Output: last row of the updated token-level sparsity
+
+mask Mnpew
+
+Define the updated boundaries bv,.41 < Li -1
+
+3: Compute chunk-level similarity: S. ~ Q.K2 €       and by,42 < L/
+NeXNe                                                                ¢
+R®°*                                                        2: Define the updated chunk Cy,      +
+ty,...,tz_2] and Cn,41 < [tz/_
+4: Initialize token-level similarity S; € RY** to ze-     3:  teat pera) an keys K" for {te  a Cn.41
+TOS —                                                              4: Compute last row of the updated chunk-level sim-
+5: for 7 = 0 to N. — 1 do                                   ilarity Scnew < dz, (K.)" ce RNet+?
+6:   for | = 0 to N. — 1 do
+T:        Se [bj + bj 41, br: dizi] — Se[9, |]            5: Initialize last row of the updated token-level simi-
+    dfo d for                                            larity Stnew € RU’ with zeros
+» ene tor                        6: for j = 0to N. +1do
+10: Initialize mask M € {0,1}"** to zeros             Ki  end fan [by : bj +1] + Se,new[J]
+
+: for: =1to Ldo
+
+12:       Select Top Nz proceeding keys based on S¢/i, :     9: Initialize mask Myey € {0, 1}”! with zeros
+
+10: Select Top Nz proceeding keys based on Si new
+11: Update myey accordingly
+12: return Mnew
+
+13:      Update M{i, :] accordingly
+14: end for
+15: return M
+
+interpretability of these boundaries, we analyzed their correspondence with sentence and paragraph
+endings and observed a strong alignment, suggesting that DHSA captures meaningful discourse-level
+transitions.
+
+Architecture. We define the boundary prediction function as a neural network. After exploring
+various architectures and hyperparameters, we finalize the design shown in Fig. [3| This architecture
+was chosen because it strikes a balance between expressiveness, efficiency, and robustness. The
+encoder effectively captures contextualized token embeddings for both the left and right windows.
+The feature fusion module proved more stable and discriminative than using a single metric in
+isolation. The final MLP is shallow enough to maintain low latency but still has sufficient capacity.
+By keeping the receptive field limited to 2w tokens, the total prediction cost is linear to token length
+
+In the feature fusion module, we combined the raw context vectors kj, K,ignt, absolute differences
+[kiert — krignt|, multiplicative interactions kjef © kyight, and cosine similarity sim(kiert, Krignt) because
+each signal captures complementary aspects of boundary semantics. The raw vectors preserve
+local context information, absolute differences highlight directional changes between left and right
+spans, multiplicative interactions emphasize co-activation patterns, and cosine similarity provides
+a normalized measure of alignment. Together, these features make the boundary predictor more
+robust to scale, length, and semantic variation. In ablations, we found that using only a single
+similarity measure (e.g., cosine similarity) was less stable, whereas combining multiple signals
+yielded consistently better boundary detection.
+
+We selected the optimal hyperparameters using the Long Data Collections datasef?] The selection
+process involved monitoring training loss, training metrics, and validation metrics, including precision,
+recall, Fl score, and topK overlap. In addition, we evaluated the end-to-end performance of the
+trained model on the validation set. The chosen configuration includes a context window size of
+w = 4 (ie., 8 tokens per position), 8 attention heads, average pooling, a hidden size of 256 in the
+MLP, and a total model size of 20 MB shared across layers and datasets.
+
+https: //huggingface.co/datasets/togethercomputer/Long-Data-Collections
+
+
+
+===== PAGE BREAK =====
+
+Explicit modeling incorporates multiple similarity signals beyond raw encodings, enhancing both
+interpretability and performance. Adaptability is achieved by using a single model shared across
+layers and datasets, which promotes generalization and efficiency. The model is also lightweight:
+with a size of only 20 MB, it is well-suited for deployment in resource-constrained environments.
+
+Automatic labelling. To train the boundary predictor, we automatically derive ground-truth labels
+from attention scores, avoiding the need for manual annotation. We adopt this intermediate labelling
+strategy instead of end-to-end training from final task performance. End-to-end optimization is
+computationally intractable, as it would require differentiating through boundary indices with only
+sparse, delayed supervision from downstream metrics. In contrast, derived labels provide dense, local
+supervision, turning boundary detection into a well-defined, efficient classification problem that still
+captures the structural cues implicit in the model’s own attention behavior.
+
+Specifically, we analyze accumulated attention mass patterns. Tokens within a coherent span typically
+exhibit consistent accumulated attention profiles, meaning the distribution of attention mass over
+preceding tokens remains relatively stable across positions within the span. In contrast, a boundary is
+often marked by a sudden change in this profile, such as when the subsequent token’s accumulated
+attention shifts sharply toward a different subset of preceding tokens.
+
+Fig. [4] illustrates our automatic labeling strategy. For each candidate position, we examine the
+accumulated attention mass patterns in its left window and right window, where each row in the
+heatmap corresponds to a token and color intensity indicates the magnitude of accumulated attention
+mass. In the left example, the left and right windows (both outlined in blue) exhibit highly similar
+attention profiles, indicating that the tokens around this position belong to the same coherent span;
+thus, the position is not labeled as a boundary. In the right example, the attention profiles of the
+left window (blue) and right window (green) differ markedly, signaling a sharp change in attention
+behavior. This difference suggests that the position lies at the end of a chunk and should be labeled as
+a boundary.
+
+Formally, let the token sequence be
+T= [to, ti, tee ,tr-1]
+
+with length L, and let A € R/** denote its attention matrix, where Ay,» is the attention weight from
+token u to token v.
+
+For each position z € [0, L—1], we consider whether it marks the end of a chunk. To do so, we examine
+two local windows of size w on either side of ¢, i.e., the past window: tokens {t;_+1,...,¢;} and
+the future window: tokens {tj41,...,tipw}.
+
+Shared Encoder                 [ti_weo) il [fiw Gi]
+
+Feature Fusion
+
+d(i) = 0
+
+hy = [Keres Krignt [Kirt — kyignt |, KirepeOkyigne, SIM (Kiert, Krigne)]              [tj-wa1 “ t;] [tj-w+1 aa t]
+
+o-=— -<-<
+
+Linear
+
+MLP
+
+mee
+
+—_——_e eS
+
+in aie                                                      6G) =1
+Pr(6(i) = 1)
+Figure 4: Illustration of our automatic
+Figure 3: Architecture of the boundary predictor, consist- labeling strategy. The core intuition is
+ing of a shared encoder, a feature fusion module, and an that tokens within a coherent span tend
+MLP classifier.                                                           to receive similar attention distributions.
+
+
+===== PAGE BREAK =====
+
+We then compute the past cumulative attention mass:
+
+1     L-1   i
+dpast(?) = -—7—>—,  S-   S-  Au,v;          (5)
+
+u=i+twt+l v=i-w4+l
+and the future cumulative attention mass:
+
+L-1     i+w
+
+Afut (2) = mae   S-    S-  Auy;                    (6)
+
+u=itwtl v=i+l
+
+where w = 4 is the local window size (receptive field), and the outer sum index w iterates over future
+tokens (beyond 7 + w) while the inner sum index v iterates over the tokens in the corresponding
+window.
+
+We define the attention ratio:
+
+— max (atur(i), Apast (4)) +E
+a min (atut(é), Apast (7)) +eé ,                               (7)
+
+where ¢ = 0.001 is added for numerical stability.
+
+Given the maximum allowed number of chunks NV, and a threshold 6,. = 1.1, we select the top N. — 1
+positions 2 whose r; exceeds 6,. (with positions 0 and L always included as boundaries), with N,
+serving as the primary constraint in practice.
+
+Visualization. We show token-level (normalized) similarity matrix with static and dynamic chunk-
+ing in Fig.  Static chunking divides the sequence into fixed-size non-overlapping chunks for
+attention computation, whereas dynamic chunking adapts chunk boundaries based on our labelling
+strategy. These examples are taken from Gemma2-2b-it, which alternates local and global attention
+layers. Layer 0 is a local attention layer and Layer | is a global attention layer, and we treat them
+separately in the visualization to highlight the differences.
+
+In the static chunking plots (left), chunk boundaries are fixed at uniform intervals, producing rigid,
+evenly spaced attention bands that may split semantically related tokens across chunks. In contrast,
+the dynamic chunking plots (right) show irregularly sized chunks whose boundaries shift with the
+attention patterns, allowing both local and global attention layers to capture longer, more coherent
+spans within a single chunk. This alignment to content can reduce boundary-induced information
+loss and improve performance.
+
+Training of the boundary predictor. We describe below the key implementation details of our
+training pipeline that are non-trivial and contribute meaningfully to performance.
+
+Instead of using hard labels, which are obtained by selecting the top NV. — 1 positions with the highest
+attention ratios, we adopt a soft labeling strategy. Hard labels are inherently sensitive to the chunk
+number constraint, i.e., the fixed number NV. — 1 of chunk boundaries to be selected per sequence.
+Under this scheme, a position with a given ratio r might receive a label of 1 for one choice of N,
+but a label of 0 for another, even though its underlying ratio has not changed. This sensitivity can
+confuse the model and discard useful information about positions near the cutoff.
+
+To address this, we convert the attention ratio r into a continuous probability value using the following
+transformation:
+
+p =o(a- (log(r + ¢) — 8))                                    (8)
+
+where r is the ratio, € = 10~® is a small constant for numerical stability, a = 2.0 and 6 = lg(2.0)
+are scalar parameters controlling the slope and offset, with base e + 2.71828, and o(x) = ice is
+the sigmoid function.
+
+This maps the ratio to a probability in the [0, 1] range, preserving the relative ordering of positions
+and capturing confidence without enforcing a hard cutoff. Positions with higher ratios produce
+probabilities closer to 1, but those with moderately high ratios still receive meaningful supervision.
+This approach is in line with knowledge distillation, where soft targets have been shown to improve
+generalization by providing richer learning signals than binary labels.
+
+10
+
+
+===== PAGE BREAK =====
+
+Attention Mask                                                                      Attention Mask
+
+0.0
+
+°
+
+1000
+
+3
+8
+Ss
+
+2000
+
+ay
+8
+8
+s
+
+3000
+
+w
+3
+s
+8
+
+4000
+
+Query Position
+Query Position
+3
+8
+
+5000
+
+8
+8
+s
+
+6000                                                                                                                                                                     60007 +
+
+7000                                                                                                                      70004!
+Hi
+
+i
+8000                                                                                  10             800041 |
+oO      1000    2000    3000    4000    5000    6000    7000    8000                                oO      1000    2000    3000    4000    5000    6000    7000    8000
+Key Position                                                                                   Key Position
+
+-1.0
+
+(a) Static Chunking (local attention layer)                 (b) Dynamic Chunking (local attention layer)
+Attention Mask ;
+
+Attention Mask
+
+Opt
+
+1000
+
+2000
+
+3000
+
+&
+8
+Ss
+
+Query Position
+Query Position
+
+8
+8
+s
+fl
+°
+a
+
+7000
+
+oO          1000       2000       3000       4000        5000       6000        7000        8000                                                         oO          1000       2000       3000       4000        5000       6000        7000        8000
+Key Position                                                                                                           Key Position
+
+8000
+
+-1.0
+
+(c) Static Chunking (global attention layer)                (d) Dynamic Chunking (global attention layer)
+
+Figure 5: Token-level similarity matrices with static (left) and dynamic (right) chunking in Gemma?2-
+2b-it. Static chunking uses fixed-size chunks, while dynamic chunking adapts boundaries to content,
+shown for a local attention layer (layer 0) and a global attention layer (layer 1).
+
+Using the conventional Binary Cross-Entropy (BCE) loss for training our boundary predictor in
+dynamic chunking, we identify two key issues: (1) class imbalance, where boundary tokens are
+much fewer than non-boundary tokens, and (2) varying sample difficulty, where some boundaries are
+easier to detect than others. To address these, we adopt the focal BCE loss, which down-weights the
+contribution of easy examples and amplifies the focus on harder, misclassified cases. The weighting
+term (1 —p;)7 automatically reduces the loss for well-classified positions (large p; for positives, small
+p; for negatives), while the fixed positive-class weight w offsets the imbalance between boundary
+and non-boundary positions.
+
+Li =(1 = pi)? |= wy; log pi — (1 — ys) log(1 — pi)             (9)
+where y; € [0,1] is the ground-truth soft label for position i, z; € R is the logit produced by the
+boundary predictor, p; = o(z;) = Wes is the predicted probability, w = 1.3 is the fixed positive-
+
+class weight for class imbalance, and y = 2.0 is the focal parameter controlling emphasis on hard
+examples.
+
+We further accelerate training through the following strategies. (1) Storing only boundary labels:
+Instead of storing both input embeddings and boundary labels, which would consume excessive
+memory, we store only the labels. This allows the model to perform dynamic chunking directly from
+the loaded labels without recalculating them. Additionally, the labels can be generated in parallel
+for all training samples, significantly improving efficiency. (2) Training all layers simultaneously:
+The boundary predictor needs to be trained for all layers. Rather than performing multiple forward
+
+11
+
+
+===== PAGE BREAK =====
+
+passes, one for each layer, we perform a single forward pass of the language model per sample to
+obtain input embeddings for all layers. These embeddings are then used to train the predictor for all
+layers simultaneously.
+
+Data preparation. We analyze existing long-context datasets for both training and inference. For
+training, we select Long Data Collectiong} trivia QA ChatQA2
+that mainly focus on high-quality question answering and summarization tasks. We inspected the
+datasets and found that the samples are quite similar. To accelerate training, we apply sampling by
+selecting the first 10,000 samples from each dataset for training. For evaluation, we use the first 100
+samples from the validation set of each dataset.
+
+Metrics. We monitor the following metrics during training to facilitate debugging and to compare
+different hyperparameter configurations. We track the training loss across all layers (results shown
+for Gemma2-2b-it, which has 26 layers in total). For training, we evaluate precision, recall, and Fl
+score for the positive class (where soft labels > 0.5 are treated as positive), as well as top-/« overlap
+with kK = 500. Top-& overlap is defined as the number of overlapping positions divided by K, and
+we monitor this metric because, during inference, the top positions are selected as boundaries. For
+validation, we compute precision, recall, Fl score, and top-K overlap (4 = 500) on the validation
+set.
+
+Inference of the boundary predictor. We observe that selecting positions purely based on the
+topK scores can lead to suboptimal boundaries due to noise and closely spaced high-score peaks.
+To mitigate this, we adopt Non-Maximum Suppression (NMS) [Neubeck and Van Gool] {2006}, a
+technique widely used for eliminating redundant detections in computer vision. The core idea is
+to keep only the highest-scoring candidate within a local neighborhood, thereby producing well-
+separated, reliable boundaries.
+
+We first obtain the boundary scores by computing the boundary predictor’s output scores for all
+positions in the sequence, which represent the model’s confidence that a given position marks a chunk
+end. Next, we identify candidate boundary positions by selecting all positions whose scores exceed a
+minimal confidence threshold, thereby pruning out low-probability positions while retaining multiple
+plausible candidates. The remaining candidates are then sorted in descending order of their scores,
+ensuring that higher-confidence positions are considered first during suppression. We subsequently
+apply NMS: starting with the highest-scoring candidate, we mark it as a boundary and remove any
+other candidates within a specified window size (e.g., 8 or 64 tokens) of this position, as they are
+considered overlapping or too close to be separate boundaries. After suppression, the final set consists
+of well-spaced local maxima that are more robust to noise and score fluctuations.
+
+Applying NMS with a small window size (e.g., 8) yields better results than using no NMS. For
+tasks requiring broader context segmentation, a larger NMS window size (e.g., 64) further improves
+performance. In some cases, we also augment the output with explicit boundaries such as \n, \n\n,
+or prior information from structured prompts to better align with semantic structure.
+
+C_ Implementation Details
+
+We primarily implement the method using PyTorch and Hugging Face Transformers. All experiments
+were conducted on a single NVIDIA RTX 3090 GPU (24 GB) running Ubuntu 22.04.4 LTS. The
+software environment includes Python 3.12, CUDA 12.4, PyTorch 2.5.1+cu124, and Transformers
+4.52.3. We used the Gemma2-2b-i{'] and Gemma3-1b-it*| with torch. bfloat16 precision and a
+batch size of 1. In Gemma2-2b-it, global attention is applied in every other layer with a sliding
+window of 4,096 tokens, and the model supports up to 8,192 position embeddings. In Gemma3-1b-it,
+global attention is applied in every sixth layer with a sliding window of 512 tokens, and the model
+supports up to 32,768 position embeddings.
+
+.co/datasets/togethercomputer/Long-Data-Collections
+
+.co/datasets/mandar joshi/trivia_ga
+
+“https : //huggingface .co/google/gemma-3-1b-it
+
+12
+
+
+===== PAGE BREAK =====
+
+Needle-in-a-haystack test. We evaluated different baselines using Gemma2-2b-it and Gemma3-
+1b-it, starting with an assessment of the models’ long-context processing capabilities through the
+needle-in-a-haystack test. This benchmark evaluates a model’s ability to locate a target sentence (the
+needle) within a long context and is widely used for long-context language modeling. Our setup
+used context lengths ranging from 1,000 to 8,000 tokens (interval of 100) and depth ranges from
+0% to 100% (interval of 10%). The prompt format was: <|im_start|> This is a very long
+story book: <book> {context} </book>. Based on the content of the book,
+
+Question: f{retrieval_question} Answer: with the needle sentence “The best thing to do
+in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.” and the corresponding
+retrieval question “The best thing to do in San Francisco is:”. We used ROUGE as the evaluation
+metric, and visualized results with green indicating correct and red indicating incorrect predictions.
+
+D_ Additional Results
+
+Needle-in-a-haystack test. The results are shown in Fig. [6]  Among sparse attention methods,
+sliding window attention relies on static patterns that perform poorly when the
+actual attention deviates from the predefined one. On Gemma?2-2b-it, retaining the top 1k tokens
+per layer, DHSA matches dense attention while substantially outperforming block sparse attention.
+Even with a budget of 512, DHSA maintains strong performance, highlighting its efficiency. We also
+observe that Gemma3-1b-it, despite having more local attention layers, exhibits stronger long-range
+contextual understanding. This improvement likely stems from architectural and training advances,
+including an extended positional encoding range (32k vs. 8k), optimized placement of global layers,
+refined local attention designs, and greater exposure to long-form data during pretraining.
+
+Latency/memory usage comparison. We further evaluated the latency and memory usage of
+different methods: block sparse attention, sliding window attention, StreamingLLM
+[2023], H2O [Zhang et al.| 2023], and PyramidKV [Cai et al.|/2024]. Note that StreamingLLM, H20,
+and PyramidKV focus on KV cache compression, which does not reduce prefill latency or prefill
+peak memory usage. Block sparse attention, similar to our method, can affect prefill latency and peak
+memory usage.
+
+For the latency test on Gemma2-2b-it (Fig. (7). block sparse attention has a prefill budget of 512,
+sliding window attention has a maximum KV cache capacity of 2048, while StreamingLLM, H20,
+and PyramidKV are limited to 128. Block sparse attention with larger block sizes can also reduce
+prefill latency. On the other hand, for all decode-stage methods, prefill time increases with context
+length since KV cache compression only applies during decoding. Decoding time remains constant
+for KV cache compression methods regardless of context length, whereas dense attention decoding
+time increases as the context grows because more KV states are cached. Reducing the maximum KV
+cache capacity, such as using 2048 for sliding window attention compared to 128 for compression
+methods, has only a minor effect on wall-clock time, since the attention forward pass during decoding
+accounts for only a small portion of the total computation.
+
+For the memory usage test on Gemma2-2b-it (Fig. [8), larger block sizes in block-sparse attention
+reduce prefill memory usage. In contrast, all decode-stage methods show increasing prefill memory
+with context length, since KV compression only applies during decoding. During decoding, KV
+cache compression methods keep peak allocated memory constant, while dense attention memory
+usage grows with context length. Sliding window attention exhibits higher peak memory usage
+because of its larger cache capacity.
+
+For the latency test on Gemma3-1b-it (Fig. 9). decoding time remains constant regardless of context
+length because Gemma3 applies global attention only every six layers. In the local attention layers,
+the KV cache size does not grow with context length. For the memory usage test on Gemma3- lb-it,
+we noticed that sliding window attention with a large KV cache capacity (2048) shows higher memory
+usage at the first decoding step because new key/value states for a single token are concatenated to
+the existing cache. Since torch. cat () creates a new tensor rather than modifying in place, both the
+old and new tensors are temporarily stored in memory. For models with many layers, this can double
+KV cache memory usage temporarily. After the first decoding step, memory usage stabilizes, and
+reported values correspond to this stabilized state.
+
+13
+
+
+===== PAGE BREAK =====
+
+Needle in A Haystack Gemma-2-2b dense attention
+
+Depth Percent (%)
+
+Sa SS SN
+Context Length
+
+(a) Dense Attention
+Needle in A Haystack Gemma-2-2b sliding window attention
+
+Depth Percent (%)
+
+se       Se       6       Se       se       se       se       Se                 Se       se       se       se       Se       we
+
+iS                 iS                 S                 S                 S                 S                 iS                 S
+
+i           a?          as           4°          os           ae          vs            re?          5           6°          ©           oe as           A?          es
+Context Length
+
+(b) Sliding Window Attention (budget = 2k)
+
+Needle in A Haystack Gemma-2-2b block sparse attention
+
+Depth Percent (%)
+
+SS oS A
+
+Context Length
+(c) Block Sparse Attention (budget = 1k)
+Needle in A Haystack Gemma-2-2b DHSA
+
+Depth Percent (%)
+
+se Se a Se a Se se Se   Se a Se se Se we
+SC SS OS
+Context Length
+
+(d) DHSA (budget = 1k)
+
+Needle in A Haystack Gemma-2-2b DHSA
+
+Depth Percent (%)
+
+SS oS A
+
+Context Length
+(e) DHSA (budget = 512)
+Figure 6: Needle-in-a-haystack results on Gemma2-2b-it (maximum context length = 8k). The budget
+is specified per query per layer. Block size and query chunk size are both set to 64 for block sparse
+and DHSA, respectively.
+
+14
+
+
+===== PAGE BREAK =====
+
+Latency Comparison between Different Methods                           Latency Comparison between Different Methods
+
+12
+—™® dense attention prefill                                                        —™® dense attention prefill
+—m- block sparse attn prefill (block size: 16)                                           —®— dense attention decode
+10 + -™ block sparse attn prefill (block size: 32)                                      10 + —& sliding window attn prefill
+—m® block sparse attn prefill (block size: 64)                                             —@ sliding window attn decode
+—™— block sparse attn prefill (block size: 128)                                         —™-— streaming lm prefill
+84                                                                                     8 + -@- streaming Ilm decode
+—i- h2o prefill
+a                                                                         a      —®— h2o decode
+2   64                                                                                 2   67  pyramid kv prefill
+FE                                                                                         i       —®— pyramid kv decode
+44                                                                                   44
+24                                                                                   24
+04                                                                                   04
+0        5000 10000 15000 20000 25000 30000                         0        5000 10000 15000 20000 25000 30000
+# Context Token                                                                                        # Context Token
+(a) Prefill-stage sparse attention                              (b) Decode-stage sparse attention
+
+Figure 7: Latency comparison on Gemma2-2b-it with varying context lengths. Sliding-window
+attention uses a budget of 2048, block sparse attention 512 and KV compression (streaming LLM,
+h2o, pyramidKV) 128. The number of generated tokens is 100, and all methods are implemented
+with torch.sdpa.
+
+Memory Usage Comparison between Different Methods                Peak Memory Usage Comparison between Different Methods
+20  —™ dense attention prefill                                                   16 + — dense attention prefill
+
+—&- block sparse attn prefill (block size: 16)                                            —® dense attention decode
+
+—m block sparse attn prefill (block size: 32)                                             lm sliding window prefill
+_ 18 7 _g block Sparse attn prefill (block size: 64)                                      14 +.—-® sliding window decode
+o      —- block sparse attn prefill (block size: 128)                                o       —- streaming Ilm prefill
+>                                                                                ne      —® streaming Ilm decode
+€                                                          g 12 + 8 h2o prefill
+g                                                                      g      —®-— h2o decode
+3                                                                                      =       —l- pyramid kv prefill
+g                                                                         £10} —e- pyramid kv decode
+8                                                                                    8
+<                                                                                    <
+x                                                                                    x
+8                                                                                    g*
+
+64
+0       5000     10000    15000    20000    25000    30000                      i?)       5000     10000    15000    20000    25000    30000
+# Context Token                                                                                       # Context Token
+(a) Prefill-stage sparse attention                              (b) Decode-stage sparse attention
+
+Figure 8: Peak memory usage comparison on Gemma2-2b-it with varying context lengths. Sliding-
+window attention uses a budget of 2048, block sparse attention 512 and KV compression (streaming
+LLM, h2o, pyramidKV) 128. The number of generated tokens is 100, and all methods are imple-
+mented with torch.sdpa.
+
+Finally, we note several potential influencing factors in KV compression methods (Fig. [10). Large
+changes in wall-clock inference time occur only with substantial reductions in KV cache size. While
+KV compression may not drastically shorten inference time, it clearly reduces memory usage. In
+addition, decoding time is largely proportional to the number of newly generated tokens.
+
+15
+
+
+===== PAGE BREAK =====
+
+Time (s)
+
+Latency Comparison between Different Methods
+
+dense attention prefill
+dense attention decode
+sliding window attn prefill
+sliding window attn decode
+streaming Ilm prefill
+streaming llm decode
+
+h2o prefill
+
+h2o0 decode
+
+pyramid kv prefill
+
+pyramid kv decode
+
+teehee
+
+15000 20000 25000
+
+# Context Token
+
+ie)       5000     10000                                  30000
+
+(a) Latency
+
+Peak Allocated Memory (GB)
+
+10 4
+
+Peak Memory Usage Comparison between Different Methods
+
+dense attention prefill
+dense attention decode
+sliding window prefill
+sliding window decode
+streaming IIm prefill
+streaming Ilm decode
+h2o prefill
+
+h2o decode
+
+pyramid kv prefill
+pyramid kv decode
+
+teeeee eee
+
+15000 20000 25000 30000
+
+# Context Token
+
+0              5000         10000
+
+(b) Memory Usage
+
+Figure 9: Latency and peak memory usage comparison across different baselines with varying context
+length on Gemma3-1b-it. Sliding-window attention uses a budget of 2048, block sparse attention 512
+and KV compression (streaming LLM, h2o0, pyramidKV) 128. The number of generated tokens is
+100, and all methods are implemented with torch.sdpa.
+
+Time (s)
+
+(a) Latency vs. Maximum KV Cache Capacity (con-
+
+Latency v.s. Max KV Cache Capacity
+
+4.24
+
+—® sliding window attn decode
+—™l- h2o decode
+
+6000 8000 10000 12000 14000 16000
+Max KV Cache Capacity
+
+0     2000 4000
+
+text length = 32k, generated tokens = 100)
+
+16
+
+Time (s)
+
+407
+
+Latency v.s. Number of Generated Tokens
+
+-l- sliding window attn (max capacity 16384) prefill
+-M™- h2o (max capacity 128) prefill
+—® sliding window attn (max capacity 16384) decode
+
+—@— h2o0 (max capacity 128) decode
+
+400                   600                   800                  1000
+
+# Generated Tokens
+
+0          200
+
+(b) Latency vs. Number of Generated Tokens (context
+length = 32k)
+
+Figure 10: Potential factors affecting the latency of KV compression methods on Gemma2-2b-it. The
+attention is implemented with torch.sdpa.

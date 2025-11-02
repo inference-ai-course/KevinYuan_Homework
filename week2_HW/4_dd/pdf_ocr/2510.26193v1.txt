@@ -1,0 +1,1994 @@
+arX1v:2510.26193v1 [cs.CL] 30 Oct 2025
+
+RCScore: Quantifying Response Consistency in Large Language Models
+
+Dongjun Jang and Youngchae Ahn and Hyopil Shin
+Department of Linguistics
+Seoul National University
+{qwer4107, estelle1026, hpshin}@snu.ac.kr
+
+Abstract
+
+Current LLM evaluations often rely on a single
+instruction template, overlooking models’ sen-
+sitivity to instruction style—a critical aspect for
+real-world deployments. We present RCScore,
+a multi-dimensional framework quantifying
+how instruction formulation affects model re-
+sponses. By systematically transforming bench-
+mark problems into multiple instruction styles,
+RCScore reveals performance variations un-
+detected by conventional metrics. Our exper-
+iments across ten LLMs on four reasoning
+benchmarks demonstrate that instruction style
+can shift accuracy by up to 16.7% points. We
+introduce Cross-Response Similarity (CRS),
+a method applying RCScore metrics to mea-
+sure stylistic self-consistency, and establish its
+strong correlation with task accuracy, suggest-
+ing consistency as a valuable proxy for model
+reliability. Additional findings show that deter-
+ministic decoding produces more stylistically
+stable outputs, and model scale correlates pos-
+itively with cross-style consistency. RCScore
+offers a principled approach to assess instruc-
+tion robustness.
+
+1 Introduction
+
+Large language models (LLMs) exhibit remark-
+able proficiency in complex reasoning, multi-step
+problem-solving, and creative generation, signifi-
+cantly extending their utility beyond fundamental
+text generation (Brown et al., 2020; Touvron et al.,
+2023). While these models demonstrate advanced
+cognitive capabilities in areas such as mathematical
+reasoning, logical deduction, and code generation,
+current evaluation benchmarks inadequately cap-
+ture the subtleties of these sophisticated tasks.
+Current evaluation practices for LLMs predom-
+inantly rely on traditional metrics like accuracy
+and F1 scores. Although mathematically validated,
+these metrics fall short in assessing the quality, con-
+sistency, and multifaceted aspects of open-ended
+LLM responses, where diverse valid outputs are
+
+common. Despite impressive scores on reasoning-
+intensive benchmarks like MMLU (Hendrycks
+et al., 2020), GPQA (Rein et al., 2024), and
+GSMB8K (Cobbe et al., 2021), this reliance creates a
+fundamental disconnect between the sophisticated
+outputs of LLMs and the simplistic nature of their
+evaluation.
+
+To address these limitations, one strategy that
+has been explored is the use of LLMs as evalua-
+tors (Zheng et al., 2023; Xia et al., 2025). While
+offering flexibility and scalability, this approach
+faces challenges including domain knowledge con-
+straints requiring costly fine-tuning and inherent
+model biases that potentially undermine evaluation
+objectivity. Critically, it introduces a circular evalu-
+ation paradigm, where LLMs assess other LLMs,
+compromising objectivity and reliability as identi-
+fied by Wang et al. (2023).
+
+A particularly significant yet underexplored eval-
+uation gap concerns the impact of instruction for-
+mulation on model performance. Research has
+demonstrated that LLM performance varies consid-
+erably depending on prompt design and instruction
+style (Liu et al., 2023). Beyond methods such as
+Chain-of-Thought (Wei et al., 2022) and Tree-of-
+Thoughts (Yao et al., 2023), recent studies have
+highlighted the sensitivity of language models to
+instruction phrasing. Ajith et al. (2023) and Cao
+et al. (2024) analyze performance variation under
+prompt perturbations, while Mizrahi et al. (2024)
+show that evaluations based on a single template
+can yield unreliable metrics across paraphrased in-
+structions. This sensitivity extends to subtle linguis-
+tic variations as shown by Wahle et al. (2024) and
+Leidinger et al. (2023). Following this, recent stud-
+ies propose metrics for prompt sensitivity, includ-
+ing rephrasing-based evaluation (Lu et al., 2024;
+Errica et al., 2024) and embedding-based coher-
+ence scoring (Lauriola et al., 2025). However, these
+approaches rely on ad-hoc rewriting, incur high
+computational costs, and offer limited insight into
+
+
+===== PAGE BREAK =====
+
+model behavior.
+
+To address this evaluation gap, we introduce
+RCScore!, a comprehensive metric that method-
+ically assesses how LLMs respond to different
+instruction styles. Through structured variation
+of instructional cues across clause types, RC-
+Score evaluates responses across three key di-
+mensions—Structurality, Lexicality, and Coher-
+ence—providing deeper insights into model capa-
+bilities. Our metric delivers three important contri-
+butions: (1) it reveals performance variations across
+instruction styles that traditional accuracy-focused
+benchmarks often miss; (2) it introduces Cross-
+Response Similarity (CRS) to measure stylistic
+self-consistency, showing that higher consistency
+correlates with better task accuracy, suggesting con-
+sistency as a reliability indicator; and (3) it provides
+an easy-to-reproduce, efficient protocol for assess-
+ing model robustness.
+
+2 Related Work
+
+2.1 Traditional LLM Evaluation Methods
+
+As LLMs have advanced rapidly, a variety of eval-
+uation methodologies have emerged to assess their
+capabilities. However, most mainstream bench-
+marks—such as MMLU (Hendrycks et al., 2020),
+BIG-Bench (Srivastava et al., 2022), GSM8K
+(Cobbe et al., 2021), GPQA (Rein et al., 2024), Hel-
+laSwag (Zellers et al., 2019), MATH (Hendrycks
+et al., 2021), and DROP (Dua et al., 2019)—-con-
+tinue to rely on traditional metrics such as ex-
+act match accuracy and F1 score. This simplifi-
+cation is further reflected in the technical reports of
+many recent LLMs, which predominantly empha-
+size accuracy-based performance results (Achiam
+et al., 2023; Grattafiori et al., 2024; Team et al.,
+2023; Yang et al., 2024; Team et al., 2025; An-
+thropic, 2024; Guo et al., 2025). Mondorf and Plank
+(2024) argue that LLMs’ reasoning abilities remain
+unclear due to an overreliance on shallow accuracy-
+based metrics. Other studies similarly critique eval-
+uations based solely on final answers, and propose
+alternative methods (Mahdavi et al., 2025; Nguyen
+et al., 2024; Golovneva et al., 2023).
+
+2.2 Beyond Accuracy-Centric Evaluation
+
+To address the limitations of accuracy-centric eval-
+uation, recent studies have explored alternative
+strategies that go beyond exact match or lexical
+
+'RCScore github link https: //github.com/Junmaij/
+RCScore
+
+overlap. One prominent direction is the LLM-as-a-
+judge paradigm, where strong models are used to
+assess the quality of generated responses directly
+(Zheng et al., 2023; Xia et al., 2025). Yet, stud-
+ies show that such methods can diverge from hu-
+man judgments and suffer from structural flaws
+(Wang et al., 2023, 2025), casting doubt on their
+reliability. In parallel, other studies assess different
+facets of LLM output quality. FactScore (Min et al.,
+2023) verifies generations by checking atomic fac-
+tual units against external sources. SelfCheckGPT
+(Manakul et al., 2023) evaluates factuality through
+consistency across sampled outputs, and ARES
+(Saad-Falcon et al., 2023) scores the quality of
+individual components in retrieval-augmented gen-
+eration pipelines.
+
+2.3 Stylistic Variation in Prompting: Effects
+and Evaluation
+
+Prompt formulation plays a critical role in shaping
+LLM behavior and performance, often enabling
+substantial gains without parameter updates (Liu
+et al., 2023). The field evolved from zero-shot
+(Radford et al., 2019) and few-shot approaches
+(Brown et al., 2020) to more sophisticated tech-
+niques like Chain-of-Thought (Wei et al., 2022),
+Tree of Thoughts (Yao et al., 2023), self-refine
+prompting (Madaan et al., 2023), and Automatic
+Prompt Engineer (Zhou et al., 2023), demonstrat-
+ing prompt design’s significant impact on LLM
+capabilities.
+
+As prompting techniques developed, research
+shifted toward understanding how stylistic varia-
+tions across prompts affect model performance. He
+et al. (2024) demonstrated that surface-level format-
+ting changes (e.g., JSON, YAML) affect model out-
+puts. On the linguistic side, Wahle et al. (2024) ex-
+amined the impact of morphological, syntactic, and
+lexical paraphrases, while Leidinger et al. (2023)
+highlighted LLMs’ sensitivity to subtle linguistic
+variations. Using prompt variants that are seman-
+tically equivalent, these studies demonstrated that
+models are highly sensitive to even subtle stylistic
+cues.
+
+Motivated by these findings, several studies have
+sought to formalize the effect of prompt variabil-
+ity by designing dedicated evaluation metrics. Lu
+et al. (2024) proposed sensitivity-based metrics to
+assess how prompt formulation influences model
+performance. Errica et al. (2024) introduced sensi-
+tivity and consistency metrics, using paraphrased
+benchmark questions generated via LLaMA3. Lau-
+
+
+===== PAGE BREAK =====
+
+riola et al. (2025) focused on coherence, measuring
+the average cosine similarity between answers to
+equivalent questions.
+
+3 Experiment on Instruction Style
+Sensitivity
+
+Large language models often exhibit varying perfor-
+mance depending on how instructions are phrased,
+yet traditional benchmarks rarely account for this
+variability. Prior work shows that subtle prompt
+variations affect how models respond (He et al.,
+2024; Wahle et al., 2024; Leidinger et al., 2023),
+and Mizrahi et al. (2024) further demonstrate that
+evaluations relying on a single instruction tem-
+plate are inadequate. Building on these findings,
+we conducted comprehensive evaluations across di-
+verse reasoning tasks and multiple model families
+to quantify how different instruction formulations
+influence model accuracy and response characteris-
+tics.
+
+3.1 Benchmark
+
+We selected four benchmarks covering diverse rea-
+soning tasks in mathematical and scientific do-
+mains. The American Invitational Mathematics
+Examination (AIME 2024)? contains competitive
+mathematics problems that require precise numer-
+ical reasoning. GSM8K (Cobbe et al., 2021) in-
+cludes diverse grade school math word problems
+designed to test multi-step arithmetic reasoning.
+MATH-500 is a curated subset of 500 problems
+from the MATH benchmark (Hendrycks et al.,
+2021), selected by OpenAI as part of the Let’s Ver-
+ify Step by Step study (Lightman et al., 2023). For
+advanced scientific reasoning, we use the GPQA-
+Diamond subset of the GPQA (Rein et al., 2024),
+which is originally a multiple-choice benchmark
+but is evaluated in our setting without answer op-
+tions to better assess pure reasoning ability. These
+benchmarks were chosen due to their prominent
+role in recent LLM technical reports (Achiam et al.,
+2023; Grattafiori et al., 2024; Team et al., 2023;
+Yang et al., 2024; Team et al., 2025; Anthropic,
+2024; Guo et al., 2025).
+
+3.2 Models
+
+Our evaluation covers ten open-source instruction-
+tuned LLMs spanning three major model fam-
+ilies. This includes the Gemma 3 series from
+
+“https ://huggingface.co/datasets/
+HuggingFaceH4/aime_2024
+
+Google—Gemma 3 4B, 12B, and 27B Instruct vari-
+ants (Team et al., 2025); the Qwen 2.5 Instruct
+models from Alibaba at 3B, 7B, 32B, and 72B
+scales (Yang et al., 2024); and Meta’s Llama 3 fam-
+ily—Llama 3.2 3B, Llama 3.1 8B, and Llama 3.3
+70B Instruct models (Grattafiori et al., 2024).
+
+3.3 Instruction Style Variations
+
+Instruction style variations for Style Sensitivity
+Experiment
+
+Style
+
+Characteristics and Example
+
+Declarative Statements presenting facts or information
+"The problem should be solved step by step.
+The answer is to be suggested in the
+
+following format."
+
+Interrogative Direct questions challenging reasoning
+"Could you solve the problem step by step?
+Would you suggest the answer in the
+following format?"
+
+Exclamative Expressions emphasizing importance or
+difficulty
+"How important it is to solve the problem
+step by step! What a necessity it is to
+suggest the answer in the following format!"
+
+Imperative ©Command-based instructions directing
+
+processes
+"Solve the problem step by step. Suggest
+the answer in the following format."
+
+Figure 1: Instruction Styles Employed in Experiments.
+Detailed prompt templates are provided in Figure 8.
+
+To probe stylistic sensitivity without introducing
+semantic drift, we adopted a minimal intervention
+strategy. Rather than altering the benchmark ques-
+tion itself, we applied controlled stylistic variations
+solely to the instruction prefix. This design enables
+targeted analysis of how stylistic differences in
+prompts influence model responses, while ensuring
+that the core task input remains unchanged. Our ty-
+pology follows the syntactic clause classification of
+Huddleston et al. (2002), comprising Declarative,
+Interrogative, Exclamative, and Imperative forms.
+We ensured semantic consistency by fixing main
+verbs (e.g., solve, suggest) and maintaining compa-
+rable lexical complexity across styles (Type Token
+Ratio: 0.75—-0.78). The prompt structure used in our
+experiments is illustrated in Figure 8.
+
+3.4 Experimental Settings
+
+We evaluated models using two decoding strate-
+gies: beam search and greedy search, both with
+max_new_tokens = 2048. For beam search, we
+
+
+===== PAGE BREAK =====
+
+AIME              MATH-500        GPQA-Diamond
+&
+x
+3  20                                                                                   @
+e
+a   10
+gk                           |        Es                         79 UH    |    i    |
+Sl                         S2 S3 S4          S2 S3 S4       Sl S2 S3 S4
+Style                  Style                 Style                  Style
+(a) Beam search
+AIME              MATH-500        GPQA-Diamond
+_  30                                           8
+&
+z 20                                           6118
+g                                                    +
+8                                                4
+z   10                                               ®
+0                       LT 1 42  *                 ee
+S2 S3 S4      Sl                     Sl S2 S3 S4
+Style                 Style                  Style
+(b) Greedy search
+Gemma 3          LLaMA 3+           Qwen 2.5
+e27B $12B H70B @®8B «72B- +32B
+A 4B                3B             x 7B     | 3B
+
+Figure 2: Instruction style sensitivity: Accuracy ranges (S1-S4) by model family and size for Beam Search (a, T=1.0)
+and Greedy Search (b, T=0.0), showing performance impact of instruction style.
+
+used temperature = 1.0, top-k = 50, and top-p
+= Q.9. Greedy search involved selecting the high-
+est probability token at each step. We included both
+decoding strategies to comprehensively examine
+model behavior across a broad range of generation
+settings.
+
+3.5 Result
+
+Our experiments demonstrate performance varia-
+tions across instruction styles and decoding strate-
+gies (Figure 2). Models exhibit accuracy fluctua-
+tions when identical problems are framed using
+different instruction styles (S1: Declarative, S2: In-
+terrogative, S3: Exclamative, S4: Imperative, as per
+Figure 1). Detailed Style Sensitivity Index scores
+across all benchmarks are provided in Table 4, with
+comprehensive benchmark-specific analyses avail-
+able in Appendix D.
+
+Under beam search (Figure 2a), accuracy vari-
+ations were pronounced. For instance, on AIME,
+Gemma 3-27B and Qwen 2.5-72B exhibited gaps
+
+of 13.3% and 16.7%, respectively, while LLaMA
+3-70B showed a 3.0% gap on GPQA-Diamond.
+Under greedy search (Figure 2b), these variations
+remained with reduced magnitude—for example,
+LLaMA 3-70B and Qwen 2.5-72B each shifted by
+6.7% on AIME. This confirms that even determin-
+istic decoding remains susceptible to instruction
+style.
+
+These findings underscore that single-style
+benchmarks offer an incomplete view of model
+capabilities. We posit that instruction-induced accu-
+racy fluctuations reflect differences in response con-
+sistency—the degree to which a model produces
+structurally, lexically, and logically stable outputs
+across prompt styles.
+
+4 RCScore: Quantifying Response
+Consistency Across Instruction Styles
+
+The observed accuracy fluctuations, as detailed in
+Section 3.5, highlight the limitations of relying
+solely on task performance metrics. To enable a
+
+
+===== PAGE BREAK =====
+
+Structurality
+
+"To what extent do
+responses maintain consis-
+tent syntactic patterns?"
+
+fer
+
+Measures syntactic pat-
+tern preservation via
+dependency parsing
+
+Lexicality
+
+"How consistently do re-
+sponses use similar vocab-
+ulary and terminology?"
+eo °        °
+I         @      \   C )
+\
+
+1
+\
+
+1
+
+|
+
+_° e
+1 ot v4
+Lol en
+,
+e',; - 1 @1
+e
+| ° 2 °
+
+|
+!
+I
+1
+I
+
+e   e
+
+Combines TF-IDF
+vector similarity with
+sequential matching
+
+Coherence
+
+"Do responses maintain
+consistent logical progres-
+sion and organization?"
+
+O00
+
+iN
+Vv
+
+an     Vv
+
+aac
+
+Assesses logical flow
+and content organi-
+zation preservation
+
+Figure 3: RCScore: A multi-dimensional metric for quantifying response consistency across instruction styles.
+
+more precise and multi-faceted analysis of how
+instruction style influences the fundamental quali-
+ties of text generated by LLMs, we introduce RC-
+Score, a comprehensive framework that measures
+response variation across stylistic dimensions. Un-
+like conventional metrics focused purely on cor-
+rectness, RCScore captures how different prompt
+formulations impact model behavior through three
+complementary dimensions—Structurality, Lexi-
+cality, and Coherence—each quantifying a core
+aspect of stylistic variation (Figure 3). This enables
+structured evaluation of instruction sensitivity by
+examining stylistic consistency and assessing fi-
+delity to reference outputs under diverse prompt
+formulations.
+
+Structurality Structurality quantifies the syntac-
+tic similarity between text samples, addressing the
+research question: "Jo what extent do responses
+maintain consistent syntactic patterns and gram-
+matical structures?" This dimension is formalized
+as:
+
+1
+S(Da, Do) = A S> J(P(si),P(ti))
+(s;,t:)€M
+
+Here, M denotes semantically aligned sentence
+pairs (identified via BERTScore*), P(s) extracts
+syntactic patterns of the form (pos;, dep,, posp),
+capturing part-of-speech tags and dependency re-
+lations, and J computes the Jaccard similarity be-
+tween the resulting pattern sets.
+
+Lexicality Lexicality captures the degree of lexi-
+cal overlap and vocabulary similarity between gen-
+erated responses, aiming to answer the question:
+
+3We use the RoBERTa-Large model (Liu et al., 2019) for
+our BERTScore implementation.
+
+"How consistently do responses employ similar vo-
+cabulary, terminology, and phrasing?" We define
+this dimension as follows:
+
+L(Da, Do) = wre: StF + wre: Sree (2)
+
+Here, Str denotes the cosine similarity between
+TF-IDF vectors, which reflects the global term
+distribution across documents. In addition, Spr,
+measures sequential lexical overlap via ROUGE-L,
+capturing local word order. By combining these
+complementary perspectives, Lexicality provides a
+more comprehensive measure of textual similarity.
+We assign equal weights (wrp = wrt = 0.5) to
+balance global and local contributions.
+
+Coherence Coherence assesses the logical flow
+and organizational similarity between model out-
+puts, addressing the question: "Jo what extent do
+responses maintain consistent logical progression
+and content organization?" We define the coher-
+ence score as:
+
+C(Da, Do) = S(Da, Do) . Cw(Da; Do)    (3)
+
+The primary component S(D,, Dy) aggregates
+four distinct aspects of organizational similarity:
+order correlation, position matching, sequential
+continuity, and semantic alignment. Each aspect
+captures a different facet of how well the content
+structure is preserved between responses. To ensure
+comparisons remain semantically meaningful, we
+apply a content-weighted penalty term C,,(Da, Do)
+that down-weights alignments over irrelevant or
+trivial content.
+
+A final RCScore is then computed as a weighted
+average of these three dimensions, with Struc-
+turality, Lexicality, and Coherence each assigned
+
+
+===== PAGE BREAK =====
+
+AIME                          MATH-500                    GPQA-Diamond                      GSM8K
+085 ts                       085 ta                       085 tS                       085 tS
+1S)                                    1S)                                   1S}                                    1S}
+E                                   E                                   gE                                   gE
+A                                   y         :                          A                                   A       .
+:                                     *
+.                                                                                                          Oo
+0.10    af Lex.,          0.10       Bex,            019 20% Lex.,          0.10 + 2 2 Lex,
+0.20                0.85                      0.20                0 85                |     020                0.85                |      0.20                0.85
+ce [a                                        ce he                                        coe                                        co
+0.85                                 0.85                                 0.85                                 0.85
+(a) AIME                        (b) MATH-500                 (c) GPQA-Diamond                   (d) GSM8K
+o Gemma (CRS Beam)          o LLaMA (CRS Beam)          o Qwen (CRS Beam)
+e Gemma (CRS Greedy)        e LLaMA (CRS Greedy)        e Qwen (CRS Greedy)
+
+Figure 4: CRS values (RCScore dimensions: Lexicality, Structurality, Coherence) per benchmark. Beam Search
+(hollow circles) vs. Greedy Search (filled circles). Marker size reflects model parameter count.
+
+RCScore Applied Through the CRS Way
+
+CRS1,2
+Ca Som
+K
+CRS1,3 !           TRS 4            | CRS2,4
+'             ORS 3 ~~               \
+ _ i cme)
+CRS3.4
+
+( Structurality, Lexicality, Coherence )
+Aggregate metrics:
+CRS: Average cross-style similarity (6 pairs)
+
+All comparisons yield 3D vectors:
+
+Figure 5: The Cross-Response Similarity (CRS) way
+applies RCScore dimensions to measure consistency
+across all possible combinations of instruction styles (6
+pairwise comparisons).
+
+a weight of 0.33. For practical examples of how
+these dimensions quantify similarity, refer to Ta-
+ble 5 (high similarity) and Table 6 (low similar-
+ity), which demonstrate the metrics’ application
+through concrete cases. A comprehensive mathe-
+matical treatment is provided in Appendix A.
+
+4.1 Quantification of Cross-Style Response
+Consistency using RCScore
+
+To assess how instruction styles affect model
+response characteristics beyond accuracy, we in-
+troduce the Cross-Response Similarity (CRS) way
+of applying RCScore dimensions. This approach
+(Figure 5), detailed in Appendix A.2, quantifies
+the stylistic consistency among a model’s own
+responses when presented with the same under-
+lying problem framed by different instruction
+styles. CRS thus highlights a model’s tendency to
+produce stylistically similar or divergent responses
+
+based on variations in prompt formulation. A key
+aspect of our methodology is the computation of
+CRS values from the three-dimensional RCScore
+vector—(Structurality, Lexicality, Coherence)—as
+defined in Appendix A. This approach retains the
+multi-dimensional nature of response style and
+enables fine-grained analysis of which linguistic
+aspects (syntactic structure, lexical choice, or
+logical organization) are most affected by in-
+struction variations. For each problem instance,
+CRS values are computed by aggregating all
+pairwise comparisons among responses generated
+from different instruction styles. The detailed
+aggregation procedure is outlined in Algorithm 1.
+
+4.2 Analyzing Cross-Response Similarity
+(CRS) with RCScore Dimensions
+
+We analyze model consistency across instruction
+styles using the CRS way defined in Section 4.1.
+CRS applies RCScore’s three dimensions (Struc-
+turality, Lexicality, and Coherence) to quantify re-
+sponse stability. Tables (1a, 1b) present these val-
+ues for Beam and Greedy Search respectively, with
+scores ranging from 0 to 1 (higher values indicating
+greater consistency).
+
+Our analysis reveals three key patterns. First,
+decoding strategy significantly affects consistency
+- Greedy Search consistently yields higher CRS
+values than Beam Search (e.g., LLaMA 3.3-
+70B’s GSM8K RCScore increases from 0.44 to
+0.67). Second, larger models generally demonstrate
+higher consistency, as seen with LLaMA 3.3-70B
+outperforming LLaMA 3.2-3B on AIME (0.44
+vs. 0.31 with Beam Search). Third, task complex-
+ity influences consistency - Gemma 3-27B with
+
+
+===== PAGE BREAK =====
+
+AIME                                   MATH-500                             GPQA-Diamond                              GSM8K
+Model                                   CRS                                         CRS                                         CRS                                        CRS                  |
+Struct. Lex. Coh. RCScore | Struct. Lex. Coh. RCScore | Struct. Lex. Coh. RCScore | Struct. Lex. Coh. RCScor
+Gemma 3-4B         0.25     0.61 0.27       0.38        0.33     0.68 0.38       0.46        0.29     0.54 0.29       0.37        0.42     0.70 0.45       0.52
+Gemma 3-12B        0.20     0.58 0.28       0.36        0.32     0.68 0.39       0.46        0.27     0.52 0.28       0.36        0.41      0.71 0.45       0.52
+Gemma3-27B | 0.21 059 029 _037__| 0.34 0.71 040 048 | 0.28 055 032038 _ | 047 0.72 048 056__
+LLaMA 3.2-3B       0.22     0.44 0.26       0.31         0.26     0.54 0.30       0.36        0.28     0.5      0.31       0.37        0.37     0.63 0.39       0.46
+LLaMA 3.1-8B       0.21     0.45 0.27       0.31        0.26     0.55 0.32       0.38        0.28     0.52 0.31       0.37        0.38     0.64 0.43       0.48
+LLaMA33-70B | 0.34 0.61 0.38 O44 | 0.35 0.66 O44 _048_| 0.37 0.62 040 046 | 0.38 0.57 0.38 __ 0.44
+Qwen 2.5-3B         0.25     0.53 0.34       0.37        0.28     0.62 0.37       0.42        0.25     0.46 0.25       0.32        0.29     0.60 0.37       0.42
+Qwen 2.5-7B          0.24     0.50 0.33       0.35         0.24     0.54 0.33       0.37         0.23     0.4      0.26       0.30        0.23      0.46 0.30       0.33
+Qwen 2.5-32B        0.23     0.53 0.33       0.36        0.25     0.60 0.33       0.39        0.25     0.48 0.30       0.34        0.28     0.58 0.33       0.39
+Qwen 2.5-72B        0.25      0.58 0.40       0.41         0.31      0.68 0.40       0.46         0.34     0.6      0.37       0.44         0.31      0.65 0.33       0.43
+(a) Beam Search CRS Values (temperature = 1.0).
+AIME                                   MATH-500                             GPQA-Diamond                              GSM8K
+Model                                   CRS                                         CRS                                         CRS                                        CRS                  |
+Struct. Lex. Coh. RCScore | Struct. Lex. Coh. RCScore | Struct. Lex. Coh. RCScore | Struct. Lex. Coh. RCScor
+
+Gemma 3-4B         0.42     0.72 0.44       0.53        0.52     0.78 0.55       0.61        0.32     0.57 0.31       0.40        0.46     0.73 0.54       0.57
+Gemma 3-12B        0.44     0.71 0.58       0.57         0.54      0.80 0.55       0.63         0.33      0.58 0.32       0.41         0.46      0.73 0.51       0.57
+Gemma 3-27B | 0.41 0.68 0.43 0.51 | 0.63 0.84 0.61 0.69 | 0.32 0.58 0.34 0.41 | 0.69 0.84 0.69 0.74
+LLaMA 3.2-3B       0.30     0.50 0.34       0.38         0.36     0.62 0.38       0.45         0.36     0.58 0.40       0.44        0.47     0.72 0.48       0.56
+LLaMA 3.1-8B       0.32      0.53 0.34       0.40         0.40      0.64 0.43        0.49         0.40      0.61 0.44       0.48         0.55      0.76 0.58       0.63
+LLaMA 3.3-70B      0.42     0.67 0.46       0.52        0.43      0.72 0.52       0.56        0.45     0.67 0.47       0.53         0.58     0.81 0.64       0.67
+Qwen 2.5-3B          0.34      0.58 0.42       0.45         0.39      0.70 0.47       0.52         0.34      0.59 0.38       0.44         0.45      0.75 0.56       0.59
+Qwen 2.5-7B          0.33      0.63 0.46       0.48         0.39      0.73 0.48        0.53         0.37      0.62 0.41        0.47         0.46      0.76 0.49        0.57
+Qwen 2.5-32B        0.40     0.66 0.50       0.52         0.37      0.73 0.48       0.52         0.39      0.65 0.47       0.50         0.41      0.70 0.46       0.53
+Qwen 2.5-72B         0.33      0.61 0.41        0.45         0.47      0.77. 0.50       0.58         0.38      0.65 0.42       0.49         0.43      0.73 0.42       0.52
+
+(b) Greedy Search CRS Values (temperature = 0.0).
+
+Table 1: Cross-Response Similarity (CRS) values for AIME, MATH-500, GPQA-Diamond, and GSM8K benchmarks
+across models, comparing Beam Search (temperature = 1.0) and Greedy Search (temperature = 0.0) generation
+
+methods.
+
+Greedy Search achieves 0.51 on AIME but 0.74
+on GSM8K. Figure 4 visually maps these multi-
+dimensional relationships across models and bench-
+marks.
+
+5 Is Cross-Style Consistency a Reliable
+Proxy for Accuracy?
+
+Metric            Pearson       p-val Spearman       p-val
+r                            p
+
+Beam Search (temperature = 1.0)
+
+RCScorestruct          0.57 1.4e-04           0.49       0.001
+RCScoreLex           0.65  5.0e-06           0.68     1.7e-06
+RCScorecoh           0.64 9.0e-06           0.65 6.9e-06
+RCScoreoverall              0.66  3.1e-06                   0.65 6.9e-06
+Greedy Search (temperature = 0.0)
+
+RCScorestruct        0.675  1.74e-06          0.684 1.13e-06
+RCScorezex          0.790 1.39e-09          0.786  1.88e-09
+RCScorecoh          0.656 4.38e-06          0.641 8.32e-06
+RCScoreoverall       0.733 7.43e-08          0.725 1.20e-07
+
+Table 2: Pearson’s r and Spearman’s p correlations be-
+tween mean task accuracy and RCScore dimensions
+(Structurality, Lexicality, Coherence, and Overall) ap-
+plied through the Cross-Response Similarity (CRS) way
+across all model-benchmark pairs (N=40) for Beam
+Search and Greedy Search
+
+To investigate whether a model’s consistency
+across varied instruction styles correlates with its
+task-solving accuracy, we analyzed the relation-
+ship between our CRS values and conventional
+accuracy metrics. For each of the ten models
+across four benchmarks (AIME, GSM8K, MATH-
+500, GPQA), we computed CRS values using RC-
+Score’s three dimensions (Structurality, Lexicality,
+Coherence) and the aggregated RCScore. Concur-
+rently, we calculated a mean accuracy score for
+each of the 40 model-benchmark pairs by aver-
+aging accuracies achieved under each of the four
+instruction styles. We then measured Pearson’s r
+and Spearman’s p correlations between these mean
+accuracies and each dimension of CRS to assess
+both linear and monotonic relationships.
+
+The results, presented in Table 2, reveal a signif-
+icant positive correlation between a model’s ability
+to maintain stylistic consistency and its overall task
+performance. Notably, the aggregated RCScore and
+its Lexicality dimension when applied through the
+CRS way showed strong correlations with mean
+accuracy. For instance, Lexicality exhibited a Pear-
+son’s r > 0.65 under beam search and r & 0.79
+under greedy search. This suggests that models
+
+
+===== PAGE BREAK =====
+
+1 Beam Search [] I Greedy Search
+|          I          I          I          I
+
+0.6 -                                                                                |
+nN
+[a4
+O 0.55                                                                                                              |
+s                                     0.45                        age                                  ode
+>                  0.43 9 49                                                                          ‘
+6                               .
+
+0.4 +                                                                                |
+
+0.37     0.38                0.38               0.37
+0.34
+0.3
+s 2 © & & © % ® Y &
+Ri        >         >         a        ry oe         &        &        S         ~
+es Fs FS XP YF Ff Fr KY
+
+Figure 6: Overall CRS values for Gemma, LLaMA, and Qwen model variants. Solid bars correspond to beam search
+
+(T=1.0),
+
+Decoding Strategy Performance
+
+10           1 Greedy Better] 1 Beam Better
+8
+3   Spy        7                        |
+3
+Ss OF                        5            |
+G4
+   4
+5                           3
+5   9 |      2        2                     |
+1
+0
+
+AIME —
+GSM8K —
+
+MATH-500 ~
+GPQA-DIA |
+
+Figure 7: Decoding strategy performance: Number of
+models where Greedy Search or Beam Search achieved
+higher average accuracy per benchmark. Greedy Search
+generally performed better, aligning with its higher CRS
+values (Figure 6). Detailed average accuracy scores are
+available in Table 7.
+
+producing lexically consistent explanations across
+different instruction styles tend to achieve higher
+accuracy. More broadly, all dimensions demon-
+strated statistically significant positive correlations
+with task accuracy when measured via the CRS ap-
+proach. This consistent pattern indicates that higher
+cross-style self-similarity in a model’s responses is
+a robust indicator of better task performance. These
+findings underscore the utility of RCScore dimen-
+
+and semi-transparent bars to greedy search (T'=0.0).
+
+sions applied through CRS in capturing nuanced
+behavioral traits of LLMs—specifically, the ability
+to generate consistent outputs irrespective of in-
+struction style—that are meaningfully aligned with
+their fundamental task-solving capabilities. Thus,
+cross-style consistency, as quantified through RC-
+Score dimensions, emerges not just as a measure
+of stylistic stability but as a valuable proxy for a
+model’s underlying accuracy and reliability.
+
+5.1 Parameter-Scale and Decoding Strategy
+Effects on CRS
+
+Figure 6 displays CRS values, highlighting the in-
+fluence of model scale and decoding strategy on
+stylistic consistency. Larger models (>70B), such
+as LLaMA 3.3-70B and Qwen 2.5-72B, generally
+demonstrate higher CRS, suggesting that increased
+parameter scale improves stylistic stability against
+varied instruction phrasings. Decoding strategy
+also plays a critical role: greedy search (T’ = 0.0)
+consistently yields 7-13% higher CRS scores than
+beam search (T' = 1.0) across all models, indicat-
+ing deterministic decoding produces more stylisti-
+cally stable outputs. Notably, this enhanced consis-
+tency with greedy search correlates with improved
+task performance. As illustrated in Figure 7, greedy
+decoding led to higher average accuracy for a ma-
+jority of models on the AIME, MATH-500, and
+GSMB8K benchmarks. While Beam Search appears
+to have a slight edge on GPQA-Diamond for more
+models, the overall low accuracy scores on this
+benchmark (typically below 10% for most models,
+
+
+===== PAGE BREAK =====
+
+as seen in Table 3) suggest that these particular dif-
+ferences in decoding strategy performance might
+be less indicative of a general trend. Overall, the
+deterministic approach of greedy search also nar-
+rows the CRS performance gap between smaller
+and larger models, particularly benefiting smaller
+models in maintaining consistency.
+
+6 Conclusion
+
+We introduce RCScore, a multi-dimensional met-
+rics designed to assess LLM sensitivity to instruc-
+tion style, extending traditional accuracy-focused
+evaluations. RCScore quantifies response varia-
+tions along three core dimensions: Structurality,
+Lexicality, and Coherence. Through experiments
+applying varied instruction styles to established
+benchmarks, we demonstrate that LLM perfor-
+mance can fluctuate based on instruction phrasing.
+Our findings introduce Cross-Response Similarity
+(CRS) as a measure of stylistic self-consistency,
+establishing a strong positive correlation between
+CRS and task accuracy. Additionally, we observe
+that larger models exhibit greater stylistic stability,
+and deterministic decoding produces more consis-
+tent outputs. These insights suggest that cross-style
+consistency serves as a valuable indicator of model
+reliability, offering deeper perspectives on LLM
+robustness.
+
+7 Limitations
+
+While RCScore offers a more nuanced evaluation
+of instruction style sensitivity, its current imple-
+mentation relies on a predefined set of four linguis-
+tic styles and specific English-language NLP tools
+for dimensional analysis (e.g., dependency parsing,
+TF-IDF). The framework’s applicability to other
+languages or a broader range of stylistic variations
+(e.g., code-switching, highly informal language)
+remains to be explored, and the computational cost,
+though minimized, might still be a factor for ex-
+tremely large-scale evaluations across numerous
+model-benchmark pairs.
+
+Additionally, our focus on mathematical and rea-
+soning tasks, while methodologically sound, may
+not generalize to more subjective domains like cre-
+ative writing or emotional support, where style
+sensitivity might manifest differently. The current
+RCScore dimensions also lack validation through
+human evaluation to confirm their alignment with
+human perceptions of consistency or quality. Fur-
+thermore, the weights for aggregating RCScore
+
+dimensions are currently uniform, and future work
+could investigate task-dependent or empirically de-
+rived weighting schemes.
+
+8 Ethical Consideration
+
+The primary ethical considerations for RCScore
+relate to its potential application and interpretation.
+While designed to improve LLM evaluation by re-
+vealing sensitivities, there is a risk that findings
+could be used to "over-optimize" models for spe-
+cific instruction styles, potentially at the expense
+of generalizability or by inadvertently encoding
+biases present in the chosen stylistic variations.
+
+The datasets used (AIME, MATH, GPQA,
+GSMS8K) are standard academic benchmarks, and
+the instruction variations are syntactically derived
+without introducing new factual content, minimiz-
+ing the risk of generating harmful or biased test
+material. We acknowledge that inconsistent perfor-
+mance across instruction styles raises accessibil-
+ity concerns, as users with different cultural back-
+grounds or neurodivergent conditions might nat-
+urally prefer specific formulation patterns, poten-
+tially creating uneven experiences with AI systems.
+
+Additionally, the increased computational re-
+quirements for multi-style evaluation introduce en-
+vironmental considerations that should be balanced
+against the benefits of more comprehensive assess-
+ment. We encourage users of RCScore to be mind-
+ful of these aspects and to employ the framework
+as a tool for understanding and improving model
+robustness broadly, rather than for narrow stylistic
+optimization.
+
+References
+
+Josh Achiam, Steven Adler, Sandhini Agarwal, Lama
+Ahmad, Ilge Akkaya, Florencia Leoni Aleman,
+Diogo Almeida, Janko Altenschmidt, Sam Altman,
+Shyamal Anadkat, et al. 2023. Gpt-4 technical report.
+arXiv preprint arXiv:2303.08774.
+
+Anirudh Ajith, Chris Pan, Mengzhou Xia, Ameet Desh-
+pande, and Karthik Narasimhan. 2023. Instructeval:
+Systematic evaluation of instruction selection meth-
+ods. arXiv preprint arXiv:2307.00259.
+
+Anthropic. 2024. Introducing the next generation of
+claude.
+
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, et al. 2020. Language models are few-shot
+learners. Advances in neural information processing
+
+systems, 33:1877-1901.
+
+
+===== PAGE BREAK =====
+
+Bowen Cao, Deng Cai, Zhisong Zhang, Yuexian Zou,
+and Wai Lam. 2024. On the worst prompt perfor-
+mance of large language models. arXiv preprint
+arXiv:2406. 10248.
+
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,
+Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias
+Plappert, Jerry Tworek, Jacob Hilton, Reiichiro
+Nakano, et al. 2021. Training verifiers to solve math
+word problems. arXiv preprint arXiv:2110.14168.
+
+Dheeru Dua, Yizhong Wang, Pradeep Dasigi, Gabriel
+Stanovsky, Sameer Singh, and Matt Gardner. 2019.
+Drop: A reading comprehension benchmark requir-
+ing discrete reasoning over paragraphs. arXiv
+preprint arXiv: 1903.00161.
+
+Federico Errica, Giuseppe Siracusano, Davide San-
+vito, and Roberto Bifulco. 2024. What did i
+do wrong? quantifying Ilms’ sensitivity and con-
+sistency to prompt engineering. arXiv preprint
+arXiv:2406. 12334.
+
+Olga Golovneva, Moya Peng Chen, Spencer Poff, Mar-
+tin Corredor, Luke Zettlemoyer, Maryam Fazel-
+Zarandi, and Asli Celikyilmaz. 2023. ROSCOE: A
+suite of metrics for scoring step-by-step reasoning. In
+The Eleventh International Conference on Learning
+Representations.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle,
+Aiesha Letman, Akhil Mathur, Alan Schelten, Alex
+Vaughan, et al. 2024. The llama 3 herd of models.
+arXiv preprint arXiv:2407.21783.
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song,
+Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma,
+Peiyi Wang, Xiao Bi, et al. 2025. Deepseek-r1: In-
+centivizing reasoning capability in Ilms via reinforce-
+ment learning. arXiv preprint arXiv:2501.12948.
+
+Jia He, Mukund Rungta, David Koleczek, Arshdeep
+Sekhon, Franklin X Wang, and Sadid Hasan. 2024.
+Does prompt formatting have any impact on Ilm per-
+formance? arXiv preprint arXiv:2411.10541.
+
+Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou,
+Mantas Mazeika, Dawn Song, and Jacob Steinhardt.
+2020. Measuring massive multitask language under-
+standing. arXiv preprint arXiv:2009.03300.
+
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul
+Arora, Steven Basart, Eric Tang, Dawn Song, and Ja-
+cob Steinhardt. 2021. Measuring mathematical prob-
+lem solving with the math dataset. arXiv preprint
+arXiv:2103.03874.
+
+R.D. Huddleston, G.K. Pullum, and L. Bauer. 2002.
+The Cambridge Grammar of the English Language.
+The Cambridge Grammar of the English Language.
+Cambridge University Press.
+
+Ivano Lauriola, Stefano Campese, and Alessandro Mos-
+chitti. 2025. Analyzing and improving coherence
+of large language models in question answering. In
+
+Proceedings of the 2025 Conference of the Nations of
+the Americas Chapter of the Association for Compu-
+tational Linguistics: Human Language Technologies
+(Volume I: Long Papers), pages 11740-11755.
+
+Alina Leidinger, Robert Van Rooij, and Ekaterina
+Shutova. 2023. The language of prompting: What lin-
+guistic properties make a prompt successful? arXiv
+preprint arXiv:2311.01967.
+
+Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harri-
+son Edwards, Bowen Baker, Teddy Lee, Jan Leike,
+John Schulman, Ilya Sutskever, and Karl Cobbe.
+2023. Let’s verify step by step. In The Twelfth Inter-
+national Conference on Learning Representations.
+
+Pengfei Liu, Weizhe Yuan, Jinlan Fu, Zhengbao Jiang,
+Hiroaki Hayashi, and Graham Neubig. 2023. Pre-
+train, prompt, and predict: A systematic survey of
+prompting methods in natural language processing.
+ACM computing surveys, 55(9):1-35.
+
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+dar Joshi, Dangi Chen, Omer Levy, Mike Lewis,
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Roberta: A robustly optimized bert pretraining ap-
+proach. Preprint, arXiv:1907.11692.
+
+Sheng Lu, Hendrik Schuff, and Iryna Gurevych. 2024.
+How are prompts different in terms of sensitivity?
+In Proceedings of the 2024 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies
+(Volume 1: Long Papers), pages 5833-5856.
+
+Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler
+Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon,
+Nouha Dziri, Shrimai Prabhumoye, Yiming Yang,
+et al. 2023. Self-refine: Iterative refinement with
+self-feedback. Advances in Neural Information Pro-
+cessing Systems, 36:46534—46594.
+
+Hamed Mahdavi, Alireza Hashemi, Majid Daliri, Pegah
+Mohammadipour, Alireza Farhadi, Samira Malek,
+Yekta Yazdanifard, Amir Khasahmadi, and Vasant
+Honavar. 2025. Brains vs. bytes: Evaluating Ilm
+proficiency in olympiad mathematics. arXiv preprint
+arXiv:2504.01995.
+
+Potsawee Manakul, Adian Liusie, and Mark JF Gales.
+2023. Selfcheckgpt: Zero-resource black-box hal-
+lucination detection for generative large language
+models. arXiv preprint arXiv:2303.08896.
+
+Sewon Min, Kalpesh Krishna, Xinxi Lyu, Mike
+Lewis, Wen-tau Yih, Pang Wei Koh, Mohit Iyyer,
+Luke Zettlemoyer, and Hannaneh Hajishirzi. 2023.
+Factscore: Fine-grained atomic evaluation of factual
+precision in long form text generation. arXiv preprint
+arXiv:2305.14251.
+
+Moran Mizrahi, Guy Kaplan, Dan Malkin, Rotem Dror,
+Dafna Shahaf, and Gabriel Stanovsky. 2024. State
+of what art? a call for multi-prompt Ilm evaluation.
+Transactions of the Association for Computational
+Linguistics, 12:933-949.
+
+
+===== PAGE BREAK =====
+
+Philipp Mondorf and Barbara Plank. 2024. Beyond
+accuracy: Evaluating the reasoning behavior of
+large language models—a survey. arXiv preprint
+arXiv:2404.01869.
+
+Minh-Vuong Nguyen, Linhao Luo, Fatemeh Shiri, Dinh
+Phung, Yuan-Fang Li, Thuy-Trang Vu, and Gho-
+lamreza Haffari. 2024. Direct evaluation of chain-
+of-thought in multi-hop reasoning with knowledge
+graphs. arXiv preprint arXiv:2402.11199.
+
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan,
+Dario Amodei, Ilya Sutskever, et al. 2019. Language
+models are unsupervised multitask learners. OpenAI
+blog, 1(8):9.
+
+David Rein, Betty Li Hou, Asa Cooper Stickland, Jack-
+son Petty, Richard Yuanzhe Pang, Julien Dirani, Ju-
+lian Michael, and Samuel R Bowman. 2024. Gpqa:
+A graduate-level google-proof q&a benchmark. In
+First Conference on Language Modeling.
+
+Jon Saad-Falcon, Omar Khattab, Christopher Potts, and
+Matei Zaharia. 2023. Ares: An automated evalua-
+tion framework for retrieval-augmented generation
+systems. arXiv preprint arXiv:2311.09476.
+
+Aarohi Srivastava, Abhinav Rastogi, Abhishek Rao,
+Abu Awal Md Shoeb, Abubakar Abid, Adam Fisch,
+Adam R Brown, Adam Santoro, Aditya Gupta,
+Adria Garriga-Alonso, et al. 2022. Beyond the
+imitation game: Quantifying and extrapolating the
+capabilities of language models. arXiv preprint
+arXiv:2206.04615.
+
+Gemini Team, Rohan Anil, Sebastian Borgeaud, Jean-
+Baptiste Alayrac, Jiahui Yu, Radu Soricut, Johan
+Schalkwyk, Andrew M Dai, Anja Hauth, Katie
+Millican, et al. 2023.    Gemini: a family of
+highly capable multimodal models. arXiv preprint
+arXiv:2312.11805.
+
+Gemma Team, Aishwarya Kamath, Johan Ferret, Shreya
+Pathak, Nino Vieillard, Ramona Merhej, Sarah Perrin,
+Tatiana Matejovicova, Alexandre Ramé, Morgane
+Riviére, et al. 2025. Gemma 3 technical report. arXiv
+preprint arXiv:2503.19786.
+
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier
+Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+Baptiste Roziére, Naman Goyal, Eric Hambro,
+Faisal Azhar, et al. 2023. Llama: Open and effi-
+cient foundation language models. arXiv preprint
+arXiv:2302.13971.
+
+Jan Philip Wahle, Terry Ruas, Yang Xu, and Bela Gipp.
+2024. Paraphrase types elicit prompt engineering
+capabilities. arXiv preprint arXiv:2406.19898.
+
+Peiyi Wang, Lei Li, Liang Chen, Zefan Cai, Dawei Zhu,
+Binghuai Lin, Yunbo Cao, Qi Liu, Tianyu Liu, and
+Zhifang Sui. 2023. Large language models are not
+fair evaluators. arXiv preprint arXiv:2305.17926.
+
+Ruiqi Wang, Jiyu Guo, Cuiyun Gao, Guodong Fan,
+Chun Yong Chong, and Xin Xia. 2025. Can Ilms
+replace human evaluators? an empirical study of Ilm-
+as-a-judge in software engineering. arXiv preprint
+arXiv:2502.06193.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+et al. 2022. Chain-of-thought prompting elicits rea-
+soning in large language models. Advances in neural
+information processing systems, 35:24824—24837.
+
+Shijie Xia, Xuefeng Li, Yixin Liu, Tongshuang Wu, and
+Pengfei Liu. 2025. Evaluating mathematical reason-
+ing beyond accuracy. In Proceedings of the AAAI
+Conference on Artificial Intelligence, volume 39,
+pages 27723-27730.
+
+An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui,
+Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu,
+Fei Huang, Haoran Wei, et al. 2024. Qwenz?2. 5 tech-
+nical report. arXiv preprint arXiv:2412.15115.
+
+Shunyu Yao, Diszzzzan Yu, Jeffrey Zhao, Izhak Shafran,
+Tom Griffiths, Yuan Cao, and Karthik Narasimhan.
+2023. Tree of thoughts: Deliberate problem solving
+with large language models. Advances in neural
+information processing systems, 36:11809-11822.
+
+Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali
+Farhadi, and Yejin Choi. 2019. Hellaswag: Can a
+machine really finish your sentence? arXiv preprint
+arXiv: 1905.07830.
+
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan
+Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin,
+Zhuohan Li, Dacheng Li, Eric Xing, et al. 2023. Judg-
+ing Ilm-as-a-judge with mt-bench and chatbot arena.
+Advances in Neural Information Processing Systems,
+
+36:46595—46623.
+
+Yongchao Zhou, Andrei Ioan Muresanu, Ziwen Han,
+Keiran Paster, Silviu Pitis, Harris Chan, and Jimmy
+Ba. 2023. Large language models are human-level
+prompt engineers. In The Eleventh International
+Conference on Learning Representations.
+
+A RCScore Computation Details
+
+A.1 Dimension Formulations
+
+All three metrics employ a unified computational
+approach where similarity scores are calculated
+between document pairs, normalized to the [0,1]
+range, with higher values indicating greater simi-
+larity along the respective dimension.
+
+A.1.1  Structurality
+
+We compute Structurality through syntactic pattern
+comparison between aligned sentence pairs:
+
+S-  J(P(si), P(t)
+
+1
+Struct(Da, Dy) = —
+
+(4)
+
+
+===== PAGE BREAK =====
+
+where D,, Dy, denote the source and target doc-
+uments, M = {(s1, t1), (So, t2),..-, (Sn, tn) } rep-
+resents the set of semantically aligned sentence
+pairs determined via BERTScore similarity, P(s)
+extracts the set of syntactic patterns from sentence
+s, and J(A,B) =  sus calculates the Jaccard
+similarity between pattern sets. Each syntactic pat-
+tern has the form (pos;, dep,, pos;,) representing
+the part-of-speech tag, dependency relation, and
+head token’s part-of-speech.
+
+This approach captures fine-grained syntactic re-
+lationships while abstracting away from specific
+lexical choices, allowing us to measure structural
+similarity even when vocabulary differs substan-
+tially.
+
+A.1.2 Lexicality
+
+We define Lexicality as the weighted sum of two
+complementary similarity measures:
+
+Lex(Da, Dy) = wre: Step + wrt: Sat (5)
+
+where Stp represents the TF-IDF cosine simi-
+larity between document vectors, and Spy quan-
+tifies the ROUGE-L F-measure based on longest
+common subsequence. wrp and wey are weights
+with default values wrp = wey = 0.5. This com-
+bined approach balances global vocabulary distri-
+bution similarity (TF-IDF) with local sequential
+word matching (ROUGE-L).
+
+A.1.3. Coherence
+
+We formulate Coherence as the product of struc-
+tural alignment and content similarity:
+
+Coherence(D,, Dp) = S(Da, Do) + Cw(Da; Do)
+(6)
+
+where S(D,,Dy) = wo: O+wp:P+un-:
+N + wc: Cs represents the structural similarity
+score combining four components: (1) O = TH
+the normalized Kendall’s Tau correlation (7) of
+chunk order; (2) P, position matching with em-
+phasis on document endpoints; (3) N, sequential
+continuity between matched chunks; and (4) C;,
+semantic similarity between aligned chunks. The
+weights wo, wp, wn, wc have default values of
+0.25 each. The term C,,(Da, Dy) = C? applies a
+quadratic content-weighted penalty to ensure that
+structural similarities are only meaningful when
+the compared chunks contain related information.
+
+The computation involves segmenting docu-
+ments into semantic chunks of adaptive size k,
+aligning chunks using a combined BERTScore and
+TF-IDF similarity matrix, and analyzing the se-
+quence and position of matched chunk pairs.
+
+Algorithm 1 Applying RCScore Dimensions
+through the CRS Way
+
+Require: Style-variant responses {,} where s €
+S
+
+Ensure: Three-dimensional CRS values using RC-
+
+Score dimensions
+
+: function RCSCORE(D,, D2)
+
+return (Structurality, Lexicality,
+Coherence)      > 3D similarity vector
+
+: end function
+
+CRS vectors —_ 0
+
+: for (5;,5;) € (3) do          > All style pairs
+
+sim; < RCScore(Rs,, Rs;)
+
+CRS vectors <- CRS vectors U {simi.;}
+
+10: end for
+
+I: CRS = 7 SsccrS yee &                  P
+Dimension-preserving average
+
+12: return CRS = (CRSstruct; CRStex,
+
+13:          CRS con)
+
+> Number of style pairs
+
+A.2 Cross-Response Similarity (CRS) Way of
+Applying RCScore
+
+To quantify how instruction styles influence model
+responses, we apply RCScore dimensions through
+the Cross-Response Similarity (CRS) way (Algo-
+rithm 1):
+
+¢ Cross-Response Similarity (CRS) - mea-
+sures the consistency across (/3!) pairs of re-
+sponses generated under different instruction
+
+formulations using RCScore dimensions.
+
+The key innovation in our approach is preserving
+RCScore’s three-dimensional nature when calcu-
+lating cross-style consistency. Each comparison
+produces a vector (struct, lex, coh) representing
+Structurality, Lexicality, and Coherence dimen-
+sions. This allows for a detailed analysis of which
+specific aspects of reasoning style are most affected
+by instruction variations.
+
+For each problem, we compute:
+
+CRS, = Aggregate{ sim;,j|(si, sj) € (3); (7)
+
+
+===== PAGE BREAK =====
+
+Model                         AIME                      MATH-500             GPQA-Diamond              GSM8K
+
+S1     82     S3     S4     S1     82     S3     S4 /S1 S82 S3 S4) S1     82     S3     S4
+Gemma 3-4B        6.7 10.0 6.7 3.3 | 65.8 640 66.0 67.0|45 3.0 4.0 2.5 | 88.3 87.9 88.9 89.2
+Gemma 3-12B      23.3 23.3 23.3 20.00) 71.4 71.6 73.00 72.4 |45 40 66 66) 92.0 91.7 92.3 91.9
+Gemma 3-27B      30.0 26.7 33.3 20.0 | 75.8 77.6 76.8 774/61 7.1 61 66948 93.9 946 94.1
+LLaMA 3.2-3B | 33 0.0 67 10.0) 41.8 41.6 41.0 398/51 2.0 40 51/783 764 71.8 78.4 |
+LLaMA 3.1-8B      3.3 100 67 67 | 42.8 43.6 424 464|2.0 35 45 2.5 | 82.1 82.9 842 83.5
+LLaMA 3.3-70B | 20.0 23.3 26.7 23.3 | 644 644 616 63.6]6.1 86 56 5.6) 90.4 90.1 914 90.8
+Qwen2.5-3B | 3.30 3.30 3.3 6.7 | 55.0 54.2 552 554/25 2.5 3.0 3.5] 83.3 79.1 843 83.3 |
+Qwen 2.5-7B        13.3 67 13.3 13.3 | 64.0 63.0 58.2 65.0| 5.6 3.5 45 4.0) 87.1 88.3 82.5 86.2
+Qwen 2.5-32B      13.3 13.3) 16.7 16.7 | 69.8 68.8 67.8 69.8 | 3.5 2.0 61 2.0) 92.6 91.4 93.2 93.0
+Qwen 2.5-72B      30.0 23.3 13.3 23.3 | 70.8 69.6 71.2 71.2|40 66 56 5.1 | 92.3 92.9 92.9 92.5
+
+(a) Beam search (temperature = 1.0).
+
+Model                         AIME                      MATH-500             GPQA-Diamond              GSM8K
+
+S1     82     S3     S4     S1     82     S3     S4 /S1 S82 S3 S4) S1     82     S3     S4
+Gemma 3-4B        13.3 13.3 67 10.0 | 66.6 65.8 646 646|]3.5 2.5 3.0 2.0) 87.1 848 848 86.1
+Gemma 3-12B       33 33 33 3.3 |524 526 546 508/61 66 3.0 5.1 | 90.0 89.9 90.3 91.0
+Gemma 3-27B      26.7 30.0 30.0 23.3 | 76.2 764 76.8 78.0] 6.1 5.6 5.1 66) 94.5 94.2 942 946
+LLaMA 3.2-3B [10.0 13.3 13.3 100/416 42.6 424 454/30 40 25 51)798 79.1 78.0 79.8 |
+LLaMA 3.1-8B      6.7 3.3 10.0 10.0 | 43.2 450 43.6 448)3.5 5.1 3.5 3.0 | 84.7 85.2 849 84.9
+LLaMA 3.3-70B | 26.7. 23.3 30.0 26.7 | 64.4 63.0 61.8 65.0 | 7.1 8.1 7.1 7.1 | 93.7. 93.3 93.2 93.3
+Qwen2.5-3B | 6.7 133 100 3.3 | 57.4 55.2 58.2 572/15 15 3.0 30) 84.7 848 84.2 84.6 |
+Qwen 2.5-7B       20.0 16.7 10.0 16.7 | 66.2 66.6 65.8 646|2.0 2.0 3.0 1.5 | 90.5 889 89.4 89.3
+Qwen 2.5-32B      16.7. 10.0 20.0 20.0 | 71.6 70.6 72.2 69.0| 5.1 66 7.1 40) 92.8 92.8 92.3 92.7
+Qwen 2.5-72B      20.0 26.7 20.0 20.0 | 72.2 70.8 71.8 69.6| 5.6 3.5 6.1 5.1 | 92.8 92.3 93.0 93.3
+
+(b) Greedy search (temperature = 0.0).
+
+Table 3: Accuracy by Instruction Style (S1: Declarative, $2: Interrogative, S3: Exclamative, S4: Imperative) on four
+
+benchmarks (AIME, MATH-500, GPQA-Diamond, and GSM8K) for different decoding strategies.
+
+where S is the set of instruction styles, and
+simi,j is the similarity vector between responses
+generated under instruction styles s; and s;, calcu-
+lated using RCScore dimensions.
+
+B_ Experimental Implementation Details
+
+RCScore evaluates model performance across dif-
+ferent instruction styles while maintaining consis-
+tent semantic content. Figure 8 shows our imple-
+mentation approach for applying these style varia-
+tions.
+
+Rather than completely rephrasing benchmark
+problems, which would be computationally expen-
+sive and potentially introduce unintended seman-
+tic shifts, we adopted a lightweight approach that
+appends style-specific instructions to the original
+problem text. This preserves the core problem con-
+tent while varying only the instruction component.
+
+As shown in Figure 8, our implementation de-
+fines four instruction styles—Declarative, Interrog-
+ative, Exclamative, and Imperative—following lin-
+guistic clause type classifications. Each style main-
+tains consistent main verbs (solve, suggest) while
+varying syntactic structure. We carefully controlled
+the Type-Token Ratio (0.75-0.78) across all styles
+
+to ensure lexical complexity remained comparable.
+
+This implementation approach enables efficient
+evaluation of style sensitivity at scale across multi-
+ple benchmarks and models, with minimal disrup-
+tion to the original benchmark problems.
+
+C_ Detailed Performance Results
+
+C.1 Performance with Beam Search
+(Temperature = 1.0)
+
+Table 3a provides comprehensive accuracy results
+for all evaluated models across the four instruction
+styles (S1: Declarative, S2: Interrogative, $3: Ex-
+clamative, S4: Imperative) and four reasoning tasks
+when using beam search with temperature = 1.0.
+These detailed measurements complement the visu-
+alization in Figure 2 (a), providing exact numerical
+values.
+
+The results reveal several notable patterns.
+Within each model family, larger parameter counts
+generally correlate with higher accuracy. For exam-
+ple, across most tasks, Gemma 3-27B shows higher
+accuracy than Gemma 3-4B. Different benchmarks
+exhibit varying levels of style sensitivity; AIME,
+for instance, shows considerable variance (e.g.,
+
+
+===== PAGE BREAK =====
+
+Style Sensitivity Index (SSI) at temp=1.0
+
+Style Sensitivity Index (SSD) at temp=0.0
+
+Model               AIME MATH GPQA  GSM8K | AIME MATH GPQA  GSM8K
+Gemma34B | 2110.18 0.95           0.07           130 0.14107           0.12
+Gemma3-12B | 0.52. O11 ‘(1.08           0.03           0.00 028 1.20           0.05
+Gemma 3-27B | 1.55 0.09 0.43           0.04          099 0.09 059           0.02
+LLaMA33B | 4230.19 1.20           0.40          0.92034. 1.05           0.10
+LLaMA3-8B | 239 033 1.12           0.10          249 016 O81           0.03
+LLaMA 3-70B | 086 016 0.65           0.06          085 O18 025           0.02
+Qwen25-3B 12.26 0.09 0.79            0.25           7840.18 1.78            0.03
+Qwen25-7B | 149 043 061            0.27            154 0.12—«d4:24           0.08
+Owen 2.5-32B | 0.70 012 267            0.08            129 O15 4101            0.03
+Qwen2.5-72B | 242 0.09 0.67            0.03            107 0.14. 0.85            0.04
+
+Table 4: Style sensitivity across tasks and temperature settings. The Style Sensitivity Index (SSI) quantifies
+variation in model performance across instruction styles, calculated as SSI = 5-(a/j) + 0.05 - (max — min), where
+o is population standard deviation and jz is mean accuracy. Higher values indicate greater performance variability.
+AIME exhibits the highest sensitivity (average SSI: 1.83 at temp=1.0), followed by GPQA-Diamond (average SSI:
+1.02), while MATH-500 and GSM8K show lower sensitivity (average SSI: 0.18 and 0.13). While temperature=0.0
+generally reduces style sensitivity, three models (Qwen 2.5-3B/32B and LLaMA 3-8B) exhibit increased sensitivity
+at temperature=0.0 on AIME, demonstrating that deterministic generation can sometimes amplify instruction style
+
+effects.
+
+Qwen 2.5-72B ranges from 13.3% with S3 to
+30.0% with S1, a 16.7 percentage point (pp) dif-
+ference). In contrast, on GSM8K, the variation for
+many models is smaller, though LLaMA 3.2-3B
+still shows a 6.6% range (71.8% with S3 to 78.4%
+with S4).
+
+Model families demonstrate distinct patterns
+of style preference, which can also vary by task.
+For example, on AIME, Gemma 3-27B achieved
+its highest accuracy (33.3%) with the Exclama-
+tive style (S3), while Qwen 2.5-72B performed
+best with the Declarative style (S1) at 30.0%. The
+standard deviation of performance across styles
+can serve as an indicator of style robustness, with
+lower deviations suggesting more consistent perfor-
+mance.
+
+C.2 Performance with Greedy Search
+(Temperature = 0.0)
+
+Table 3b presents accuracy results for the same
+set of models and tasks when using greedy search
+(temperature = 0.0), providing a deterministic gen-
+eration scenario. These results are visualized in
+Figure 2 (b). Similar to beam search results, larger
+models within each family generally show higher
+accuracy (e.g., Gemma 3-27B and LLaMA 3.3-70B
+typically outperform their smaller counterparts).
+Benchmarks continue to show varying degrees
+of sensitivity to instruction styles even in this deter-
+ministic setting. AIME and GPQA-Diamond tend
+to exhibit more pronounced style-based variations
+compared to GSM8K, where performance is often
+more consistent. For instance, on AIME, LLaMA
+
+3.1-8B’s accuracy ranged from 3.3% (S2) to 10.0%
+(S3/S4), a 6.7% difference. On GPQA-Diamond,
+Qwen 2.5-32B varied from 4.0% (S4) to 7.1% (S3),
+a 3.1% difference. Distinct style preferences per-
+sist, with models showing varying optimal styles
+depending on the task and model size. Standard
+deviations across styles are generally smaller than
+at temperature = 1.0, indicating more consistent
+performance in deterministic generation.
+
+C.3. Comparative Analysis of Temperature
+Effects
+
+Comparing model performance with beam search
+(temperature = 1.0) versus greedy search (temper-
+ature = 0.0) reveals important insights. Models
+generally exhibit reduced cross-style variance with
+greedy search. For example, on AIME, the max-
+imum observed accuracy difference for LLaMA
+3.1-8B was 6.7% with greedy search, compared to
+larger gaps such as 16.7% for Qwen 2.5-72B under
+beam search.
+
+Despite this reduction in variance, significant
+style-based performance differences persist even in
+deterministic generation. As noted, Qwen 2.5-32B
+on GPQA-Diamond still exhibited a 3.1% differ-
+ence with greedy search. While greedy search tends
+to yield more consistent performance across styles
+for most models, it does not always result in opti-
+mal accuracy. In several instances, models achieve
+their highest accuracy on particular style-task com-
+binations with beam search at temperature = 1.0
+(e.g., Gemma 3-27B on AIME with S3: 33.3% at
+temp=1.0 vs. 30.0% at temp=0.0; LLaMA 3.3-70B
+
+
+===== PAGE BREAK =====
+
+Prompt Template for Instruction Style Variations
+
+Code Implementation:
+
+Instruction Type Definition:
+sentence_type = [
+
+# Declarative
+
+"The problem should be solved step by step.
+The answer is to be
+
+suggested in the following format.”
+
+# Interrogative
+
+"Could you solve the problem step by step?
+Would you suggest
+
+the answer in the following format?”
+
+# Exclamative
+
+"How important it is to solve the problem
+step by step! What a
+
+necessity it is to suggest the answer in
+the following format!”
+
+# Imperative
+
+"Solve the problem step by step. Suggest
+the answer in the
+
+following format.”
+
+J
+
+Message Structure:
+messages = [{
+"role": "user",
+"content": (
+f"”{text}\n\n"
+f"{sentence_type}\n"
+f”Solution: [explanation]\n”
+f”Answer: CLanswer]”
+)
+¥]
+
+Figure 8: Prompt implementation for RCScore exper-
+iments. We programmatically append different instruc-
+tion styles to each benchmark problem while maintain-
+ing a consistent output structure. This approach enables
+efficient evaluation of style sensitivity without modify-
+ing the core problem content.
+
+on GPQA-Diamond with S2: 8.6% at temp=1.0 vs.
+8.1% at temp=0.0), suggesting that some sampling
+diversity can be beneficial.
+
+These findings indicate that practitioners should
+consider both instruction style and temperature set-
+tings. For applications requiring maximum consis-
+tency, greedy search with carefully chosen instruc-
+tion styles may be preferable. Conversely, appli-
+cations seeking peak performance might benefit
+from temperature > 0 with task-specific style opti-
+mization. The persistence of style-based variation
+across temperature settings underscores the impor-
+tance of comprehensive evaluation frameworks like
+RCScore.
+
+D_ Cross-Task Patterns of Style Sensitivity
+
+To quantify how instruction style affects model
+performance across tasks and temperature settings,
+we developed the Style Sensitivity Index (SSI):
+
+SSI=5- 7 + 0.05 - (max — min)     (8)
+
+where a is the standard deviation of accuracy
+across styles, jis mean accuracy, and (max — min)
+captures the absolute performance range. This met-
+ric integrates both relative variation and absolute
+performance differences.
+
+Table 4 presents SSI values for all models across
+four benchmarks at temperatures 1.0 and 0.0. Style
+sensitivity patterns persist across all tasks but with
+task-dependent magnitudes: AIME exhibits highest
+sensitivity (avg SSI: 1.83 at temp=1.0), followed
+by GPQA-Diamond (avg SSI: 1.02), with MATH-
+500 and GSM8K showing substantially lower sen-
+sitivity (avg SSI: 0.18 and 0.13). This hierarchy
+suggests that task complexity and open-endedness
+amplify instruction phrasing effects.
+
+D.1 Analysis of Style Sensitivity on AIME
+
+AIME demonstrates exceptionally high style sen-
+sitivity, with several models showing SSI values
+exceeding 2.0 at temperature=1.0. LLaMA 3B ex-
+hibits the highest sensitivity (SSI: 4.23), followed
+by LLaMA 8B (2.39), Qwen 72B (2.42), and Qwen
+3B (2.26). The competitive nature of AIME prob-
+lems, requiring advanced mathematical reasoning
+and precise numerical solutions, appears particu-
+larly vulnerable to instruction formulation varia-
+tions.
+
+While temperature=0.0 generally reduces sen-
+sitivity, significant variations persist in determin-
+istic generation. Notably, three models exhibit
+increased sensitivity at temperature=0.0: Qwen
+3B (2.26-2.84), Qwen 32B (0.70 1.29), and
+LLaMA 8B (2.39-2.49). This contradicts the ex-
+pectation that deterministic generation would uni-
+versally stabilize performance across instruction
+styles.
+
+D.2 Analysis of Style Sensitivity on
+MATH-500
+
+MATH-500 shows consistently lower style sensi-
+tivity than AIME despite both being mathematical
+reasoning tasks. SSI values predominantly remain
+below 0.2, with Qwen 7B at temperature=1.0 be-
+ing the notable exception (SSI: 0.43). The struc-
+
+
+===== PAGE BREAK =====
+
+tured format of MATH-500 problems likely con-
+tributes to this reduced sensitivity, providing consis-
+tent mathematical notation that models can process
+regardless of instruction style.
+
+Temperature effects on MATH-500 sensitivity
+vary by model. Qwen 7B shows significantly higher
+sensitivity at temperature=1.0 (0.43) compared to
+temperature=0.0 (0.12), while Gemma 12B ex-
+hibits the opposite pattern (0.11—0.28). LLaMA
+3B demonstrates significant sensitivity at both tem-
+perature settings (0.19-0.34).
+
+D3 Analysis of Style Sensitivity on
+GPQA-Diamond
+
+GPQA-Diamond exhibits moderate to high style
+sensitivity with diverse patterns across model fam-
+ilies. Qwen 32B shows exceptionally high sensi-
+tivity at temperature=1.0 (SSI: 2.67), followed by
+LLaMA 3B (1.20) and LLaMA 8B (1.12). The
+scientific reasoning required by GPQA-Diamond
+appears particularly susceptible to instruction vari-
+ations, especially for certain model architectures.
+Temperature effects on GPQA sensitivity show
+model-specific patterns. While LLaMA 70B
+demonstrates reduced sensitivity at tempera-
+ture=0.0 (0.65-40.25), several models exhibit in-
+creased sensitivity: Qwen 3B (0.79-+1.78), Qwen
+7B (0.61-1.24), and Gemma 12B (1.08-1.20).
+
+D.4_ Analysis of Style Sensitivity on GSM8K
+
+GSM8K demonstrates the lowest style sensitivity
+among all benchmarks, with most models exhibit-
+ing SSI values below 0.1, particularly at tempera-
+ture=0.0. The well-structured nature of elementary
+arithmetic word problems likely contributes to this
+reduced sensitivity, presenting unambiguous rea-
+soning paths regardless of instruction phrasing.
+
+Temperature significantly impacts GSM8K style
+sensitivity. At temperature=1.0, smaller models
+show moderate sensitivity: LLaMA 3B (SSI: 0.40),
+Qwen 7B (0.27), and Qwen 3B (0.25). However,
+at temperature=0.0, nearly all models demonstrate
+minimal sensitivity (SSI < 0.05), with only LLaMA
+3B (0.10) and Gemma 4B (0.12) showing SSI val-
+ues above 0.1.
+
+E_ Discussion
+
+RCScore provides a crucial lens on LLM per-
+formance by assessing sensitivity to instruction
+style—a dimension typically absent in standard
+benchmarks. Our findings confirm that models ex-
+hibit significant accuracy variations and stylistic
+
+shifts in their responses (as measured by CRS)
+when instruction phrasing changes, even if seman-
+tic content is preserved. This variability, influenced
+by task complexity and decoding strategy, high-
+lights the limitations of single-formulation evalua-
+tions.
+
+The notable positive correlation between CRS
+(particularly its lexical and aggregated components)
+and mean task accuracy suggests a deeper con-
+nection: models that maintain stylistic consistency
+when explaining solutions across varied prompts
+tend to achieve higher accuracy. This implies that
+robust problem-solving ability may manifest as
+more stable expressive patterns. While RCScore
+does not directly measure internal cognitive pro-
+cesses, the consistency it quantifies in response
+characteristics, especially when linked to accuracy
+on reasoning-intensive tasks, offers an empirically
+grounded proxy for the stability and potential depth
+of a model’s approach. Thus, RCScore moves be-
+yond simple performance metrics, offering diag-
+nostic insights into the reliability and predictability
+of LLMs in diverse interaction contexts.
+
+F Future Work
+
+A key avenue for future work is to leverage RC-
+Score, especially CRS, as a more direct indicator
+of robust reasoning capabilities. The hypothesis is
+that models demonstrating high CRS on complex
+problems across varied instruction styles are more
+likely to possess genuine, transferable reasoning
+skills, as opposed to relying on superficial pattern
+matching. The observed correlation between CRS
+and accuracy supports investigating RCScore as a
+complementary signal for assessing the depth and
+reliability of a model’s problem-solving faculties.
+
+Further applications include using RCScore’s di-
+mensional feedback to refine model architectures
+and training objectives to improve specific aspects
+of response consistency. Additionally, RCScore can
+inform optimized prompt engineering practices by
+identifying instruction styles that elicit not only ac-
+curate but also consistently well-formed responses.
+The framework’s principles could also be extended
+to diverse generative tasks and modalities, and to
+cross-lingual style sensitivity analyses, ultimately
+fostering LLMs that are more adaptable and reli-
+able.
+
+
+===== PAGE BREAK =====
+
+Reference                   Comparison                                              Struct      Lexi Cohe RCScore Similarity
+The analysis of              Similar 1: The evaluation of mathematical proofs 0.4163 0.6696 0.8386       0.6415 High
+algorithmic complexity requires a systematic approach. First, we must
+requires a systematic     identify the basic assumptions within the theo-
+approach. First, we       rem. Then, we need to calculate how the logi-
+must identify the basic cal inferences build with respect to axiom use.
+operations within the       Many mathematicians confirm that formal nota-
+algorithm. Then, we      tion is necessary to express these logical steps.
+need to calculate how       However, there remains debate about the most ac-
+the number of these         curate methods for constructing proofs with mul-
+operations grows with     tiple lemmas while maintaining intuitive clarity.
+respect to input size.         Finally, we should consider the trade-offs between
+Many mathematicians      proof elegance and proof length when presenting
+confirm that asymptotic these theorems in practice.
+notation 1s necessary 0 Simijar 2: The formulation of statistical models 0.4289 0.7161 0.8474. —-0.6642—- High
+express these growth            :                 :            h. Fi
+HW       there     requires a systematic approach. First, we must
+rates.  vbate b       identify the basic variables within the dataset.
+remains depate about      Then, we need to calculate how the relation-
+the most accurate  ;         ships between these variables change with respect
+methods for analyzing                     :                           oe
+:      :          to sample size. Many mathematicians confirm
+algorithms with                           Pn         .
+itiol      ‘abl     hil     that probabilistic notation is necessary to express
+mulup © varia  vical © these statistical relationships. However, there re-
+evanee. b ol        mains debate about the most accurate methods for
+retevance, minally: We      building models with multiple parameters while
+should consider the             reer             wy:      :
+.      maintaining interpretability. Finally, we should
+trade-offs between time           :
+Jexi      d             consider the trade-offs between model accuracy
+comp exity ane’ space       and model complexity when applying these tech-
+complexity when              F       :         :
+:              :                     niques in practice.
+implementing these
+algorithms in practice.     Similar 3: The development of optimization al- 0.4225 0.7116 0.8422      0.6588 High
+
+gorithms requires a systematic approach. First,
+we must identify the basic constraints within the
+problem. Then, we need to calculate how the so-
+lution space changes with respect to parameter
+values. Many mathematicians confirm that vector
+notation is necessary to express these feasible re-
+gions. However, there remains debate about the
+most accurate methods for solving problems with
+multiple objectives while maintaining computa-
+tional efficiency. Finally, we should consider the
+trade-offs between convergence speed and solu-
+tion quality when implementing these methods in
+practice.
+
+Table 5: RCScore for Reference Paragraph vs. Similar Comparison Paragraphs. This table illustrates RCScore
+quantification for paragraphs with high stylistic similarity to a reference text, with visual cues for similar concepts
+(green text for similar concepts, blue text for reference’s key phrases).
+
+
+===== PAGE BREAK =====
+
+Reference
+
+Comparison
+
+The analysis of
+algorithmic complexity
+requires a systematic
+approach. First, we
+must identify the basic
+operations within the
+algorithm. Then, we
+need to calculate how
+the number of these
+operations grows with
+respect to input size.
+Many mathematicians
+confirm that asymptotic
+notation is necessary to
+express these growth
+rates. However, there
+remains debate about
+the most accurate
+methods for analyzing
+algorithms with
+multiple variables while
+maintaining practical
+relevance. Finally, we
+should consider the
+trade-offs between time
+complexity and space
+complexity when
+implementing these
+algorithms in practice.
+
+Different 1: OMG! Machine learning is SOOO
+amazing! I tried a neural network yesterday and
+WOW - it actually worked! Sort of... It got like
+85% accuracy which isn’t bad for my first try,
+right?! I think I’m totally gonna be an AI expert
+now! The code was pretty simple once I figured
+out all those weird tensor thingies. This stuff is
+way cooler than boring old algorithms. #AI #Ma-
+chineLearning #Future
+
+Different 2: Consider a set X with the discrete
+topology, where every subset of X is open. If X is
+an infinite set, such as the set of natural numbers
+N, then X is not compact. This is because the col-
+lection of all singleton sets {x} for x in X forms an
+open cover of X. However, no finite subcollection
+of this open cover can cover X, as each singleton
+set only covers one point. Therefore, by the defini-
+tion of compactness (a space is compact if every
+open cover has a finite subcover), an infinite set
+with the discrete topology is not compact. This
+demonstrates a fundamental concept in point-set
+topology.
+
+Different 3: To solve this quadratic equation, first,
+bring all terms to one side to get the form ax2
++ bx + c = 0. Then, identify the coefficients a, b,
+and c. The solutions for x can be found using the
+quadratic formula: x = (-b + sqrt(b’2 - 4ac)) / (2a).
+Remember that the discriminant, Delta = b’2 -
+4ac, determines the nature of the roots. If Delta
+> 0, there are two distinct real roots. If Delta = 0,
+there is one real root (a repeated root). If Delta
+< 0, there are two complex conjugate roots. This
+method is a cornerstone of algebra and is widely
+applicable in various scientific and engineering
+problems.
+
+Struct        Lexi Cohe RCScore Similarity
+0.0813 0.0141 0.7298     0.2751 Low
+0.2751 0.1428 0.7821        0.4000 Low
+0.2105 0.1519 0.7953     0.3859 Low
+
+Table 6: Comparison with Semantically and Stylistically Different Paragraphs, highlighting contrasting elements
+(red text) against the reference’s structure (blue text for reference’s key phrases).
+
+
+===== PAGE BREAK =====
+
+Model                             AIME                MATH-500        GPQA-Diamond           GSM8K
+Beam Greedy | Beam Greedy | Beam Greedy | Beam’ Greedy
+
+Gemma 3-4B           6.7         10.8        65.7        65.4        3.5          2.8         88.6        85.7
+Gemma 3-12B        22.5        3.3         72.1        52.6        5.4          5.2         92.0       90.3
+Gemma 3-27B        27.5        27.5        76.9       76.9        6.5          5.9         94.4       94.4
+LLaMA 3.2-3B          5.0           11.7          41.1          43.0           4.1             3.7            76.2         79.2
+LLaMA 3.1-8B        6.7         7.5         43.8        44.2        3.1          3.8         83.2       84.9
+LLaMA 3.3-70B | 23.3        26.7        63.5        63.6        6.5          7.4         90.7        93.4
+Qwen 2.5-3B           4.2         8.3         55.0       57.0        2.9          2.3          82.5        84.6
+Qwen 2.5-7B            11.7         15.9         62.6         65.8          4.4            2.1           86.0         89.5
+Qwen 2.5-32B         15.0        16.7        69.1        70.9        3.4          5.7         92.6       92.7
+Qwen 2.5-72B           22.5          21.7          70.7          71.1           5.3             5.1            92.7          92.9
+Average                 14.5        15.0        62.1        61.1         4.5          4.4         87.9       88.8
+
+Table 7: Average accuracy comparison between Beam Search (temperature = 1.0) and Greedy Search (temperature
+= 0.0) across four benchmarks. Each value represents the average of S1-S4 instruction style scores. Bold numbers
+indicate the better-performing decoding strategy for each model and benchmark.

@@ -1,0 +1,1441 @@
+arX1v:2510.25303v1 [cs.CL] 29 Oct 2025
+
+Teaching Sarcasm: Few-Shot Multimodal Sarcasm Detection via
+Distillation to a Parameter-Efficient Student
+
+Soumyadeep Jana and Sanasam Ranbir Singh
+Department of Computer Science and Engineering
+Indian Institute of Technology Guwahati
+{sjana ,ranbir}@iitg.ac.in
+
+Abstract
+
+Multimodal sarcasm detection is challenging,
+especially in low-resource settings where sub-
+tle image-text contradictions are hard to learn
+due to scarce annotated data, which hinders the
+model’s performance. Parameter-efficient fine-
+tuning (PEFT) methods like adapters, LoRA,
+and prompt tuning reduce overfitting but strug-
+gle to reach optimal performance due to lim-
+ited supervision from few-shot data. We pro-
+pose PEKD, a unified framework that enhances
+PEFT methods via distillation from an ex-
+pert model trained on large-scale sarcasm data,
+which acts as the teacher. To mitigate unreli-
+able signals from the teacher, we introduce an
+entropy-aware gating mechanism that dynami-
+cally adjusts the distillation strength based on
+teacher confidence. Experiments on two public
+datasets demonstrate that our PEKD framework
+enables PEFT methods to outperform both prior
+parameter-efficient approaches and large multi-
+modal models, achieving strong results in the
+few-shot scenario. The framework is modu-
+lar and adaptable to a wide range of multi-
+modal models and tasks. The code is available
+at https: //github. com/mr-perplexed/kd_
+sarcasm.
+
+1 Introduction
+
+The use of multimodal (image+text) sarcasm has
+grown rapidly on social media, as it allows the
+users to express their harsh opinions in a veiled
+manner. Creation of large sarcasm datasets for
+tackling this problem is both costly and challeng-
+ing (Davidov et al., 2010; Gonzalez-Ibafiez et al.,
+2011), as sarcasm is often context-dependent, cul-
+turally nuanced, and difficult to annotate consis-
+tently (Rockwell and Theriot, 2001; Dress et al.,
+2008; Oprea and Magdy, 2019).
+
+In light of this, recent works in the mul-
+timodal domain have explored techniques like
+prompt-learning and adapter-learning with pre-
+trained language models (PLMs) for few-shot sar-
+casm (Liang et al., 2022b; Jana et al., 2024) and
+
+sentiment analysis (Yu and Zhang, 2022; Yu et al.,
+2022; Yang et al., 2022; Wu et al., 2024). These
+techniques have shown promise in few-shot set-
+tings, allowing the model to adapt effectively by
+introducing only a small number of learnable pa-
+rameters while keeping the large pretrained back-
+bone intact. The core motivation behind adopting
+these techniques is to achieve parameter-efficient
+learning, as large parameter size tend to overfit
+when training data is scarce. However, while these
+methods mitigate overfitting, they often underper-
+form because they have limited data to learn and
+generalize from—a challenge we refer to as su-
+pervision scarcity. From Table 4, we observe
+that across both datasets, vanilla PEFT methods
+(without distillation) fall short of their distillation-
+enhanced variants by approximately 1.7—3.5% in
+accuracy under the 1% data setting.
+
+To mitigate this supervision scarcity problem,
+we take inspiration from the teacher-student frame-
+work for knowledge distillation (KD) (Hinton et al.,
+2015) and propose PEKD (Parameter-Efficient
+Knowledge Distillation), a plug-and-play frame-
+work designed for few-shot multimodal sarcasm
+detection. This framework allows any model built
+with parameter-efficient modules, such as LORA
+(Hu et al., 2021), adapter (Houlsby et al., 2019),
+or prompt tuning (Lester et al., 2021), to be easily
+plugged in as the student, while an expert model
+trained on large-scale sarcasm data serves as the
+teacher. This setup enables the student to gener-
+alize from limited examples without overfitting,
+while learning inductive biases from the teacher
+through knowledge distillation. A major chal-
+lenge in distillation is unreliable teacher predic-
+tions, which can mislead the student. We address
+this with an entropy-aware gating mechanism that
+weights the distillation loss based on teacher confi-
+dence, providing strong guidance when the teacher
+is confident and reducing its influence when the
+teacher is uncertain. This ensures effective knowl-
+
+
+===== PAGE BREAK =====
+
+edge transfer while avoiding noisy signals.
+
+Compared to SOTA multimodal baselines, our
+framework PEKD helps PEFT methods achieve su-
+perior performance in the 1% data regime (A2.2%
+to A5.2%). Additionally, when compared against
+SOTA LVLMs, PEKD consistently helps PEFT
+techniques outperform across 5/10/20 shot settings,
+with LoRA even outperforming the best LVLM
+LLaMA-3.2-11B using 18x fewer trainable param-
+eters. In addition to strong quantitative results, we
+conduct qualitative evaluations, including embed-
+ding space visualization, student-teacher represen-
+tation alignment, and error mitigation analysis to
+understand how distillation benefits different PEFT
+variants. Our contributions are:
+
+1. We propose PEKD, the first teacher-student
+framework combining PEFT with entropy-
+aware knowledge distillation for few-shot mul-
+timodal sarcasm detection.
+
+2. We systematically evaluate and compare three
+PEFT variants—LoRA, Adapters, and Prompt
+Tuning, under our KD framework, and show
+that distillation consistently enhances their
+performance.
+
+3. We conduct a comprehensive empirical anal-
+ysis to reveal how KD improves representa-
+tion alignment, prediction confidence, and re-
+duces mismatched errors between student and
+teacher.
+
+2 Related Work
+
+Image-Text Sarcasm Detection
+
+The rise of visual content on social media has
+spurred interest in multimodal sarcasm detection.
+Early efforts by Schifanella et al. (2016) used
+hand-crafted image-text features, followed by hi-
+erarchical and contrastive fusion approaches (Cai
+et al., 2019; Xu et al., 2020; Pan et al., 2020)
+that model intra-modal and inter-modal incongruity.
+Graph-based techniques (Liang et al., 2021, 2022a)
+model token-level and global-level incongruity
+while knowledge-enriched (Liu et al., 2022) mod-
+els enhanced cross-modal reasoning. More recent
+advances include dynamic routing on modalities
+for capturing dominant modalitiy of sarcasm. (Tian
+et al., 2023), Qin et al. (2023) improved MMSD
+dataset, and proposed CLIP-based modeling.Tang
+et al. (2024) used retrieval-augmented instruction
+tuning while Xie et al. (2024) introduced parameter-
+efficient learning using mixture of adapters. Jana
+
+et al. (2024) proposed the first dedicated few-shot
+multimodal sarcasm detection model using prompt-
+tuning approach on BERT.
+
+In this study, we address the problem of few-
+shot multimodal saracsm detection with PEFT and
+
+distillation techniques.
+
+Multimodal Few-Shot Detection
+
+Early efforts for few-shot sentiment analysis used
+prompting and prompt tuning in PLM (Yu and
+Zhang, 2022). Yu et al. (2022) used a pre-training
+task to align image prompts before downstream
+sentiment analysis task. Yang et al. (2022) fused
+discrete prompts through bayesian fusion for im-
+proving sentiment detection. For object detection
+(Zhou et al., 2021) inserted prompts within CLIP
+text encoders while (Zhou et al., 2022) used image-
+conditioned prompts. Gao et al. (2021) introduced
+adapters in CLIP for object detection. Jana et al.
+(2024) used prompt tuning with attentive prompts
+for few-shot multimodal sarcasm detection.
+
+Our approach differs orthogonally by leveraging
+knowledge distillation with PEFT methods under
+a teacher-student setup for robust few-shot multi-
+modal sarcasm detection.
+
+3. Task Definition
+
+The few-shot multimodal sarcasm detection task
+is a binary classification problem: given an im-
+age-text pair Y = (J,T), the goal is to pre-
+dict y € 0,1, where 1 denotes sarcasm. In
+the few-shot setting, we have a small support set
+S = {(X;,yi)}%, with N equally split between
+sarcastic and non-sarcastic classes.
+
+4 Proposed Approach
+
+We choose CLIP (Radford et al., 2021) as the back-
+bone for both student and teacher due to its strong
+multimodal grounding and proven effectiveness on
+sarcasm detection tasks (Qin et al., 2023; Xie et al.,
+2024), however, it can be extended to other vision-
+language models as well.
+
+4.1 CLIP Preliminaries
+
+Vision Encoder: The input image I is divided into
+patches and passed through L transformer blocks:
+
+[BE =e ,E'), i=l. b M
+where €° is the visual transformer at layer i, E* €
+R™*¢» denotes the patch embeddings from the i"
+layer, and z* € R!*% is the embedding of the
+learnable class token. The final visual representa-
+tion himg is obtained by projecting the output class
+
+
+===== PAGE BREAK =====
+
+FFN @
+Softmax   ]
+
+Back propagate
+
+\\ Entropy,
+:                      \Gate
+i          na
+Combined Loss
+
+Output : O/1
+
+KD Loss.
+
+Figure 1: Architecture of PEKD framework.
+
+token from the last layer L:
+himg = Proje, (z”),   ie R?       (2)
+Text Encoder: A given input text sequence |
+
+is tokenized, embedded and passed through the L
+text transformer blocks €;:
+
+W=€ (Wr), i=1,...,L ©)
+
+where W* € R”**% represents the text embeddings
+from layer T’. To derive the final textual repre-
+sentation, the embedding of the last token in the
+final layer L is projected into the shared embedding
+space:
+
+hext = Proje,(W*[-1l]), te R*
+4.2 Methodology
+
+We propose PEKD, a parameter-efficient frame-
+work for few-shot multimodal sarcasm detection,
+illustrated in Fig. 1. It consists of two components:
+(a) A teacher model fully fine-tuned (updating all
+its parameters) on a large-scale sarcasm dataset,
+(b) a student augmented with PEFT modules for
+efficient adaptation. During training, both teacher
+and student process the same input, and their out-
+puts are used to compute the KD loss along with
+the task loss. An entropy-aware gating mechanism
+combines these losses to regulate the teacher’s in-
+fluence based on confidence, and only the student’s
+PEFT modules are updated. We elaborate on the de-
+tails of the teacher, the student, and the fine-tuning
+of the student in the subsections below.
+
+(4)
+
+4.3 Teacher Model
+
+Let 7 denotes the teacher, a pretrained CLIP model
+fine-tuned on a large sarcasm dataset. Due to its
+extensive parameterization and access to abundant
+
+training data, 7 captures intricate, cross-modal pat-
+terns of sarcasm. In few-shot settings, where direct
+fine-tuning of a large model can lead to overfitting,
+the teacher provides strong supervision and guides
+a parameter-efficient student, facilitating the trans-
+fer of its rich, sarcasm-sensitive knowledge. The
+teacher predicts the sarcasm label as:
+
+yz = Softmax(W7 - (himg ® htxt)) (5)
+
+where himg and hix¢ are the image and text
+embeddings obtained from the respective CLIP en-
+coders, W7 is the projection layer, © is the con-
+catenation operator and y7 is the soft logits from
+the teacher.
+
+4.4 Parameter-Efficient Student Model
+
+We design the student S as a parameter-efficient
+model that can be adapted to few-shot settings us-
+ing a range of PEFT techniques. In this work, we
+focus on three such techniques, namely, adapters,
+prompt-tuning, and LoRA and apply them to CLIP.
+Our framework is flexible, allowing any PEFT
+method to be plugged in as the student model. Each
+technique adds only a small number of learnable
+parameters, keeping the rest of the CLIP backbone
+frozen, which reduces overfitting in few-shot set-
+tings. The trainable parameter sizes are specified
+in Table 1. We outline the adaptations of these
+techniques in CLIP in the following subsections.
+
+4.4.1 Adapter-CLIP
+
+In this setup, we insert adapters into every layer
+of CLIP’s text and visual encoders. These
+adapters are lightweight bottleneck layers, consist-
+ing of a down-projection, a non-linearity, and an
+up-projection layer. Adapter Ad is realized as:
+
+
+===== PAGE BREAK =====
+
+Ad(h) = Mup . 0(Maown . h)        (6)
+
+where M,,, and Maown are upsample and down-
+sample projection layers respectively and @ is
+ReLU non-linearity. The visual and text encoders
+in equations (1) and (3) can be modified as:
+
+[2*, EB] = \([z"*, EB)
++ Ads, ([2"~*, B*~*))
+
+i=1,..,L         (7)
+[W"] = €}((W*"]) + Adz, ([(W*])
+i=1,..,L         (8)
+
+where Ady and Adp, are the adapter layers in
+the i‘” transformer block of the visual and text
+encoders, respectively.
+
+The insertion of adapters reduces the model’s
+trainable parameter size to around 3 ~ 4% of the
+original CLIP model. During fine-tuning, only the
+adapters get trained while the CLIP backbone is
+frozen.
+
+4.4.2 Prompt-CLIP
+
+In this configuration, we introduce a small set
+of learnable embeddings, called prompts, that are
+added to the input of the text and visual encoders
+at every layer. After applying prompts, the visual
+and text encoders in equations (1) and (3) can be
+reformulated as:
+
+[2", B', P2,] = E)([2""*, EB", Ps"'))
+t=1,..,L      (9)
+(P2,,W'] = e)((P, Ww)
+t=1,..,L     (10)
+where Pi! and Pi! are learnable prompt em-
+beddings added to the input of the visual and text
+encoders 2. This approach reduces the number of
+trainable parameters to roughly 0.02 ~ 0.03% of
+the original CLIP model. During fine-tuning, only
+
+the prompts are trained, while the CLIP backbone
+remains frozen.
+
+4.4.3 LoRA-CLIP
+
+LoRA (Low-Rank Adaptation) updates a pre-
+trained weight matrix W ¢ R@* using a low-
+rank decomposition AW = BA, where A €
+R™®, Be R®*", and r < min(dj,d2). For
+input X, the adapted projection becomes:
+
+h=WX +7(BA)X,          (11)
+
+Model                               Trainable Parameters
+CLIP ViT-B/16 (Teacher)              149M
+LoRA-CLIP (Student)                   2.9M
+Prompt-CLIP (Student)                 0.03 M
+Adapter-CLIP (Student)              4.1M
+
+Table 1: Trainable parameter sizes of teacher and stu-
+dent models.
+
+Model                 Train                Valid               Test
+MMSD
+Teacher (99%) 8543/11075/19618 860/1351/2211 959/ 1450/2409
+Student (1%)        99/99 / 198        99/99 / 198     959 / 1450 / 2409
+MMSD2.0
+Teacher (99%) 9477/10141/19618 943/1269/2212 1037/1072 / 2409
+Student (1%)        99/99 / 198         99/99 / 198     1037 / 1072 / 2409
+
+Table 2: Train, valid, and test splits (Pos/Neg/Total)
+for teacher and student. Student sees only 1% of the
+training data, while the teacher sees the remaining 99%.
+
+with ¥ as a scaling factor. We apply LoRA to the
+query, key, and value matrices of each attention
+layer in both text and vision encoders:
+
+Qto = XW, + y(BgAq)X        (12)
+Kio = XWp + Y(BeAg)X        (13)
+Vio = XWy + y(Bv Av) X        (14)
+The attention operation now becomes:
+oKy,
+Attn = Softmax( 2474 Vio (15)
+Vdk
+
+LoRA reduces trainable parameters by around 1.9%
+of the original CLIP. Only the low-rank matrices A
+and B are optimized during training.
+
+4.5 Fine-tuning the Student Model
+
+To fine-tune the student, we use knowledge distil-
+lation (KD) in addition to the task-specific loss to
+enable the student to learn from both ground truth
+labels and the teacher’s rich output distribution.
+This allows the student to mimick the teacher’s
+rich sarcasm-specific cross-modal representations,
+which is difficult for the student to generalize from
+limited training examples.
+
+We follow the same operations as the teacher
+(similar to equation 5) to get the final soft logits ys
+from the student. We fine-tune S on the few-shot
+data split, updating only the PEFT modules and the
+projection layer Ws. The combined objective for
+fine-tuning the student is:
+
+L=glor+(1—-g)£LKo        (16)
+
+
+===== PAGE BREAK =====
+
+where, Loz is the task-specific cross-entropy loss
+while Lp is the knowledge-distillation loss from
+the teacher to the student.
+
+The KD loss is computed as the KL divergence
+between teacher and student predictions:
+
+=                (i)
+Lip =T° S- yt (2) log vali) :
+
+i=1
+
+(17)
+
+where C’ is the number of classes and T? com-
+pensates for the temperature scaling effect. There
+might be cases when the teacher’s predictions are
+less confident. In such scenarios, we want the stu-
+dent to rely on learning from the data rather than
+rely on the teacher. To achieve this, we introduce
+an entropy-aware gating parameter g based on nor-
+malized entropy of the teacher:
+
+_ =e yr (i) log yr(@)
+
+18
+log C     (18)
+
+g
+where log C is the maximum possible entropy, en-
+suring g € (0, 1].
+
+Lemma. Weighting Lp by (1 — g) ensures it
+approaches zero as teacher uncertainty increases
+(g — 1) and remains intact when the teacher is
+confident (g — 0). (Proof in Appendix A.4.)
+
+Alternative Variant. We also experimented with
+a variant that sets the KD loss to zero when the
+teacher’s prediction is incorrect; however, this ap-
+proach underperformed compared to entropy-based
+gating. Detailed discussion is provided in Ap-
+pendix A.5.
+
+5 Experiments
+
+5.1 Datasets
+
+We assess our approach, PEKD, on the few-shot
+splits of MMSD (Cai et al., 2019) and MMSD2.0
+(Qin et al., 2023), proposed in the study (Jana et al.,
+2024). They extract two 1% few-shot splits for
+each dataset, with an equal number of samples per
+class. The size of the test set remains unchanged
+from the original dataset. We utilize the 1% split
+to train the student while the remaining 99% to
+train the teacher. Detailed statistics are provided
+in Table 2.
+
+5.2 Experimental Settings
+
+We employ ViT-B/16 CLIP backbone for both the
+teacher and student. Few-shot training can exhibit
+significant performance variability. To capture this,
+we train the student 6 times (3 trials x 2 splits) for
+
+each dataset and report the average Accuracy (Acc),
+average Macro-F1 (F1), and the standard deviation
+across all six runs. Additional hyperparameter de-
+tails for training the teacher and the student are
+reported in Appendix A.1.
+
+5.3 Baselines
+
+We evaluate our approach against two groups of
+baselines: PEFT and non-PEFT-based. For the non-
+PEFT based multimodal baselines, we consider
+the following SOTA models for sarcasm detection;
+HFM (Cai et al., 2019), Att-BERT (Pan et al.,
+2020), HKE (Liu et al., 2022), DIP (Wen et al.,
+2023), MV-CLIP (Qin et al., 2023), DynRT (Tian
+et al., 2023) and RAG-LLaVA (Tang et al., 2024).
+For the PEFT-based multimodal group, we consider
+PVLM (Yu and Zhang, 2022), UP-MPF (Yu et al.,
+2022), and CAMP (Jana et al., 2024) which are
+based on prompt-tuning in PLMs. CoOp (Zhou
+et al., 2021) and CoCoOp (Zhou et al., 2022) are
+prompt-tuning adaptations for CLIP. MoBA (Xie
+et al., 2024) is an adapter-based adaptation of CLIP.
+The details of these baselines are provided in the
+Appendix A.2. We evaluate all baselines on the
+few-shot data splits and report the performances.
+
+6 Main Results
+
+Following Jana et al. (2024), we report the few-shot
+performance of the models in Table 3. Our obser-
+vations are: (1) PEFT methods often outperform
+or match their non-PEFT counterparts by leverag-
+ing task-specific parameters while keeping the pre-
+trained backbone frozen, thus reducing overfitting.
+(2) When we train the teacher, Teacher (CLIP)
+(row 8 in Non-PEFT), on 1% few-shot split, we ob-
+serve that it overfits and performs poorly due to its
+large parameter size. In contrast, the student mod-
+els (LORA-CLIP (w/ KD), Adapter-CLIP (w/ KD),
+and Prompt-CLIP (w/ KD)) benefit from KD by
+acquiring inductive biases from the teacher (trained
+on the remaining 99% split). As a result, they out-
+perform the best baseline on MMSD, MoBA by gains
+ranging from A2.2% to A4.6% in Acc and CoOp
+on MMSD2.0 by A2.2% to A5.2%. (3) Among
+the students, LoRA-CLIP (w KD) demonstrates su-
+perior performance in the KD setup due to LoRA’s
+ability to directly modify the attention mechanism
+of the pretrained model. By injecting low-rank
+updates into the Q, K, V matrices of the attention
+layers, LoRA enables the student to more precisely
+align its internal attention patterns with those of the
+teacher, unlike prompts (which affect only inputs)
+
+
+===== PAGE BREAK =====
+
+MMSD                      MMSD2.0
+Method                     Acc            Fl             Acc            Fl
+Multimodal (Non PEFT)
+HFM                      0.612 (1.3) 0.598 (1.1) 0.561 (0.2) 0.361 (0.3)
+Att-BERT                    0.707 (1.7) 0.696 (1.3) 0.659 (1.6) 0.683 (1.8)
+HKE                       0.503 (2.3) 0.667 (2.8) 0.408 (1.5) 0.579 (1.3)
+DIP                         0.704 (2.7) 0.698 (2.3) 0.685 (2.8) 0.658 (2.6)
+DynRT                     0.583 (0.1) 0.487 (0.6) 0.518 (2.9) 0.513 (3.2)
+MV-CLIP                    0.780 (0.2) 0.770 (0.2) 0.742 (0.4) 0.740 (0.3)
+RAG-LLaVA                0.483 (9.1) 0.406 (4.6) 0.569 (0.1) 0.446 (8.3)
+Teacher (CLIP)             0.777 (0.5) 0.768 (0.6) 0.740 (1.2) 0.739 (1.1)
+Multimodal (PEFT)
+PVLM                      0.712 (0.6) 0.699 (0.2) 0.665 (2.2) 0.658 (2.1)
+UP-MPF                    0.707 (2.4) 0.701 (2.6) 0.669 (0.4) 0.663 (0.1)
+CAMP                      0.729 (0.9) 0.717(1.0) 0.692 (2.8) 0.681 (2.3)
+CoOp                        0.772 (1.6) 0.769 (1.5) 0.759(0.9) 0.759 (0.8)
+CoCoOp                    0.782 (1.0) 0.779 (1.0) 0.746 (1.6) 0.745 (1.6)
+MoBA                       0.799 (1.2) 0.790 (1.1) 0.758(0.7) 0.753 (0.9)
+PEKD (Ours)
+
+Adapter-CLIP (w/ KD) 0.824 (0.2) 0.819 (0.3) 0.799 (0.1) _—_-0.792 (0.3)
+Prompt-CLIP (w/ KD) 0.821 (0.3) 0.811 (0.4) 0.781 (0.5) 0.798 (0.4)
+LoRA-CLIP (w/ KD)       0.845 (0.3) 0.843 (0.1) 0.811 (0.2) 0.811 (0.2)
+
+Table 3: Performance comparison of multimodal meth-
+ods across few-shot MMSD and MMSD2.0 datasets.
+Our PEKD variants achieves SOTA performance. Num-
+bers in brackets indicate standard deviation. The
+
+best , second-best , and _ third-best results are
+
+highlighted respectively. Our method outperforms base-
+lines significantly with p < 0.05.
+
+or adapters (which act more peripherally).
+
+7 Comparison with LVLMs
+
+We compare our PEKD-based models with SOTA
+LVLMs, LLaVA-1.6-7B (Liu et al., 2023), LLaMA-
+3.2-11B (et al., 2024), and Qwen-2.5-VL-7B (Bai
+et al., 2025) across extremely low-resource settings:
+5/10/20-shots, as well as 1% supervision, as shown
+in Fig 4 for MMSD2.0 dataset. For fine-tuning of
+these LVLMs, we resort to LoRA with rank 8, due
+to resource constraints. Despite having drastically
+fewer trainable parameters (e.g., Prompt-CLIP:
+0.03M, Adapter-CLIP: 4.1M, LoRA-CLIP: 2.9M
+vs. 40-52M for LVLMs), our models consistently
+outperform LVLMs in the 5/10/20-shot settings.
+Even at 1% supervision, PEKD-based methods
+reach near-comparable accuracy to LVLMs while
+LoRA-CLIP outperforms the LVLMs in this setting.
+
+8 Ablation
+8.1 KD Boosts PEFT Performance
+
+Table 4 compares each PEFT variant with and with-
+out KD. Across all methods, KD consistently im-
+
+MMSD                              MMSD2.0
+
+Model
+
+Acc        Fl           A         Acc        Fl           A
+
+Prompt-CLIP (w/o KD) 0.802 0.799 41.9% 0.762 0.762 41.9%
+
+Prompt-CLIP (w/ KD) 0.821 0.811                 0.781 0.798
+
+Adapter-CLIP (w/o KD) 0.807 0.803       0.771 0.778
+
++1.7%
+Adapter-CLIP (w/ KD) 0.824 0.819     0.799 0.792
+
++2.8%
+
+0.810 0.803 43.5% 0.783 0.782 42.8%
+0.845 0.843     0.811 0.811
+
+LoRA-CLIP (w/o KD)
+LoRA-CLIP (w/ KD)
+
+Table 4: Ablation on KD. A shows % improvement in
+Acc with KD. Green highlights indicate positive gains.
+
+Student Embeddings (w/o KD)                    Student Embeddings (w/ KD)
+
+Class 0                                                                                             e Class 0
+Class 1         °                                                                                    © Class 1
+°
+
+Figure 2: Comparison of student embeddings with and
+without KD.
+
+proves the performance of the student in the 1%
+few-shot setting. In contrast, LoRA-CLIP (w/o
+KD), Adapter-CLIP (w/o KD), and Prompt-CLIP
+(w/o KD), without KD, underperform due to insuf-
+ficient supervision. The students trained with KD
+outperforms as we mitigate the supervision scarcity
+problem by inducting knowledge from the teacher.
+
+8.2 Effect of Entropy-Aware Gating
+
+To assess entropy-aware gating, we analyze its ef-
+fect on the weighting of KD loss during training.
+Figure 5 shows that higher teacher confidence cor-
+responds to lower entropy (g), resulting in larger
+weights (1 — g) for KD loss, thus amplifying re-
+liable teacher signals. When confidence is low, g
+increases, reducing KD influence. Table 5 confirms
+that entropy-based gating consistently improves
+performance across all student variants.
+
+9 Analysis
+
+9.1 Impact of KD on Student
+
+We study the impact of distilling knowledge from
+the teacher to the student from two perspectives: (a)
+Effect of KD on the student’s embedding space: We
+visualize the logit representations of the student
+model trained with and without KD in Fig 2. The
+KD-trained student exhibits better class-wise sepa-
+ration and structured embeddings, suggesting im-
+proved discriminative capacity and alignment with
+the teacher’s feature space. (b) Improved predic-
+
+
+===== PAGE BREAK =====
+
+°   °
+
+Prediction Confidence
+°
+N
+
+°
+a
+
++
+
+os            —                        8                       1                     —1_
+
+Label 0             Label             Label 2             Label 1
+w/e KD                w/ KD                w/o KD                w/ KD
+
+Figure 3: Class-wise prediction confidence comparison
+of student with and without KD.
+
+#Shots
+
+5-shot
+lm 10-shot
+lm 20-shot
+im 1%
+
+peta) 220M)     2a)    we   2
+oe ae “anc? we *   61 a3 0"   32? pr”. 0P
+apre’                                wen?
+
+Accuracy (%)
+2a 2 a as @ @
+$8 3 @ 8 &
+
+a
+a
+
+40 Mi)
+
+promot
+
+Figure 4: Comparison of PEKD-based models with
+LVLMs in 5/10/20 shots and 1% data setting for
+MMSD2.0 dataset. TP denotes trainable parameters.
+
+tion confidence of the student: As shown in Fig 3,
+the student model trained with KD exhibits con-
+sistently higher prediction confidence compared to
+its non-KD counterpart, across both class labels.
+This is evident from the upward shift in the median
+values and a tighter interquartile range.
+
+9.2 Strength of LoORA-CLIP
+
+To evaluate the strength of LoRA-CLIP over
+Adapter-CLIP and Prompt-CLIP, we compute the
+the mean Canonical Correlation (CCA) between
+the hidden states of the teacher model and each
+student model across corresponding transformer
+layers, for both the text and vision branches. This
+metric quantifies how closely the student preserves
+the internal representational structure of the teacher.
+As shown in Fig 6, LoORA-CLIP consistently ex-
+hibits the highest CCA scores across all layers.
+This suggests that LoRA is more effective at pre-
+serving and transferring internal structural repre-
+sentations from the teacher model. Notably, the
+alignment gap between LoRA and other methods
+widens in deeper layers, indicating LORA’s supe-
+rior ability to absorb hierarchical knowledge during
+distillation.
+
+MMSD                                         MMSD2.0
+
+Model
+
+w/o Gating w/ Gating A w/o Gating w/Gating A
+
+Prompt-CLIP 0.812          0.821 +0.9% 0.771          0.781 +1.0%
+Adapter-CLIP 0.811          0.824 +1.3% 0.777          0.799 +2.2%
+LoRA-CLIP         0.835          0.845 +1.0% 0.803          0.811 +0.8%
+
+Table 5: Ablation on Entropy-Aware Gating: Accuracy
+improvements when applying entropy-based gating for
+KD. A shows percentage gain.
+
+0.87
+0.6 4                     I
+D054                       I
+
+0.3 +
+
+0.2         T            T            T            T            T
+[0.5-0.6] [0.6-0.7] [0.7-0.8] [0.8-0.9] [0.9-1.0]
+Confidence Interval of Teacher Predictions
+
+Figure 5: Effect of teacher confidence on KD gating:
+Lower confidence (higher uncertainty) results in reduced
+KD weight (1-g), demonstrating the adaptive behavior
+of entropy-aware gating.
+
+9.3 Influence of KD on Student Errors
+
+We study the impact of KD on student performance
+from two perspectives: (a) Absolute reduction in
+student errors: Fig 7 shows a class-wise compari-
+son of the number of misclassified samples by the
+student with and without KD. Across both labels 0
+& 1, KD consistently reduces the total number of
+prediction errors, demonstrating its effectiveness in
+improving student generalization. (b) Mitigation
+of errors where the teacher was correct: To assess
+whether the student learns from the teacher’s cor-
+rect predictions, we isolate those samples where
+the teacher was correct but the student was not.
+Fig 8 presents these student-teacher mismatches,
+which effectively represent cases where distillation
+has the potential to guide the student. After KD,
+the number of such mismatches drops substantially
+across both classes, showing that the student better
+aligns with the teacher’s correct decisions.
+
+9.4 Cross-Dataset Generalization
+
+To evaluate the generalizability of our proposed
+framework, we conduct cross-dataset experiments
+by training all models on just 1% of the MMSD2.0
+dataset and testing them on two unseen datasets:
+MCMD (Maity et al., 2022) and RedEval (Tang
+et al., 2024). The details of these datasets are
+
+
+===== PAGE BREAK =====
+
+—e— LoRA-CLIP
+—=— Adapter-CLIP
+—*— Prompt-CLIP
+
+Mean Canonical Correlation
+JOWOJSULL XOL
+
+—e— LoRA-CLIP
+0.85 | —=— Adapter-CLIP
+—a— Prompt-CLIP
+
+Mean Canonical Correlation
+TaulIOJSUEI] [eNsIA
+
+0.65  oo
+
+2         4                           10       12
+
+6          8
+Transformer Layer
+
+Figure 6: Layer-wise CCA similarity between teacher
+and student models across text and visual transformers.
+
+Number of Errors
+
+Label o
+w/o KD
+
+Label 0
+w/ KD
+
+Label 1
+w/o KD
+
+Label 1
+w/ KD
+
+Figure 7: Class-wise error comparison of the student
+with and without KD.
+
+provided in Appendix A.3. As shown in Ta-
+ble 6, PEKD-based models consistently outper-
+form both PEFT and non-PEFT baselines, and even
+LVLMs across both datasets. Notably, the best-
+performing PEKD variant (LoRA-CLIP) achieves a
+substantial improvement over the strongest baseline
+(Qwen2.5-VL-7B). These results prove the general-
+izability of PEKD framework.
+
+10 Error Analysis
+
+To better understand the failure cases of our PEKD
+framework, we qualitatively analyze prediction er-
+rors and identify two broad patterns, shown in Ta-
+ble 7. First, both teacher and student models fail
+on (i) OCR-heavy cases, where sarcasm cues are
+embedded as image text (e.g., memes, screenshots),
+and (ii) context-dependent cases, where interpre-
+tation relies on external knowledge such as political
+or cultural context, inaccessible to the models (row
+1). Second, we observe student-specific failures
+where the teacher predicts correctly but the student
+does not—often due to limited data exposure or
+weaker multimodal reasoning capacity (row 2).
+
+Method                          MCMD                    RedEval
+Acc           Fl           Acc           Fl
+Multimodal (Non-PEFT)
+Att-BERT              0.477 (0.3) 0.474 (0.1) 0.461 (1.1) 0.457 (0.8)
+DIP                       0.545 (1.2) 0.545 (0.8) 0.532 (0.2) 0.513 (0.7)
+DynRT                  0.519 (1.6) 0.518 (1.4) 0.541 (0.6) 0.537 (0.9)
+MV-CLIP              0.653 (0.2) 0.641 (0.2) 0.623 (1.1) 0.620 (1.3)
+RAG-LLaVA           0.624 (1.7) 0.623 (1.5) 0.617(1.9) 0.611 (1.4)
+Multimodal (PEFT)
+PVLM                   0.564 (1.8) 0.541 (1.3) 0.553 (1.2) 0.552 (1.1)
+UP-MPF                 0.582 (2.1) 0.577 (1.9) 0.569 (0.1) 0.561 (0.3)
+CoOp                       0.663 (0.4) 0.662 (0.2) 0.629(0.9) 0.618 (0.7)
+CoCoOp              0.658 (1.0) 0.649 (0.5) 0.637(1.2) 0.631 (1.1)
+CAMP             0.601 (1.3) 0.591 (1.6) 0.631 (0.7) 0.628 (1.2)
+Large Vision-Language Models (LVLMs)
+LLaMA3.2-11B           0.693 (0.4) 0.682 (0.3) 0.641 (0.1) 0.653 (0.4)
+LLaVA1.6-7B             0.674 (0.5) 0.669 (0.3) 0.642 (0.4) 0.641 (0.6)
+Qwen2.5-VL-7B          0.691 (0.3) 0.685 (0.6) 0.656 (0.7) 0.659 (0.5)
+PEKD (Ours)
+
+Prompt-CLIP (w/KD) 0.713 (0.1) 0.698 (0.2) 0.686 (0.4) 0.683 (0.1)
+Adapter-CLIP (w/ KD) 0.724 (0.2) 0.719 (0.3) 0.698 (0.2) (0.691 (0.4)
+LoRA-CLIP (w/ KD)      0.742 (0.1) 0.739 (0.2) 0.704 (0.2) 0.698 (0.4)
+
+Table 6: Cross-dataset evaluation. All models are
+trained on 1% of MMSD2.0 and tested on two unseen
+datasets: MCMD and RedEval. PEKD consistently
+boosts all PEFT variants. Numbers in brackets denote
+standard deviation. Best results are in bold.
+
+Mismatches with Teacher
+
+Label o            Label              Label 1
+w
+
+oO                              Label 1
+w/o KD               KD              w/o KD              w/ KD
+
+Figure 8: Unique prediction errors made by the student
+(i.e., errors made by the student but not by the teacher)
+across KD and non-KD settings.
+
+11. Conclusion
+
+In this work, we introduce PEKD, a framework for
+few-shot multimodal sarcasm detection that com-
+bines parameter-efficient tuning with knowledge
+distillation from a strong CLIP-based teacher. By
+guiding lightweight CLIP student variants through
+KD and incorporating an entropy-aware gating
+mechanism to prioritize reliable teacher signals,
+PEKD enhances robustness and performance in
+few-shot settings. Experiments on two benchmarks
+show consistent gains over parameter-efficient and
+large multimodal baselines, highlighting its poten-
+tial for scalable vision-language understanding un-
+der data scarcity.
+
+
+===== PAGE BREAK =====
+
+(a) what i plan on saying to (b) authentic chinese desserts
+anyone that rings my doorbell
+GT/T/S:1/0/0
+
+GT/T/S:1/0/0
+
+(c) capacity room at basic
+income consultation in
+kingston
+GT/T/S:0/0/1
+
+(d) major pullback ! ! Spts
+GT/T/S:1/1/0
+
+Table 7: Qualitative error examples with image, caption,
+and prediction (GT: ground truth, T: teacher, S: student).
+Refer to appendix A.6 for an explanation of the errors.
+
+12 Limitations
+
+While PEKD delivers notable improvements in few-
+shot multimodal sarcasm detection, it has some
+limitations. Both teacher and student primarily
+leverage visual-textual content and can struggle in
+OCR-heavy scenarios or cases requiring external
+context. Lastly, the entropy-based weighting of the
+KD signal is a simple confidence proxy and may
+not fully capture nuanced uncertainties of sarcasm.
+Future work could explore richer reliability esti-
+mation and integration of external knowledge to
+improve robustness and reasoning.
+
+References
+
+Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wen-
+bin Ge, Sibo Song, Kai Dang, Peng Wang, Shi-
+jie Wang, Jun Tang, Humen Zhong, Yuanzhi Zhu,
+Mingkun Yang, Zhaohai Li, Jiangiang Wan, Pengfei
+Wang, Wei Ding, Zheren Fu, Yiheng Xu, Jiabo Ye,
+Xi Zhang, Tianbao Xie, Zesen Cheng, Hang Zhang,
+Zhibo Yang, Haiyang Xu, and Junyang Lin. 2025.
+Qwen2.5-vl technical report. ArXiv.
+
+Yitao Cai, Huiyu Cai, and Xiaojun Wan. 2019. Mullti-
+modal sarcasm detection in Twitter with hierarchical
+fusion model. In Proceedings of the 57th Annual
+Meeting of the Association for Computational Lin-
+guistics, Florence, Italy. Association for Computa-
+tional Linguistics.
+
+Dmitry Davidov, Oren Tsur, and Ari Rappoport. 2010.
+Semi-supervised recognition of sarcasm in Twitter
+and Amazon. In Proceedings of the Fourteenth Con-
+ference on Computational Natural Language Learn-
+ing, Uppsala, Sweden. Association for Computa-
+tional Linguistics.
+
+Megan L. Dress, Roger J. Kreuz, Kristen E. Link, and
+Gina M. Caucci. 2008. Regional variation in the
+use of sarcasm. Journal of Language and Social
+Psychology, 27:71 — 85.
+
+Abhimanyu Dubey et al. 2024. The llama 3 herd of
+models. ArXiv.
+
+Peng Gao, Shijie Geng, Renrui Zhang, Teli Ma,
+Rongyao Fang, Yongfeng Zhang, Hongsheng Li, and
+Yu Jiao Qiao. 2021. Clip-adapter: Better vision-
+language models with feature adapters. ArXiv.
+
+Roberto I. Gonzalez-Ibafiez, Smaranda Muresan, and
+Nina Wacholder. 2011. Identifying sarcasm in twitter:
+A closer look. In Annual Meeting of the Association
+for Computational Linguistics.
+
+Geoffrey E. Hinton, Oriol Vinyals, and Jeffrey Dean.
+2015. Distilling the knowledge in a neural network.
+ArXiv.
+
+Neil Houlsby, Andrei Giurgiu, Stanislaw Jastrzebski,
+Bruna Morrone, Quentin de Laroussilhe, Andrea Ges-
+mundo, Mona Attariyan, and Sylvain Gelly. 2019.
+Parameter-efficient transfer learning for nlp. ArXiv.
+
+J. Edward Hu, Yelong Shen, Phillip Wallis, Zeyuan
+Allen-Zhu, Yuanzhi Li, Shean Wang, and Weizhu
+Chen. 2021. Lora: Low-rank adaptation of large
+language models. ArXiv.
+
+Soumyadeep Jana, Animesh Dey, and Ranbir Singh
+Sanasam. 2024. Continuous attentive multimodal
+prompt tuning for few-shot multimodal sarcasm de-
+tection. Proceedings of the 28th Conference on Com-
+putational Natural Language Learning.
+
+Brian Lester, Rami Al-Rfou, and Noah Constant. 2021.
+The power of scale for parameter-efficient prompt
+tuning. In Conference on Empirical Methods in Nat-
+ural Language Processing.
+
+Bin Liang, Chenwei Lou, Xiang Li, Lin Gui, Min Yang,
+and Ruifeng Xu. 2021. Multi-modal sarcasm de-
+tection with interactive in-modal and cross-modal
+graphs. Proceedings of the 29th ACM International
+Conference on Multimedia.
+
+Bin Liang, Chenwei Lou, Xiang Li, Min Yang, Lin Gui,
+Yulan He, Wenjie Pei, and Ruifeng Xu. 2022a. Multi-
+modal sarcasm detection via cross-modal graph con-
+volutional network. In Annual Meeting of the Associ-
+ation for Computational Linguistics.
+
+Sheng Liang, Mengjie Zhao, and Hinrich Schiitze.
+2022b. Modular and parameter-efficient multimodal
+fusion with prompting. ArXiv.
+
+Haotian Liu, Chunyuan Li, Yuheng Li, and Yong Jae
+Lee. 2023. Improved baselines with visual instruc-
+tion tuning. 2024 IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition (CVPR).
+
+
+===== PAGE BREAK =====
+
+Hui Liu, Wenya Wang, and Haoliang Li. 2022. To-
+wards multi-modal sarcasm detection via hierarchical
+congruity modeling with knowledge enhancement.
+In Proceedings of the 2022 Conference on Empiri-
+cal Methods in Natural Language Processing, Abu
+Dhabi, United Arab Emirates. Association for Com-
+putational Linguistics.
+
+Krishanu Maity, Prince Jha, Sriparna Saha, and Push-
+pak Bhattacharyya. 2022. A multitask framework for
+sentiment, emotion and sarcasm aware cyberbully-
+ing detection from multi-modal code-mixed memes.
+Proceedings of the 45th International ACM SIGIR
+Conference on Research and Development in Infor-
+mation Retrieval.
+
+Silviu Oprea and Walid Magdy. 2019. Exploring author
+context for detecting intended vs perceived sarcasm.
+In Proceedings of the 57th Annual Meeting of the
+Association for Computational Linguistics, Florence,
+Italy. Association for Computational Linguistics.
+
+Hongliang Pan, Zheng Lin, Peng Fu, Yatao Qi, and
+Weiping Wang. 2020. Modeling intra and inter-
+modality incongruity for multi-modal sarcasm de-
+tection. In Findings of the Association for Computa-
+tional Linguistics: EMNLP 2020, Online. Associa-
+tion for Computational Linguistics.
+
+Libo Qin, Shijue Huang, Qiguang Chen, Chenran Cai,
+Yudi Zhang, Bin Liang, Wanxiang Che, and Ruifeng
+Xu. 2023. MMSD2.0: Towards a reliable multi-
+modal sarcasm detection system. In Findings of
+the Association for Computational Linguistics: ACL
+2023, Toronto, Canada. Association for Computa-
+tional Linguistics.
+
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sas-
+try, Amanda Askell, Pamela Mishkin, Jack Clark,
+Gretchen Krueger, and Ilya Sutskever. 2021. Learn-
+ing transferable visual models from natural language
+supervision. In International Conference on Machine
+Learning.
+
+Patricia Rockwell and Evelyn M. Theriot. 2001. Cul-
+ture, gender, and gender mix in encoders of sar-
+casm: A self-assessment analysis. Communication
+Research Reports, 18:44 — 52.
+
+Rossano Schifanella, Paloma de Juan, Joel R. Tetreault,
+and Liangliang Cao. 2016. Detecting sarcasm in
+multimodal social platforms. Proceedings of the 24th
+ACM international conference on Multimedia.
+
+Binghao Tang, Boda Lin, Haolong Yan, and Si Li. 2024.
+Leveraging generative large language models with
+visual instruction and demonstration retrieval for mul-
+timodal sarcasm detection. In North American Chap-
+ter of the Association for Computational Linguistics.
+
+Yuan Tian, Nan Xu, Ruike Zhang, and Wenji Mao. 2023.
+Dynamic routing transformer network for multimodal
+sarcasm detection. In Proceedings of the 61st Annual
+
+Meeting of the Association for Computational Lin-
+guistics (Volume I: Long Papers), Toronto, Canada.
+Association for Computational Linguistics.
+
+Chan Shao Wen, Guoli Jia, and Jufeng Yang. 2023. Dip:
+Dual incongruity perceiving network for sarcasm de-
+tection. 2023 IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR).
+
+Zichen Wu, Hsiu-Yuan Huang, Fanyi Qu, and Yun-
+fang Wu. 2024. Mixture-of-prompt-experts for multi-
+modal semantic understanding. In International Con-
+ference on Language Resources and Evaluation.
+
+Yifeng Xie, Zhihong Zhu, Xin Chen, Zhanpeng Chen,
+and Zhiqi Huang. 2024. Moba: Mixture of bi-
+directional adapter for multi-modal sarcasm detec-
+tion. In Proceedings of the 32nd ACM International
+Conference on Multimedia. Association for Comput-
+ing Machinery.
+
+Nan Xu, Zhixiong Zeng, and Wenji Mao. 2020. Rea-
+soning with multimodal sarcastic tweets via model-
+ing cross-modality contrast and semantic association.
+In Proceedings of the 58th Annual Meeting of the
+Association for Computational Linguistics, Online.
+Association for Computational Linguistics.
+
+Xiaocui Yang, Shi Feng, Daling Wang, Pengfei Hong,
+and Soujanya Poria. 2022. Few-shot multimodal sen-
+timent analysis based on multimodal probabilistic
+fusion prompts. Proceedings of the 31st ACM Inter-
+national Conference on Multimedia.
+
+Yang Yu and Dong Zhang. 2022. Few-shot multi-modal
+sentiment analysis with prompt-based vision-aware
+language modeling. 2022 IEEE International Con-
+ference on Multimedia and Expo (ICME).
+
+Yang Yu, Dong Zhang, and Shoushan Li. 2022. Unified
+multi-modal pre-training for few-shot sentiment anal-
+ysis with prompt-based learning. Proceedings of the
+30th ACM International Conference on Multimedia.
+
+Kaiyang Zhou, Jingkang Yang, Chen Change Loy, and
+Ziwei Liu. 2021. Learning to prompt for vision-
+language models. International Journal of Computer
+Vision.
+
+Kaiyang Zhou, Jingkang Yang, Chen Change Loy, and
+Ziwei Liu. 2022. Conditional prompt learning for
+vision-language models. 2022 IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition
+
+(CVPR).
+
+A Appendix
+A.1 Hyperparameter Details
+
+The teacher was fine-tuned till the best val accuracy
+was reached, with learning rates of le-5 for the
+backbone and 1e-4 for the head and a batch size of
+32. The student was fine-tuned with a learning rate
+of le-4, batch size of 32, with a LoRA rank of 32.
+The best model on the validation set was used for
+
+
+===== PAGE BREAK =====
+
+testing. The value of temperature T for the KD loss
+was set to 2. All experiments were conducted on an
+Nvidia RTX A5000 GPU with 24GB of memory.
+
+A.2 Baseline Details
+
+To establish a comprehensive comparison, we eval-
+uate our method against two categories of multi-
+modal sarcasm detection baselines: (1) Non-PEFT-
+based methods, which primarily focus on model-
+ing image-text interactions through hierarchical fu-
+sion, graph networks, co-attention, or dynamic rout-
+ing, and (ii) PEFT-based methods, which leverage
+prompts and adapters to address few-shot multi-
+modal sentiment, sarcasm and image recognition
+tasks.
+Non-PEFT Baselines:
+
+¢ HFM (Cai et al., 2019): Introduces hierarchi-
+cal early and late fusion to integrate image,
+text, and image attributes.
+
+D&R Net (Xu et al., 2020): Uses decompo-
+sition and relational reasoning to capture se-
+mantic associations.
+
+Att-BERT (Pan et al., 2020): Employs co-
+attention to detect intra- and inter-modal in-
+congruity.
+
+HKE (Liu et al., 2022): Leverages a hierarchi-
+cal network to model coarse- and fine-grained
+incongruities.
+
+MV-CLIP (Qin et al., 2023): Extends CLIP
+with an interaction layer for enhanced image-
+text incongruity modeling.
+
+DIP (Wen et al., 2023): Captures sarcasm via
+semantic reweighting, uncertainty modeling,
+and contrastive learning at factual and affec-
+tive levels.
+
+DynRT (Tian et al., 2023): Employs dynamic
+routing to identify sarcasm-relevant tokens in
+multimodal data.
+
+RAG-LLaVA (Tang et al., 2024): Incorpo-
+rates retrieval-based demonstrations to assist
+LLaVA for sarcasm detection.
+
+PEFT baselines:
+
+¢ PVLM (Yu and Zhang, 2022): Adopts
+prompt-based fine-tuning with integrated im-
+age tokens for few-shot multimodal sentiment
+analysis.
+
+Dataset         Sarcastic       Non-Sarcastic       Total
+
+MCMD              183                      123                  306
+RedEval            395                      609                  1004
+
+Table 8: Statistics of datasets used for cross-dataset
+evaluation.
+
+¢ UP-MPF (Yu et al., 2022): Pretrains on image
+tasks to bridge the gap between textual and
+visual prompts before applying to few-shot
+sentiment tasks.
+
+CoOp (Zhou et al., 2021): Learns continuous
+text prompts for CLIP for image recognition.
+
+CoCoOp (Zhou et al., 2022): Introduces
+image-conditioned text prompts for improved
+adaptation for CLIP for image recognition.
+
+CAMP (Jana et al., 2024): Proposes continu-
+ous attentive prompt tokens in BERT for few-
+shot multimodal sarcasm detection.
+
+MOoBA (Xie et al., 2024): Proposed mixture
+of adapters-based technique to combine vi-
+sual and textual information for multimodal
+sarcasm detection, achieving parameter effi-
+ciency.
+
+A.3 Cross-Dataset Details
+
+To evaluate the generalization ability of multimodal
+sarcasm detection models, we introduce two out-
+of-distribution datasets: MCMD and RedEval.
+
+¢ MCMD (Multi-modal Code-Mixed Memes
+Dataset) (Maity et al., 2022): This dataset
+consists of code-mixed memes originally
+meant for hateful meme detection but also
+has annotations for sarcasm. We remove sam-
+ples that are code-mixed in nature or has no
+sarcasm annotations.
+
+RedEval (Tang et al., 2024): Constructed to
+assess domain shift, RedEval includes image-
+text pairs from Reddit, since existing MMSD
+datasets are Twitter-centric. Sarcastic exam-
+ples are sourced from the sarcasm subreddit,
+while non-sarcastic examples come from sub-
+reddits like aww, funny, and pics.
+
+The detailed statistics for both these datasets
+are in Table 8
+
+
+===== PAGE BREAK =====
+
+MMSD2.0                                           MMSD
+
+Model
+
+Hard-Gate Entropy A Hard-Gate Entropy A
+
+Prompt-CLIP         0.775          0.781 = +0.6%        0.815          0.821 +0.6%
+Adapter-CLIP         0.791           0.799 = +0.8%         0.817           0.824 +0.7%
+LoRA-CLIP           0.803          0.811 +0.8%        0.834          0.845 +1.1%
+
+Table 9: Comparison of KD Variants. Entropy-gated KD
+outperforms Hard-Gate KD across models and datasets.
+A shows accuracy gain.
+
+A.4 Proof for Lemma 1
+Proof. The entropy-aware gating factor is defined
+
+as:
+
+Cc
+
+H(yr) =—>_ yr (i) log yr (i),
+i=1
+
+A(yr)
+log C ’
+
+g =
+(19)
+
+where log C’ is the maximum possible entropy for
+C classes, normalizing g € [0, 1]. The gated KD
+loss:
+
+cagated  _
+
+KD = (1—g9)Lxp.    (20)
+
+Case 1: Teacher is highly uncertain. If
+yr (t) © 4 for all 2, then:
+
+i=1
+g= PG =1, LEGS =0. (22)
+
+Case 2: Teacher is highly confident. If teacher
+predicts one class with high probability:
+
+H(yr) ~0, g=0, LIN =Lep. (23)
+
+Conclusion: Weighting by (1 — g) makes KD
+vanish when g — 1 (uncertain teacher) and fully
+retain it when g — O (confident teacher). This
+prevents noisy guidance while exploiting strong
+teacher signals.
+
+A.5 Effect of Hard-Gate on KD Loss
+
+We experimented with an alternative KD strat-
+egy, Hard-Gate KD, which discards the KD loss
+whenever the teacher prediction is incorrect. Ta-
+ble 9 compares this approach against our Entropy-
+Gated KD. The entropy-based approach consis-
+tently outperforms the hard-zero variant by 0.6-
+1.1% in accuracy across both datasets and all
+PEFT configurations. Reason: Hard-Gate KD elim-
+inates valuable soft-label information even in cases
+
+where the teacher prediction is slightly off but pro-
+vides useful class-probability distribution. Entropy
+gating, on the other hand, dynamically reduces KD
+influence without discarding it entirely, leading to
+better knowledge transfer.
+
+A.6 Detailed Error Analysis
+
+WED 10
+
+(b) Context-dependent
+Caption: “authentic chinese desserts”
+GT/T/S: 1/0/0
+Reason: Requires cultural knowledge
+as this dessert is not Chinese; both
+models fail.
+
+(a) OCR-heavy
+Caption: “what i plan on saying to
+anyone that rings my doorbell”
+GT/T/S: 1/0/0
+Reason: Sarcasm cue appears in text
+embedded in image; both models fail.
+
+(d) Student-only
+Caption: “major pullback!! Spts”
+GT/T/S: 1/1/0
+Reason: Sarcasm via exaggeration;
+student misses numeric reasoning.
+
+(c) Student-only
+Caption: “capacity room at basic
+income consultation”
+GT/T/S: 0/0/1
+Reason: Student overfits sarcastic
+patterns, might think that sparse room
+contradicts caption.
+
+Figure 9: Qualitative Error Analysis: Failure cases
+with GT (Ground Truth), T (Teacher), and S (Student)
+predictions.

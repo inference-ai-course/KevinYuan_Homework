@@ -1,0 +1,2029 @@
+2510.25805v1 [cs.CL] 29 Oct 2025
+
+arXiv
+
+Ideology-Based LLMs for Content Moderation
+
+STEFANO CIVELLI, The University of Queensland, Australia
+PIETRO BERNARDELLE, The University of Queensland, Australia
+NARDIENA A. PRATAMA, The University of Queensland, Australia
+GIANLUCA DEMARTINI, The University of Queensland, Australia
+
+Large language models (LLMs) are increasingly used in content moderation systems, where ensuring fairness
+and neutrality is essential. In this study, we examine how persona adoption influences the consistency and
+fairness of harmful content classification across different LLM architectures, model sizes, and content modalities
+(language vs. vision). At first glance, headline performance metrics suggest that personas have little impact
+on overall classification accuracy. However, a closer analysis reveals important behavioral shifts. Personas
+with different ideological leanings display distinct propensities to label content as harmful, showing that
+the lens through which a model “views” input can subtly shape its judgments. Further agreement analyses
+highlight that models—particularly larger ones—tend to align more closely with personas from the same
+political ideology, strengthening within-ideology consistency while widening divergence across ideological
+groups. To show this effect more directly, we conducted an additional study on a politically targeted task,
+which confirmed that personas not only behave more coherently within their own ideology but also exhibit
+a tendency to defend their perspective while downplaying harmfulness in opposing views. Together, these
+findings highlight how persona conditioning can introduce subtle ideological biases into LLM outputs, raising
+concerns about the use of AI systems that may reinforce partisan perspectives under the guise of neutrality.
+
+ACM Reference Format:
+Stefano Civelli, Pietro Bernardelle, Nardiena A. Pratama, and Gianluca Demartini. 2025. Ideology-Based LLMs
+for Content Moderation. 1, 1 (October 2025), 29 pages. https://doi-org/10.1145/nnnnnnn.nnnnnnn
+
+1 INTRODUCTION
+
+Large language models (LLMs) have demonstrated impressive capabilities across a wide range
+of tasks, from language understanding and generation to reasoning and instruction following
+[6, 36]. Yet, concerns remain about their tendency to encode and reproduce political biases, raising
+important questions in AI ethics and deployment [15, 41]. These issues are especially critical in
+automated content moderation, where LLMs are increasingly used to enhance scalability. In this
+setting, the outputs of these models reflect embedded ideological biases that can disproportionately
+affect certain groups, leading to unfair treatment of billions of users [10, 27]. If left unchecked, such
+disparities may lead to the unequal treatment of marginalized communities, the suppression of
+particular political perspectives, and an erosion of trust in the fairness and neutrality of digital
+platforms [5, 51].
+
+Prior work has shown that political bias in language models can be traced back to their training
+data. Feng et al. [12] found that, during pretraining, models acquire measurable political ideologies
+that shape their downstream tasks behavior leading to unequal treatment of different identity
+
+Authors’ Contact Information: Stefano Civelli, The University of Queensland, Brisbane, Australia, s.civelli@ugq.edu.au;
+Pietro Bernardelle, The University of Queensland, Brisbane, Australia; Nardiena A. Pratama, The University of Queensland,
+Brisbane, Australia; Gianluca Demartini, The University of Queensland, Brisbane, Australia.
+
+Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee
+provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the
+full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored.
+Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires
+prior specific permission and/or a fee. Request permissions from permissions@acm.org.
+
+© 2025 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+
+ACM XXXX-XXXX/2025/10-ART
+
+https://doi.org/10.1145/nnnnnnn.nnnnnnn
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+2                                                                                                                 Civelli et al.
+
+By
+
+“A museum curator with a                     Prompt Template
+
+vast collection of artifacts             Answer the following statement.
+
+related to early labor                          Statement: [STATEMENT] .
+
+movements.”                                  .                 .
+Respond taking on the perspective of
+
+the following persona: [PERSONA].
+
+co on museum [...]"
+
+s1: Strongly Agree
+2: Agree
+
+Authorit. >
+
+200,000 persona
+descriptions
+
+=                                                                                                                           61: Strongl
+—————————            Disagree»         t-
+o                                                                                                                i                 62: Agree               2
+8 our race has many                                                              Disagree _](__ 0.18         i                         *                     T
+superior qualities,            ,                                                     Agree        \U_ je.12          '            62 PCT responses              :
+compared with other races.                                            (                       f                  H             for each persona
+ns                                    {| Strongly Agree              0.47)
+i Stronaly Agree je4
+62 PCT statements (s)                                                     Model output
+
+Prompt Template
+
+Adopting the viewpoint of [PERSONA],
+
+o—    oe,  &               analyze the following text.
+
+Output a JSON object based on the
+“Extreme”               persona’s perspective
+10*         Personas            Text: [TEXT].
+
+°                       (445
+
+os             Harmful Content
+to Classify
+
+Authorit. +
+
+Extreme
+Personas
+Selection
+
+{"is_hate": true },
+"is hate": false },
+{"is_hate": true },
+
+(uso)                                  ;
+=<            za                         {"is_hate": false }
+
+« Libert.
+
+a
+
+Inter-grou|
+
+Agrecinen                Agreemen                           Less sensitive to own group hate
+
+x
+
+Overall Performance
+
+Agreement                                                                             Poltical
+
+Fig. 1. Overview of our experimental pipeline. Persona descriptions from PersonaHub are mapped onto a
+two-dimensional political compass using responses to the Political Compass Test (PCT). Extreme personas are
+then selected and used for to harmful content classification tasks across multiple LLMs. The design allows us
+to evaluate overall performance, intra- and inter-group agreement, and ideological sensitivity in politically
+charged moderation.
+
+groups. Since all training data reflect human biases to some extent, every model inherits these
+underlying distortions [22, 43]. The same study also revealed how models can be steered toward
+certain ideological perspectives through further pretraining, highlighting both the malleability and
+the vulnerability of LLMs to political manipulation.
+
+This issue is further amplified by the models’ ability to adopt different personas through prompt-
+based conditioning. Recent research shows that this mechanism can be leveraged to increase
+diversity and broaden perspectives. Fréhling et al. [14] found that using synthetic personas during
+data annotation increased viewpoint diversity, and Bernardelle et al. [3] demonstrated that the
+same approach can be used to influence the political viewpoint of LLMs. These findings suggest that
+persona-conditioning may serve as a lightweight alternative to expensive and opaque pretraining
+interventions. At the same time, the very impersonation capacity that enables output diversity and
+user engagement [1, 45], also creates new vectors for bias amplification [8, 11].
+
+While prior work has examined the influence on downstream tasks of ideological biases embedded
+in language models’ weights, persona-driven behaviors suggest the presence of a more dynamic
+and controllable layer of ideological induced tendencies. Surprisingly, research on how the adoption
+of personas affects LLM behavior in downstream tasks has received little attention. In this work, we
+aim to bridge this gap by investigating how the interaction between persona-conditioning, model
+architecture, and content modality (e.g., text-only vs. multimodal inputs) shape LLMs behavior in
+content moderation tasks. We address three specific research questions in this context:
+
+RQ1: How does political ideology encoded in persona descriptions affect the consistency of LLMs
+decisions in harmful content classification tasks?
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                   3
+
+RQ2: Do personas with different ideological leanings systematically differ in their propensity to
+label content as harmful?
+
+RQ3: To what extent does the moderation behaviour of a persona-conditioned LLM align more
+closely with personas sharing its political ideology? How does this alignment shape within-
+and across-ideology agreement in politically sensitive moderation tasks?
+
+RQ4: Are some LLM architectures, model sizes, or modalities (language vs. vision) more susceptible
+to persona-induced behavioral divergence in content moderation?
+
+To address these questions, we prompt six language models with a set of 200,000 synthetically
+generated persona descriptions to take the Political Compass Test (PCT). This process maps each
+persona to a two-dimensional political coordinate, capturing its economic and social ideological
+leanings. The resulting political distributions allow us to select ideologically extreme personas to
+be used for content moderation. We then re-prompt the same models using the selected extreme
+personas and evaluate their behavior on harmful content classification. Each persona-conditioned
+model assesses the same set of input instances, enabling a controlled comparison of how political ex-
+tremity in the prompt influences moderation outcomes. Our experimental pipeline is summarized in
+Figure 1, which illustrates how personas are mapped to political coordinates, how extreme personas
+are selected, and how these are subsequently used to evaluate harmful content classification. Our
+analysis shows that, from a high level, personas have little impact on overall classification accuracy.
+A closer analysis reveals that persona conditioning introduces systematic variation in moderation
+outcomes. Personas with differing ideological leanings display distinct propensities to label content
+as harmful, indicating that the lens through which a model interprets input can subtly shape its
+judgments. Agreement analyses further show that models—especially larger ones—align more
+closely with personas from the same political ideology, enhancing consistency within ideological
+groups while increasing divergence across the political spectrum. Furthermore, on a politically
+targeted task, personas not only exhibit coherent behavior within their own ideology but also tend
+to defend their perspective while downplaying harmfulness in opposing views.
+
+These results underscores the need to rigorously assess the ideological robustness of LLMs—
+particularly in high-stakes applications—where even subtle biases may have outsized impacts on
+fairness, inclusivity, and public trust.
+
+2 RELATED WORK
+
+This literature review synthesizes the current state of research across four key domains that inform
+our investigation into persona-based approaches for classification of hateful content. A growing
+body of work investigates how language models can be guided or adapted—through prompting
+strategies, fine-tuning, or role-playing frameworks—to achieve more accurate, fair, and contextually
+nuanced outputs. The following subsections review these lines of research in detail, highlighting
+both the potential and the limitations of current approaches.
+
+2.1 Persona-Based Conditioning
+
+Persona-based conditioning has recently gained attention as a resource-efficient strategy for shaping
+language model behavior, offering a way to introduce diversity without retraining. A comprehensive
+survey by Chen et al. [7] provides a foundational overview of this field, categorizing personas and
+outlining methods for their construction and evaluation. Building on this groundwork, researchers
+have explored practical applications. For example, Frohling et al. [14] showed that persona descrip-
+tions can broaden perspectives in annotation tasks, while Bernardelle et al. [3] demonstrated that
+personas can modulate political orientations in LLMs, enabling ideological diversity without param-
+eter updates. More recently, Wang et al. [49] introduced the idea of multi-persona self-collaboration,
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+4                                                                                                                 Civelli et al.
+
+where models simultaneously adopt different roles to solve complex tasks, illustrating the creative
+potential of this technique.
+
+Despite these promising directions, empirical studies have revealed important limitations. On
+factual tasks, Zheng et al. [53] systematically evaluated 162 roles across four LLM families and
+found no performance gains compared to control prompts. Similarly, Hu and Collier [20] quantified
+the "persona effect" and showed that although personas can elicit statistically significant shifts,
+they often explain less than 10% of the variance in annotations on subjective natural language
+processing (NLP) datasets. Consistent with these patterns, Civelli et al. [10] found that adopting
+personas yields only marginal improvements in hate speech detection, though their analysis is
+restricted to one model and one vision task, limiting the generalizability of the results.
+
+Beyond limited effectiveness, persona-based prompting can also carry risks of representational
+harm. Cheng et al. [9] proposed a stereotyping benchmark and showed that persona descriptions
+may reinforce racial stereotypes and marginalize underrepresented groups. Complementarily,
+Deshpande et al. [11] found that assigning certain personas increases the likelihood of toxic
+generations, raising concerns about deploying such methods in content moderation. At the same
+time, some studies have highlighted more nuanced effects. For instance, Tan et al. [45] investigated
+how socially-motivated prompting differences can shape theory-of-mind reasoning, pointing to
+subtler ways personas influence cognition-like behaviors.
+
+In response to these challenges, more systematic frameworks are being developed to strengthen
+the reliability of persona-based methods. Wang et al. [48] introduced RoleLLM, a comprehensive
+framework for benchmarking, eliciting, and improving role-playing abilities in LLMs. This included
+constructing RoleBench, the first large-scale benchmark for character-level role-playing, and fine-
+tuning models on role-specific instruction data to enhance persona adoption and maintenance.
+
+Finally, comparisons with alternative approaches underscore the trade-offs at stake. While
+prompt-based methods are computationally efficient, fine-tuning may be necessary for robust bias
+mitigation. Jin et al. [23] showed that bias mitigation at pretraining stages can transfer downstream,
+albeit unevenly, while Raza et al. [38] proposed MBIAS to reduce bias while retaining contextual
+fidelity. Together, these studies suggest that persona-based prompting alone may be insufficient
+in sensitive applications like hate speech detection, where targeted fine-tuning and structured
+frameworks could provide stronger safeguards.
+
+Our work extends these findings by systematically examining a more subtle risk: how political
+personas, even without significantly altering overall accuracy, can introduce consistent ideological
+biases and divergences in content moderation judgments across different model architectures and
+modalities.
+
+2.2 Hate Speech Detection: Multimodal and Text-Based Approaches
+
+Hate speech detection is a key challenge for building safe online platforms, and research has
+advanced along two complementary directions: multimodal detection (where text and images are
+combined) and text-based approaches.
+
+In multimodal detection, the focus has often been on hateful memes, where harmful content
+arises from the interplay between text and visuals. Kiela et al. [25] introduced the Hateful Memes
+dataset to benchmark progress in this area, showing how difficult it is for models to capture meaning
+across modalities. Building on this foundation, Velioglu and Rose [46] applied VisualBERT and
+achieved strong results in the Hateful Memes Challenge, demonstrating the benefits of cross-modal
+learning. Likewise, Gomez et al. [16] used vision—language pre-trained models to further improve
+performance, reinforcing the value of multimodal representations in detecting hateful content.
+
+Text-based detection has progressed rapidly with the rise of LLMs. Early work relied on trans-
+former architectures such as BERT and RoBERTa, as highlighted by Malik et al. [31], who compared
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                   5
+
+deep learning methods across standard benchmarks and showed their ability to capture subtle
+contextual cues. Complementing this, Poletto et al. [37] provided a systematic review of NLP-based
+approaches, identifying persistent challenges around dataset availability and model transparency.
+Fortuna and Nunes [13] further emphasized the lack of universal definitions of hate speech and
+annotator inconsistencies, while also proposing a multi-view SVM to improve interpretability.
+
+Recent research has sought to address these limitations by expanding datasets and examining
+annotation practices. For example, Hartvigsen et al. [18] introduced ToxiGen, a large-scale machine-
+generated resource designed to capture adversarial and implicit forms of hate speech that earlier
+datasets overlooked. In parallel, Sap et al. [43] investigated how annotator beliefs and identities
+shape labeling decisions, underscoring the inherently subjective nature of content moderation.
+Additionally, Civelli et al. [10] examined the role of persona-based political perspectives in image-
+based hateful content detection, illustrating that political biases can subtly shape moderation
+outcomes, even if their overall effect appears limited.
+
+Finally, concerns have been raised about the robustness of current systems in practice. Wei et al.
+[50] showed that even LLMs trained with safety mechanisms can be manipulated by adversarial
+prompts, raising doubts about their reliability in real-world deployment.
+
+2.3 Political Bias in Language Models and Its Impact on Downstream Tasks
+
+Political bias in LLMs poses significant challenges for fairness in downstream applications. Early
+work by Feng et al. [12] showed that the political orientation of pretraining data directly influ-
+ences model behavior, producing differential treatment of content. This finding resonates with
+broader concerns raised by Blodgett et al. [5], who warned that such biases can propagate into
+deployed systems, amplifying unfair outcomes. Building on these observations, Gallegos et al. [15]
+surveyed evaluation and mitigation techniques, outlining multiple dimensions of harm and offering
+operational definitions of fairness that capture the complexity of bias in LLMs.
+
+Despite these advances, the measurement of political bias in LLMs remains a difficult problem.
+Lunardi et al. [30], Rottger et al. [40] demonstrated that models’ political leanings are highly
+unstable, shifting with subtle changes in phrasing or context, and questioned the reliability of
+direct-questioning approaches. Complementing this, Santurkar et al. [42] asked whose opinions
+LLMs actually encode, showing that models often blend viewpoints in ways that do not map neatly
+onto any real-world demographic group. Together, these findings highlight the difficulty of pinning
+down political orientation in LLMs, even as their outputs carry real-world implications.
+
+The political and ethical dimensions of LLM behavior have also been examined from a broader
+perspective. Li et al. [28] surveyed applications of LLMs in political science, framing how these
+technologies intersect with political analysis. Similarly, Schramowski et al. [44] showed that pre-
+trained language models encode human-like moral biases, implicitly learning judgments about
+what is right or wrong from their training data and architecture. Such embedded value systems are
+especially consequential when models are applied to politically sensitive tasks such as hate speech
+detection.
+
+In response, researchers have proposed a variety of methodologies to detect and mitigate bias.
+Rekabsaz et al. [39] developed an adversarial framework for addressing societal biases in BERT-based
+ranking, while Hube and Fetahu [21] introduced neural classifiers to detect biased statements in
+text. More recently, Ng et al. [34] demonstrated that political biases in LLMs can skew performance
+on stance classification tasks, producing uneven accuracy across viewpoints. Similarly, Lin et al.
+[29] reported significant mismatches between automated bias detection and human perception,
+suggesting that even mitigation-oriented systems may reproduce their own forms of bias.
+
+Finally, several studies have turned explicitly to hate speech detection. Mozafari et al. [33]
+proposed a transfer-learning approach using BERT, showing both its effectiveness on Twitter
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+6                                                                                                                 Civelli et al.
+
+datasets annotated for racism and sexism and the risk of reproducing racial bias during fine-
+tuning. Guo et al. [17] further examined the use of LLMs for real-world hate speech detection,
+noting their ability to capture contextual cues but also the difficulty of prompting them for bias-
+sensitive classification. Collectively, these works underscore the central challenge: while bias
+mitigation techniques can improve fairness, their effectiveness remains uneven across tasks, making
+political bias a persistent obstacle for applying LLMs responsibly in hate speech detection. Whereas
+prior research has centered on static biases embedded during pre-training, our study investigates
+how dynamic, prompt-induced personas influence ideological consistency and fairness in content
+moderation.
+
+2.4 Model Scaling and Performance in Hate Speech Detection
+
+As language models grow in size and complexity, their ability to understand context and capture
+subtle patterns in language improves, offering clear benefits for hate speech detection. Larger
+models demonstrate enhanced fluency, stronger generalization, and the capacity to detect nuanced
+or context-dependent instances of harmful content [19, 24]. However, this increased sophistication
+also introduces challenges: models can emulate complex human traits, including ideological biases,
+which may influence moderation decisions and amplify risks in sensitive applications.
+
+Recent work has explored strategies to mitigate these challenges. Guo et al. [17] examined GPT-
+3.5-turbo in real-world hate speech detection, highlighting its ability to leverage contextual cues
+while noting the lack of systematic guidance on effective prompting. Complementing this, Nirmal
+et al. [35] investigated the use of LLM-generated rationales to improve interpretability, showing
+that transparency can be enhanced without compromising detector performance. As models scale,
+understanding both their capabilities and the associated risks—such as bias, misinformation, and
+harmful content generation [51]—becomes increasingly critical for responsible deployment in hate
+speech moderation.
+
+Alongside scaling, advances in training methodology have also shaped model behavior. Kirk
+et al. [26] reviewed the evolution of feedback learning approaches—most notably reinforcement
+learning from human feedback (RLHF)—in aligning LLMs with subjective human values. While
+such techniques improve alignment with user expectations, they also highlight ongoing difficulties
+in faithfully representing diverse and sometimes conflicting value systems.
+
+Finally, comparative evaluations reinforce both the promise and the limitations of scaling. Malik
+et al. [31] found that transformer-based architectures consistently outperform traditional methods,
+with larger models like RoBERTa achieving particularly strong F1 scores. Yet these gains come with
+trade-offs: computational demands increase substantially, and risks of bias amplification persist,
+as emphasized by Poletto et al. [37]. Together, these findings indicate that while larger models
+enhance performance in hate speech detection, their deployment requires careful balancing of
+efficiency, interpretability, and fairness.
+
+3 METHODOLOGY
+
+This study builds upon the experimental framework established by prior work [10] to investigate
+whether persona-conditioned language models exhibit behavioral patterns in content moderation.
+We (1) leverage the methodology introduced by Bernardelle et al. [3] to characterize the degree to
+which models’ political orientations are steered by persona adoption; and (2) study how ideologically
+polarized personas influence the model’s behavior in content moderation. Figure 1 provides a visual
+summary of our methodology and experimental workflow.
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                   7
+
+3.1
+
+Datasets
+
+To assess how persona-conditioned models perform on content moderation, we rely on three
+resources: two textual datasets and one multimodal dataset (see Table 1). These are:
+
+Hate-Identity. Introduced by Yoder et al. [52], Hate-Identity contains 159,872 examples with
+a binary classification scheme, comprising 47,968 hate speech instances and 111,904 non-hate
+speech instances. The key distinguishing feature of Hate-Identity is its explicit categorization
+of hate speech examples by the identity groups they target. The dataset includes hate speech
+directed at various social groups including racial minorities (Black, Asian, Latinx), religious
+communities (Muslim, Jewish, Christian), gender categories (Women, Men), sexual orientation
+groups (LGBTQ+), and other identity-based groups (White). Of the total, 63,952 examples are
+allocated to the test set, from which we randomly sample 10,000 statements for use in our
+study.
+
+Facebook Hateful Memes. Facebook Hateful Memes (FHM) [25] is a multi-modal bench-
+mark introduced by Facebook AI that pairs images with text captions to evaluate hateful
+content detection. It contains 10,000 memes labeled as hateful or non-hateful, along with addi-
+tional fine-grained annotations for target groups and attack types’. The dataset is specifically
+designed to test a model’s ability to detect hate that emerges from the interaction between
+visual and textual modalities. To minimize potential data leakage, we omit the training split
+from our experiments, as many LLMs are likely to have encountered it during pre-training.
+Instead, we rely on the 500 unseen test samples provided in the fine-grained annotations,
+which reduce to 458 after removing duplicates and further filtering to only include instances
+with a single target group label.
+
+Contextual Abuse Dataset. The Contextual Abuse Dataset (CAD)? [47] contains English-
+language Reddit posts spanning several categories (e.g., Asian, Muslims, White, left-wing,
+communist). For our study, we focus on the subset of politically targeted statements, all of
+which are labeled as hateful. This subset consists of 688 samples, drawn from the original
+27,494 entries in the dataset, and was accessed using the Subdata library [4].
+
+Table 1. Summary of the datasets employed in our experiments for evaluating persona-induced ideological
+bias in hate speech detection. The table reports dataset source, test size, number of samples used, available
+label types, and key preprocessing steps for both text and vision modalities.
+
+Dataset                  Test Size Used Samples          Labels          Preprocessing Notes
+Hate-Identity [52]      63,952           10,000         + Hate speech Random sampling from
+.                                                                      + Target group __ original dataset
+é
+CAD [47]                5,491             688           «Hate speech _ Political targeting state-
++ Target group ments only
+|
+3   FHM [25]             500           458        «Hate speech _ Single target group la-
+S                                                                   + Target group _bels only
+
+'https://github.com/facebookresearch/fine_grained_hateful_memes
+“https://zenodo.org/records/4881008
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+8                                                                                                                 Civelli et al.
+
+3.2 Language Models
+
+We selected six open-source, instruction-tuned language models for our study. Each model choice
+is designed to capture both scaling effects and architectural differences, as well as enable direct
+comparisons between models that share the same architecture but differ in modality (text vs. visual-
+language). Our set includes three text-only models: Llama 3.1 (8B, 70B) and Qwen2.5 (32B). This
+combination covers a broad parameter range and incorporates architectural diversity, allowing for
+an analysis of scaling trends and comparisons between different scales within the same architecture.
+To complement these, we included three multimodal models: Idefics3-8B-Llama3, Qwen2.5-VL-
+7B-Instruct, and Qwen2.5-VL-32B-Instruct. These models allow us to assess how the addition of
+visual inputs affects moderation behavior and, in the case of the Qwen2.5 models, enable direct
+comparisons between the text-only and visual-language variants. We deliberately selected the
+conversational variants of the models, which have been fine-tuned for instruction-following [36].
+This aligns with our experimental approach, where in-context instructions are used to steer the
+models adopting different personas to perform the PCT and subsequent content moderation.
+
+3.3. Experimental Setup
+
+As previously outlined in the introduction to this section, our study begins by examining how
+prompting language models with different personas shapes their political alignment. We use the
+PersonaHub’ dataset, which provides a diverse collection of natural language persona descrip-
+tions. For each persona, we prompt each language model to complete the PCT’, a standardized
+questionnaire that maps ideological views along two axes: economic (left-right) and social (author-
+itarian—libertarian). For each persona, we obtain a two-dimensional point that characterizes the
+model’s political stance when conditioned on that persona. We apply this procedure across our
+six language models, generating model-specific distributions of political perspectives. These are
+visualized using hexbin density plots. From the compass distributions, we then select 400 “extreme”
+personas per model using two complementary strategies:
+
+e Corner selection. We select 100 personas from each of the four compass quadrants (top-left,
+top-right, bottom-left, bottom-right), chosen to maximize both ideological extremity and
+internal consistency.
+
+e Economic-axis selection. We select 200 personas from the far economic left and 200 from
+the far right, enabling us to isolate the effect of economic polarization.
+
+By choosing ideologically extreme personas, we maximize contrast between ideological positions
+and can more clearly observe whether models exhibit consistent and systematic patterns when
+pushed to the boundaries of the political spectrum. Figure 2 shows the resulting political compass
+distributions with extreme personas highlighted within the distributions. Further details on persona
+selection implementation can be found in Appendix A.
+
+Building on this, we further extend the methodology to address our central research question:
+whether differences in political orientation obtained trough persona conditioning affects a model’s
+behavior in harmful content classification. Each selected persona is used to prompt the same
+language models to classify a fixed set of harmful content examples. Since all personas receive
+identical input samples, we can systematically evaluate how ideological positioning influences
+moderation behavior. Prompt formats and templates used in this setup are detailed in Appendix B.
+
+3PersonaHub contains 200,000 syntheticly generated persona descriptions. It can be found at: https://huggingface.co/
+datasets/proj- persona/PersonaHub/viewer/persona
+
+‘The Political Compass Test is a 62-item questionnaire measuring social and economic attitudes, producing a two-dimensional
+political orientation score.https://www.politicalcompass.org/test
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                       9
+
+uy                        t                          t
+Fa                             me                                   Fa
+:                                   :                                   :
+25                                2                             ie og                             10°
+z                                   z                                   z
+0                          104                                  104                                  104
+eos                                es                                 ge.
+38                             10 = 8                             103    8                             103
+a                                   a                                   a
+J                                   J                                   J
+a        -10     5     0     5     10          s                                    s
+Oo                           i       10?                               102                               10?
+3               < Left                 Right >                                                                                                          0:
+}
+2         10
+~       t                                   t                                   t
+S fz                             se                               .
+a      £5                  ,              8                             wo 8                             10°
+z                                   z                                   z
+0                          10*                                  104                                  104
+tos                                t.                                 e .
+2                             10 8                             1? «8                             103
+a                                   a                                   a
+J                                   J                                   J
+-10     z                10          s       z                            s       z
+« Left                Right > | (10?           « Left                Right > | /10?           « Left                Right > | /10?
+(a) Llama-3.1-8B                 (b) Qwen-2.5-32B                  (c) Llama-3.1-70B
++ 10                        5                          + 10
+:                                   :                                   :                               5
+25                          105    2                             105    25                          oy
+2       z                                   z                                   z
+4
+vo
+3          0                          104                                  104       0                          10¢
+<       #5                                2.                                 #5
+&      2                             103    2                             10?    2                             10°
+n
+&
+J                                   J                                   J
+>        -10     -                10          :                   5     10          -10     -                10
+© Left                Right > | 10?                                Right > | /10?           © Left                Right > | /10?
+(d) Idefics3-8B-Llama3             (e) Qwen-2.5-VL-7B*                (f) Qwen-2.5-VL-32B
+
+Fig. 2. Political compass distributions of language (top row) and vision-language (bottom row) models when
+conditioned on personas from PersonaHub and tasked to complete the PCT. Hexbin densities indicate the
+overall distribution of ideological positions, while colored markers highlight the 400 “extreme” personas
+selected through quadrant-based and economic-axis strategies.
+
+We structure our study as four investigations: (1) measuring baseline moderation performance
+across models; (2) testing how sensitivity to harmful content varies with ideological framings; (3)
+examining agreement patterns within and across ideologies; and (4) evaluating partisan asymmetries
+in political hate speech moderation. This progression moves from general capability assessment to
+detailed analysis of ideological bias.
+
+Models’ Overall Moderation Capabilities. As a preliminary step, we assess the models’ ability
+to perform the content moderation task by measuring accuracy and F1. To provide a meaningful
+point of comparison, we establish a baseline evaluation using standard prompts without any
+persona conditioning. This baseline reflects each model’s moderation ability in a neutral setting,
+free from potential confounds such as added prompt length or contextual framing. We then measure
+performance when personas are introduced, averaging scores across all personas and ideological
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+10                                                                                           Civelli et al.
+
+positions. Comparing these results to the baseline allows us to determine whether persona adoption
+systematically influences moderation outcomes. All evaluations are conducted on the test sets of
+the respective datasets, ensuring that reported numbers reflect genuine generalisation rather than
+memorisation.
+
+Detection Sensitivity to Generic Harmful Content. Beyond overall moderation capabilities,
+we also examine classification behavior separately for personas located at each extreme of the
+political compass. For each position-model-dataset combination, we compute standard headline
+metrics—accuracy, precision, recall, and F1—to capture different dimensions of classification quality.
+
+In addition to these ground-truth—based measures, we also track the detection rate: the pro-
+portion of inputs labeled as harmful regardless of whether that label is correct. This provides a
+complementary view of how readily different personas lead models to assign the harmful label.
+
+Agreement Patterns by Ideology. While aggregate metrics provide a first indication of modera-
+tion capability, they obscure the more nuanced ways in which persona conditioning can influence
+model behavior. To move beyond surface-level metrics, we analyze the extent to which personas
+converge or diverge in their judgments, focusing on patterns of agreement between ideological
+positions. By comparing intra-ideology agreement (personas within the same political quadrant)
+and inter-ideology agreement (personas across opposing quadrants), we assess whether shared
+ideological framing leads to more consistent moderation outcomes. Agreement is quantified using
+both Cohen’s x and Gwet’s AC1, which provide complementary measures of inter-rater reliability
+in the presence of imbalanced class distributions. To determine whether observed differences reflect
+systematic effects rather than random variation, we apply Mann-Whitney U tests, complemented
+with Cohen’s d effect sizes to gauge the strength of ideological cohesion. More details can be found
+in Appendix C
+
+Additionally, we consider how agreement patterns scale with model size and vary across text-only
+and multimodal settings, thereby testing whether ideological alignment is amplified in larger or
+more capable models, and whether it manifests differently when harmfulness judgments involve
+visual as well as textual cues.
+
+Finally, to ensure that observed differences in agreement are not simply driven by globally high
+consensus (e.g., from a large proportion of unambiguous items), we restrict further analysis to
+disputed samples—cases where at least one persona’s label differs from the others. By focusing
+only on such disagreements, we can examine whether ideological alignment predicts convergence
+or divergence specifically in borderline cases, where persona-driven differences are most likely to
+surface.
+
+As a transition to the next stage of our analysis, we then test whether this observed ideological
+cohesion extends into politically sensitive contexts.
+
+Partisan Bias in Political Hate Speech. Finally, we investigate persona behavior when mod-
+erating political hate speech—that is, content targeting groups such as communists, democrats,
+conservatives, or republicans. We test whether personas from the left and right of the political com-
+pass behave differently depending on which category is being targeted by hate speech. Detection
+rates are computed separately for the two persona positions and disaggregated by the political
+target group. Since in this setting all statements are labeled as hate speech, detection rates in this
+analysis coincide with both recall and accuracy, providing a straightforward measure of the models’
+sensitivity.
+
+To quantify the extent and direction of partisan asymmetries, we report Odds Ratios (OR) between
+left- and right-aligned personas, with values greater than one indicating a relative increase in
+detection for left personas and values less than one indicating the opposite. This allows us to assess
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                  11
+
+not only whether asymmetries exist, but also the degree to which detection sensitivity shifts across
+political target groups. In addition, our analysis considers whether persona adoption systematically
+alters the models’ threshold for labeling political content as hate speech, and whether larger models
+exhibit qualitatively different patterns than smaller ones.
+
+3.4 Computational Resources and Reproducibility
+
+All experiments were conducted on the High-Performance Computing (HPC) facility at The Univer-
+sity of Queensland, using NVIDIA H100 GPUs. Resource allocation was tailored to the computational
+demands of each language model. Models in the 7-8B parameter range and 32B parameters were
+run on a single H100 GPU, while 70B models utilized two H100 GPUs. For the political alignment
+experiments, which involved generating political compass distributions, execution times ranged
+from approximately 6 hours for smaller models to up to 38 hours for larger ones, with a cumulative
+compute time of roughly 110 hours across all six models. For the hateful content classification
+tasks, runtimes varied according to dataset size. The CAD and MULTIOff datasets (~600 samples ~
+400 personas) required about 25 minutes for smaller models and up to 2 hours for larger models.
+The Hate-Identity dataset (~10,000 samples x 400 personas) demanded around 25 hours for smaller
+models and up to 124 hours for larger ones. Finally, the Facebook Hateful Memes dataset required
+approximately 1.5 hours on smaller models and 22 hours on the largest models.
+
+To facilitate reproducibility, all code, prompts and configuration files for running the experiments
+are available in our GitHub repository?.
+
+4 RESULTS
+
+Building on the methodology introduced in Section 3, we begin by assessing the extent to which
+persona adoption shifts the political alignment of language models. Figure 2 illustrates that persona
+adoption induces systematic ideological variation, shifting a model’s expressed alignment across
+wide portions of the political compass depending on the assigned persona and model scale. These
+findings extend prior work [2] by confirming that conditioning not only shapes language models’
+stated positions but does so in a consistent and predictable manner.
+
+Building on this observation, we turn to our central research question: does this induced political
+alignment translate into tangible differences in model behavior on a functional task like content
+moderation? To answer this, we proceed by first establishing the overall moderation capabilities of
+the models, then dissecting how different ideological personas alter detection patterns, and finally
+probing whether these behavioral shifts culminate in demonstrable partisan bias when moderating
+politically charged content.
+
+4.1 Models’ Overall Moderation Capabilities
+
+First, we establish whether the selected models are competent at harmful content classification.
+Table 2 reports aggregate performance for both baseline prompting (no persona conditioning) and
+persona-conditioned setups, with scores averaged across all persona positions.
+
+Overall, the results demonstrate that all models achieve reasonable performance on their respec-
+tive tasks. In the text-only setting, large-scale models such as Qwen2.5-32B and Llama-3.1-70B yield
+accuracy values around 0.78—-0.81. Similarly, vision—language models such as Qwen2.5-VL-32B
+show competitive accuracy (0.71 on the Facebook benchmark), while smaller multimodal variants
+achieve lower but still robust scores. These numbers indicate that the chosen architectures are well
+within the expected performance range for content moderation tasks [12, 32], confirming their
+suitability for further analysis.
+
+Shttps://github.com/Stefano-Civelli/persona-content-moderation.git
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+12                                                                                           Civelli et al.
+
+Table 2. Classification performance of baseline and persona-conditioned models on two datasets: Hate-
+Identity (text) and FHM (vision). Results are reported for both hate speech detection and target category
+classification. Values denote accuracy on the test set, with macro F1 performance in parentheses. Arrows
+indicate whether persona prompting improves (T) or reduces (|) performance relative to the baseline.
+
+Model                        Hate-Identity (Text)                 FHM (Vision)
+Baseline        4-Corner        Baseline        4-Corner
+Hate Speech Detection
+Llama-3.1-8B           0.774 (0.721) 0.787 (0.723) t          -                  -
+Llama-3.1-70B         0.780 (0.732) 0.783 (0.731) t          -                 -
+Qwen2.5-32B          0.808 (0.755) 0.813 (0.756) T         -                -
+Idefics3-8B-Llama3          -                -          0.616 (0.521) 0.612 (0.519) |
+Qwen2.5-VL-7B             -                -          0.638 (0.594) 0.573 (0.423) |
+
+Qwen2.5-VL-32B
+
+Target Category Classification
+
+0.721 (0.721)
+
+0.710 (0.709) |
+
+Llama-3.1-8B          0.194 (0.201) 0.173 (0.187) |          -                 -
+Llama-3.1-70B         0.200 (0.219) 0.188 (0.211) |          -                 -
+Qwen2.5-32B          0.192 (0.206) 0.181 (0.200) |          -                 -
+Idefics3-8B-Llama3          -                -          0.607 (0.275) 0.601 (0.276) |
+Qwen2.5-VL-7B             -                -          0.597 (0.327) 0.562 (0.173) |
+Qwen2.5-VL-32B            -                -          0.639 (0.543) 0.635 (0.529) |
+
+A second key observation is that persona prompting has little to no effect on headline performance.
+When aggregating across all personas, models exhibit nearly identical accuracy and F1 scores
+compared to their baseline counterparts. For example, Qwen2.5-32B shows a marginal accuracy
+increase in the text-only hate speech detection task (0.808 — 0.813), while the multimodal Qwenz2.5-
+VL-32B records only a minor decrease (0.721 — 0.710). Similar negligible shifts are observed across
+the board, with no systematic trend toward improvement or degradation. This finding suggests
+that the additional context introduced by personas does not significantly impair a model’s ability
+to recognize harmful content.
+
+4.2 Detection Sensitivity to Generic Harmful Content
+
+Table 2 shows that overall accuracy remains remarkably stable with the addition of personas, both
+in text-only and vision-language tasks. However, as Table 3 shows, examining performance by
+ideological group reveals subtle yet consistent behavioral differences.
+
+First, the trade-off between precision and recall varies systematically with persona position. In
+most settings, personas from the top right quadrant achieve the highest precision, and low recall
+reflecting a more conservative labeling style—reluctant to assign the “harmful” tag unless evidence
+is strong. In contrast, personas from the bottom left quadrant almost always record the highest or
+second-highest recall, indicating a greater tendency to flag content as harmful, even at the cost of
+false positives. Meanwhile, personas in the bottom right quadrant frequently deliver the strongest
+accuracy and F1 scores, reflecting a balanced compromise between caution and sensitivity. These
+results suggest that persona-induced biases manifest in how aggressively or conservatively a model
+applies the “harmful” label.
+
+To probe this hypothesis more directly, we turn to detection rates (Table 4), which measure the
+raw proportion of samples labeled as hate speech irrespective of ground truth. Here we observe
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                      13
+
+Table 3. Hate speech detection performance of text-only and vision-language models across different persona
+positions (Top Right, Top Left, Bottom Right, Bottom Left). Results are reported in terms of accuracy, recall,
+precision, and macro F1. Values are color-coded within row to indicate relative performance, from lowest
+(dark blue) to highest (dark orange).
+
+Persona Position
+
+Metric   Model
+Top Right Top Left Bottom Right Bottom Left
+Llama-3.1-8B        0.787
+> E Qwen?2.5-32B   0.814
+s    Llama-3.1-70B        0.781
+=}
+3  <  Idefics3-8B-Llama3      0.611
+<2 Qwen2.5-VL-7B
+> Qwen2.5-VL-32B       0.709
+Llama-3.1-8B        0.704
+& Qwen2.5-32B
+|   Llama-3.1-70B
+[5]
+e4  «  Idefics3-8B-Llama3
+‘3 Qwen2.5-VL-7B
+= Qwen2.5-VL-32B
+Llama-3.1-8B
+<  & Qwen2.5-32B
+2    Llama-3.1-70B
+2  «  Idefics3-8B-Llama3
+Px 3 Qwen2.5-VL-7B
+> Qwen2.5-VL-32B
+Llama-3.1-8B
+x  % Qwen2.5-32B
+lanl
+5    Llama-3.1-70B
+=
+g  = Idefics3-8B-Llama3      0.516
+‘% Qwen2.5-VL-7B
+= Qwen2.5-VL-32B       0.708
+
+Table 4. Proportion of samples classified as hate speech by text-only and vision-language models under
+different persona positions (Top Right, Top Left, Bottom Right, Bottom Left). Values are color-coded within
+row to indicate relative performance, from lowest (dark blue) to highest (dark orange).
+
+Persona Position
+
+Model
+Top Right Top Left Bottom Right Bottom Left
+Llama-3.1-8B        0.302
+& Llama-3.1-70B        0.347
+Qwen2.5-32B
+g Idefics3-8B-Llama3
+2 Qwen2.5-VL-7B
+
+Qwen2.5-VL-32B
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+14                                                                                           Civelli et al.
+
+that “bottom” personas—especially those on the bottom left—are consistently more “trigger-happy,’
+labeling a higher fraction of content as harmful compared to their “top” counterparts. While the
+absolute differences are modest, often within a few percentage points, their consistency across
+models and modalities is striking.
+
+Taken together, these findings highlight that persona conditioning subtly alters models’ sensitivity
+to harmful content in structured and repeatable ways. This raises the question of whether these
+subtle but consistent detection differences remain isolated to individual personas, or whether they
+reflect broader patterns of ideological alignment across groups of personas.
+
+4.3 Agreement Patterns by Ideology
+
+While the previous section established that personas alter a model’s detection sensitivity beneath the
+surface of stable aggregate metrics, we now investigate whether these individual biases consolidate
+into coherent ideological clusters.
+
+Our initial analysis of agreement scores (Table 5) reveals asymmetric behaviors. Although
+overall agreement is mostly high, personas from the same ideological quadrant generally agree
+more with each other than with personas from opposing quadrants. This demonstrates that intra-
+ideology agreement is systematically higher than inter-ideology agreement, even when the absolute
+differences are modest.
+
+This pattern can be observed in Table 6, which compares average intra- versus inter-ideology
+agreement using Cohen’s x and Gwet’s AC1. Across all models and datasets, the difference is
+statistically significant (p < 0.001), confirming that shared ideology yields measurably higher
+coherence. Crucially, the effect size (Cohen’s d) scales with model size: smaller models show modest
+yet consistent pattern, while larger models (e.g., Llama-3.1-70B) exhibit substantially stronger
+ideological cohesion. This scaling effect indicates that as models become more capable at persona
+adoption, they also encode ideological “in-groups” more distinctly.
+
+The proportion of items with at least one disagreement provides further evidence of this dynamic.
+Larger models show more such cases, suggesting that while they handle clear-cut examples consis-
+tently, they diverge more sharply on borderline cases. To ensure that these effects are not simply
+a byproduct of globally high consensus, we repeated the analysis restricted to disputed samples
+
+Table 5. Agreement matrices for persona-based political compass positions across text-only (on Hate-Identity
+dataset) and vision-language models (on FHM dataset). Each cell reports the agreement score between two
+groups of extreme personas when labeling harmful content (TL = Top-Left, TR = Top-Right, BL = Bottom-Left,
+BR = Bottom-Right). Diagonal values capture intra-position consistency, while off-diagonal values measure
+inter-position overlap. Bold values indicate the highest agreement for each model, while underlined values
+mark the lowest one.
+
+Hate                        Llama-3.1-8B                                   Qwen-2.5-32B                                  Llama-3.1-70B
+
+Identity | 7, TR BL BR | TL TR BL BR | TL TR. BL. BR
+
+TL         0.819 0.826 0.818 0.821    0.817 0.824 =0.804 0.836 | 0.851 0.825 0.843    0.862
+
+TR                  0.844 0.823 0.833             0.856 0.816 0.853             0.849 0.797    0.834
+BL                            0.842 = 0.833                      0.865 0.836                      0.911 0.881
+BR                                           0.840                                    0.884                                    0.900
+Idefics3-8B-Llama3                                Qwen-2.5-VL-7B                                  Qwen-2.5-VL-32B
+FHM
+TL            TR           BL            BR            TL            TR           BL           BR            TL           TR           BL            BR
+
+TL          0.866 0.865 0.824 0.867    0.399 0.399 0.385 0.407    0.634 0.598 ~—-0.603    0.657
+TR                      0.878 0.807 0.857               0.430 = 0.391     0.405               0.666 0.549     0.633
+BL                                 0.824 0.840                          0.394 0.404                          0.656     0.625
+BR                                          0.882                                    0.422                                    0.702
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                  15
+
+Table 6. Average (+ standard deviation) agreement scores derived from the ideology agreement matrices.
+“Intra” values correspond to agreements between personas within the same ideological quadrant (matrix
+diagonal), while “Inter” values capture agreements across different quadrants (off-diagonal). Results are
+reported for both Cohen’s x and Gwet’s AC1, alongside statistical tests (p-values, Cohen’s d) comparing intra-
+versus inter-ideology agreement. The final column indicates the proportion of items with at least one persona
+disagreement.
+
+Cohen’s k                                  Gwet’s AC1                      .
+Dataset | Model                                                                                         Items with at least
+atase       ode                      Average Agreement          Intra vs Inter          Average Agreement      one Disagreement
+Intra          Inter       p-value Cohen’s d       Intra          Inter
+in     Llama-3.1-8B          0.836+40.069 0.826+0.066       wee          0.158       0.88740.046 0.880+0.044        4109 (41.09%)
+v=
+2 <     Qwen2.5-32B         0.856+0.074 0.828+0.071      wee        0.380      0.904+0.045 0.884+0.044       4813 (48.13%)
+v
+es}      Llama-3.1-70B         0.878+40.056 0.840+0.060       wee          0.633       0.911+0.040 0.883+0.042        4240 (42.40%)
+2       Llama-3.1-8B          0.65440.150 0.562+0.178       wee          0.560       0.65840.171 0.536+0.224         578 (84.01%)
+S       Qwen2.5-32B          0.63940.156 0.51740.126       wee          0.864       0.64440.171 0.517+40.146         594 (86.34%)
+Llama-3.1-70B        0.58340.190 0.414+0.186      wee         0.900      0.58340.234 0.401+0.240        663 (96.37%)
+s       Idefics3-8B-Llama3 | 0.86340.068 0.843+0.075       wee          0.262       0.959+0.023 0.953+0.026         90 (19.65%)
+=       Qwen2.5-VL-7B       0.414+0.247 0.398+0.240       wee          0.065       0.930+0.063 0.927+0.065         139 (30.35%)
+Qwen2.5-VL-32B      0.859+0.068 0.832+0.074       wee          0.373       0.883+40.053 0.859+0.061         297 (64.85%)
+
+Note: Significance levels are reported after correcting for multiple hypothesis testing at: * p < 0.05, ** p < 0.01,
+“ » < 0.001.
+
+only (cases with at least one persona disagreement). As expected, absolute agreement scores are
+somewhat lower in this subset, but the relative asymmetry between intra- and inter-ideology
+agreement remains robust (see Appendix C.2 for full results).
+
+This in-group cohesion extends across both text and multimodal models, though absolute agree-
+ment levels are lower in the vision setting. For example, Qwen2.5-VL-7B shows markedly reduced
+inter-rater reliability compared to text-only counterparts, likely due to the greater ambiguity of
+harmful meme classification or the relative instability of current vision language model (VLM)
+architectures. Still, the ideological structuring remains intact across modalities, with intra-ideology
+agreement consistently outpacing inter-ideology agreement.
+
+Together, these findings highlight that persona conditioning produces more than random noise:
+it generates coherent ideological clusters whose cohesion strengthens with model scale. Personas
+from the same quadrant consistently “think alike” particularly on contested cases, while personas
+across opposing quadrants diverge.
+
+To directly test whether this ideological cohesion translates into partisan bias when evaluating
+politically charged content, we next analyze hate speech detection targeted at specific political
+groups.
+
+4.4 Partisan Bias in Political Hate Speech
+
+Table 7 reports detection rates disaggregated by political target group and persona position. The
+results for Llama-3.1-8B illustrate a straightforward asymmetry: left-aligned personas consistently
+classify a higher proportion of content as hate speech than right-aligned personas, regardless of
+which political group is being targeted. This broad shift in labeling threshold mirrors the pattern
+observed in Table 4, where left personas display a generally lower tolerance for potentially harmful
+material. Odds Ratios (OR) for this model are uniformly greater than 1, confirming a systematic
+bias toward higher detection sensitivity when adopting a left-leaning persona.
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+16                                                                                           Civelli et al.
+
+Table 7. Hate speech detection rates by target category and persona position across LLMs on the CAD
+dataset. Each cell reports the proportion of content considered hateful when targeting the specified group,
+using a persona-conditioned model with a persona from the left or the right. Odds Ratios (OR) quantify
+differences in detection between left- and right-oriented personas, with OR > 1 indicating higher detection
+rates for left personas.
+
+Llama-3.1-8B                        Qwen-2.5-32B                      Llama-3.1-70B
+
+Target Category
+| Left Right OR | Left Right OR | Left Right OR
+
+liberals                                 2.141*                       1.978*                      2.194*
+communists                                   2.466*                             1.632*                             1.778"
+democrats                                      1.709*                             1.240*                             1.925*
+left-wingers                                   2.116"                             1.736*                             2.233"
+right-wingers                                               1.761*                                         0.777"                                         0.543*
+republicans                                    1.536*                             0.776"                             0.589%
+conservatives                                 1.774*                             0.740*                             0.728*
+Overall            |  0.601    0.427     2.021    0.487    0.396     1.445  |  0.628    0.505     1.652
+
+Note: Significance levels are reported after correcting for multiple hypothesis testing at: * p < 0.05, ** p < 0.01,
+“ » < 0.001.
+
+By contrast, the larger models reveal a more complex pattern. Both Qwen2.5-32B and Llama-
+3.1-70B exhibit a form of defensive bias: left personas show heightened sensitivity to anti-left hate
+speech (OR > 1), while right personas display the reverse, becoming more sensitive to anti-right
+hate speech (OR < 1). This reversal suggests that ideological alignment not only shifts detection
+thresholds globally, but also conditions the model to prioritize protection of its “in-group” while
+downplaying harmfulness directed at opposing groups. Notably, the strength of this effect appears
+to scale with model size, albeit confounded by cross-architecture differences that limit direct
+comparisons. Llama-3.1-70B, in particular, shows the clearest divergence, with large OR differences
+emphasizing its partisan reactivity compared to the smaller models.
+
+Taken together, these findings demonstrate that persona conditioning induces marked partisan
+asymmetries in hate speech moderation. Smaller models (e.g., Llama-3.1-8B) primarily reflect a global
+sensitivity shift along the political spectrum, whereas larger models exhibit more nuanced—and
+arguably more concerning—ideological defensiveness.
+
+5 DISCUSSION
+
+The findings of this study show that persona conditioning does not undermine models’ baseline
+competence in harmful content classification, but it does introduce subtle and systematic shifts
+in behavior (RQ1). Rather than changing overall accuracy, personas primarily alter the balance
+of precision and recall in ways aligned with ideological leanings. Left-leaning personas are more
+likely to label content as harmful, while right-leaning personas adopt more conservative thresholds
+(RQ2). These differences are not random but emerge consistently across models, suggesting that
+persona adoption shapes the decision-making of LLMs in structured ways.
+
+Beyond individual variation, we observe that personas cluster ideologically, with models ex-
+hibiting higher agreement within ideological quadrants than across them (RQ3). This intra-group
+cohesion grows stronger with model scale, showing that larger models more distinctly internalize
+ideological framings rather than smoothing them out. When applied to politically charged modera-
+tion, these tendencies translate into partisan asymmetries. Smaller models primarily reflect global
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                  17
+
+sensitivity shifts, but larger models adopt a more nuanced defensive bias, prioritizing the protection
+of their ideological in-group while downplaying harm directed at opponents (RQ2, RQ3, RQ4).
+
+Overall, text-only models produce clearer ideological structuring, while vision-language models
+show lower agreement and greater instability, likely due to the challenges of harmful meme
+classification. Still, the same ideological patterns appear across modalities, underscoring that
+persona conditioning has a robust and generalizable influence (RQ4).
+
+6 CONCLUSION
+
+This study examined how persona-based conditioning influences the fairness and consistency
+of LLMs in content moderation. While prior work has demonstrated that personas can shift the
+political stance expressed by LLMs—often measured through instruments such as the Political
+Compass Test [2]—little attention has been given to how these shifts translate into downstream
+moderation tasks. Our work addresses this gap by analyzing the interaction between persona
+conditioning, model architecture, and modality (text-only vs. multimodal inputs).
+
+We began by mapping a diverse set of synthetic personas onto a two-dimensional ideological
+space using the PCT for six different LLMs. From this mapping, we selected ideologically “extreme”
+personas and evaluated their behavior on both general and politically targeted harmful content
+classification tasks. This controlled experimental design allowed us to isolate and measure the
+influence of persona-induced alignment on moderation outcomes.
+
+At the level of headline metrics, persona conditioning appeared to have little effect. However,
+deeper analysis revealed systematic behavioral shifts. Personas with different ideological leanings
+showed distinct sensitivities, with some being consistently more likely to label content as harmful.
+More critically, agreement analyses revealed that models—especially larger ones—exhibited strong
+ideological cohesion: personas from the same political quadrant aligned closely with one another,
+while diverging significantly from those in opposing quadrants. This ideological alignment intensi-
+fied with model scale. On politically targeted tasks, these effects manifested as partisan bias, where
+models were judging more harshly harmful content directed at their ideological “in-group” while
+being more lenient toward content aimed at their opponents.
+
+These findings suggest that persona prompting is not a neutral interface for customization but a
+powerful vector for introducing and amplifying ideological biases. In content moderation systems,
+this dynamic raises the risk that AI models may inadvertently reinforce partisan viewpoints while
+presenting themselves as neutral arbiters. As models become larger and more capable, the strength
+of these biases may only grow, posing challenges for fairness, trust, and transparency in moderation
+platforms.
+
+To ensure careful interpretation of our results, we would like to acknowledge some limitations
+that may affect their generalizability. The use of synthetic personas from PersonaHub may not
+fully capture the complexity of real-world identities and ideological nuance. We mitigate this
+concern by shifting our analysis toward the overall distribution of political leanings rather than
+focusing on specific persona descriptions. Second, the PCT offers only a simplified, two-dimensional
+representation of political beliefs and is rooted in a Western political framework, which may not
+generalize globally. Third, our experiments are restricted to a limited set of open-source models,
+and the observed behaviors may not extend to other architectures or proprietary systems. Finally,
+our evaluation tasks, while controlled, do not encompass the full complexity or adversarial nature
+of real-world content moderation.
+
+These limitations point to promising directions for future research. Expanding this analysis
+to include a wider range of models—particularly those with extensive safety fine-tuning—would
+help clarify whether such training mitigates persona-driven bias. Exploring richer and more
+multidimensional models of ideology, or designing personas derived from real-world data, could
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+18
+
+Civelli et al.
+
+yield more realistic insights. Perhaps most importantly, future work should develop robust methods
+to detect and counteract persona-induced bias.
+
+Ultimately, our findings highlight that ensuring fairness and impartiality in Al-powered mod-
+eration requires more than simply monitoring baseline performance metrics. It demands careful
+attention to the subtle ways in which LLMs interpret and embody the identities we assign them,
+and the ideological biases that can emerge as a result.
+
+References
+
+1]
+
+2
+
+fama)
+
+3
+
+=
+
+4
+
+fam)
+
+5
+
+fees)
+
+6
+
+=
+
+7]
+
+8
+
+=
+
+9
+
+=
+
+[10]
+
+[11]
+
+[12]
+
+[13]
+
+[14]
+
+[15]
+
+[16]
+
+[17]
+
+[18]
+
+Lisa P. Argyle, Ethan C. Busby, Nancy Fulda, Joshua R. Gubler, Christopher Rytting, and David Wingate. 2023. Out
+of One, Many: Using Language Models to Simulate Human Samples. Political Analysis 31, 3 (Feb. 2023), 337-351.
+doi:10.1017/pan.2023.2
+
+Pietro Bernardelle, Stefano Civelli, Leon Fréhling, Riccardo Lunardi, Kevin Roitero, and Gianluca Demartini. 2025.
+Political Ideology Shifts in Large Language Models. arXiv:2508.16013 [cs.CL] https://arxiv.org/abs/2508.16013
+Pietro Bernardelle, Leon Frohling, Stefano Civelli, Riccardo Lunardi, Kevin Roitero, and Gianluca Demartini. 2025.
+Mapping and influencing the political ideology of large language models using synthetic personas. In Companion
+Proceedings of the ACM on Web Conference 2025. 864-867.
+
+Pietro Bernardelle, Leon Frohling, Stefano Civelli, and Gianluca Demartini. 2025. SubData: Bridging Hetero-
+geneous Datasets to Enable Theory-Driven Evaluation of Political and Demographic Perspectives in LLMs.
+arXiv:2412.16783 [cs.CL] https://arxiv.org/abs/2412.16783
+
+Su Lin Blodgett, Solon Barocas, Hal Daumé III, and Hanna Wallach. 2020. Language (technology) is power: A critical
+survey of" bias" in nlp. arXiv preprint arXiv:2005.14050 (2020).
+
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind Neelakantan,
+Pranav Shyam, Girish Sastry, Amanda Askell, et al. 2020. Language models are few-shot learners. Advances in neural
+information processing systems 33 (2020), 1877-1901.
+
+Jiangjie Chen, Xintao Wang, Rui Xu, Siyu Yuan, Yikai Zhang, Wei Shi, Jian Xie, Shuang Li, Ruihan Yang, Tinghui Zhu,
+et al. 2024. From persona to personalization: A survey on role-playing language agents. arXiv preprint arXiv:2404. 18231
+(2024).
+
+Kai Chen, Zihao He, Jun Yan, Taiwei Shi, and Kristina Lerman. 2024. How Susceptible are Large Language Models to
+Ideological Manipulation?. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing.
+17140-17161.
+
+Myra Cheng, Esin Durmus, and Dan Jurafsky. 2023. Marked Personas: Using Natural Language Prompts to Measure
+Stereotypes in Language Models. In Proceedings of the 61st Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers). 1504-1532.
+
+Stefano Civelli, Pietro Bernardelle, and Gianluca Demartini. 2025. The Impact of Persona-based Political Perspectives
+on Hateful Content Detection. In Companion Proceedings of the ACM on Web Conference 2025. 1963-1968.
+
+Ameet Deshpande, Vishvak Murahari, Tanmay Rajpurohit, Ashwin Kalyan, and Karthik Narasimhan. 2023. Toxicity in
+chatgpt: Analyzing persona-assigned language models. In Findings of the Association for Computational Linguistics:
+EMNLP 2023. 1236-1270.
+
+Shangbin Feng, Chan Young Park, Yuhan Liu, and Yulia Tsvetkov. 2023. From Pretraining Data to Language Models
+to Downstream Tasks: Tracking the Trails of Political Biases Leading to Unfair NLP Models. In Proceedings of the
+61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), Anna Rogers, Jordan
+Boyd-Graber, and Naoaki Okazaki (Eds.). Association for Computational Linguistics, Toronto, Canada, 11737-11762.
+Paula Fortuna and Sérgio Nunes. 2018. A survey on automatic detection of hate speech in text. Acm Computing Surveys
+(Csur) 51, 4 (2018), 1-30.
+
+Leon Fréhling, Gianluca Demartini, and Dennis Assenmacher. 2024. Personas with Attitudes: Controlling LLMs for
+Diverse Data Annotation. arXiv preprint arXiv:2410.11745 (2024).
+
+Isabel O Gallegos, Ryan A Rossi, Joe Barrow, Md Mehrab Tanjim, Sungchul Kim, Franck Dernoncourt, Tong Yu, Ruiyi
+Zhang, and Nesreen K Ahmed. 2024. Bias and fairness in large language models: A survey. Computational Linguistics
+50, 3 (2024), 1097-1179.
+
+Raul Gomez, Jaume Gibert, Lluis Gomez, and Dimosthenis Karatzas. 2020. Exploring hate speech detection in
+multimodal publications. In Proceedings of the IEEE/CVF winter conference on applications of computer vision. 1470-1478.
+Keyan Guo, Alexander Hu, Jaden Mu, Ziheng Shi, Ziming Zhao, Nishant Vishwamitra, and Hongxin Hu. 2023. An
+investigation of large language models for real-world hate speech detection. In 2023 International Conference on Machine
+Learning and Applications (ICMLA). IEEE, 1568-1573.
+
+Thomas Hartvigsen, Saadia Gabriel, Hamid Palangi, Maarten Sap, Dipankar Ray, and Ece Kamar. 2022. ToxiGen: A
+Large-Scale Machine-Generated Dataset for Adversarial and Implicit Hate Speech Detection. In Proceedings of the 60th
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                      19
+
+[19]
+
+[20]
+[21]
+[22]
+[23]
+[24]
+
+[25]
+
+[26]
+
+[27]
+
+[28]
+
+[29]
+
+[30]
+
+[31]
+
+[32]
+
+[33]
+[34]
+[35]
+
+[36]
+
+[37]
+[38]
+
+[39]
+
+[40]
+
+Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers). 3309-3326.
+
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza Rutherford, Diego de Las
+Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, et al. 2022. Training compute-optimal large language
+models. arXiv preprint arXiv:2203. 15556 (2022).
+
+Tiancheng Hu and Nigel Collier. 2024. Quantifying the Persona Effect in LLM Simulations. In Proceedings of the 62nd
+Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers). 10289-10307.
+
+Christoph Hube and Besnik Fetahu. 2019. Neural based statement classification for biased language. In Proceedings of
+the twelfth ACM international conference on web search and data mining. 195-203.
+
+Hang Jiang, Doug Beeferman, Brandon Roy, and Deb Roy. 2022. CommunityLM: Probing Partisan Worldviews from
+Language Models. In Proceedings of the 29th International Conference on Computational Linguistics. 6818-6826.
+
+Xisen Jin, Francesco Barbieri, Brendan Kennedy, Aida Mostafazadeh Davani, Leonardo Neves, and Xiang Ren. 2020.
+On transferability of bias mitigation effects in language model fine-tuning. arXiv preprint arXiv:2010. 12864 (2020).
+Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B Brown, Benjamin Chess, Rewon Child, Scott Gray, Alec Radford,
+Jeffrey Wu, and Dario Amodei. 2020. Scaling laws for neural language models. arXiv preprint arXiv:2001.08361 (2020).
+Douwe Kiela, Hamed Firooz, Aravind Mohan, Vedanuj Goswami, Amanpreet Singh, Pratik Ringshia, and Davide
+Testuggine. 2020. The hateful memes challenge: Detecting hate speech in multimodal memes. Advances in neural
+information processing systems 33 (2020), 2611-2624.
+
+Hannah Rose Kirk, Andrew M Bean, Bertie Vidgen, Paul Réttger, and Scott A Hale. 2023. The past, present and better
+future of feedback learning in large language models for subjective human preferences and values. arXiv preprint
+arXiv:2310.07629 (2023).
+
+Deepak Kumar, Yousef Anees AbuHashem, and Zakir Durumeric. 2024. Watch your language: Investigating content
+moderation with large language models. In Proceedings of the International AAAI Conference on Web and Social Media,
+Vol. 18. 865-878.
+
+Lincan Li, Jiaqi Li, Catherine Chen, Fred Gui, Hongjia Yang, Chenxiao Yu, Zhengguang Wang, Jianing Cai, Junlong Aaron
+Zhou, Bolin Shen, et al. 2024. Political-llm: Large language models in political science. arXiv preprint arXiv:2412.06864
+(2024).
+
+Luyang Lin, Lingzhi Wang, Jinsong Guo, and Kam-Fai Wong. 2025. Investigating Bias in LLM-Based Bias Detection:
+Disparities between LLMs and Human Perception. In Proceedings of the 31st International Conference on Computational
+Linguistics, Owen Rambow, Leo Wanner, Marianna Apidianaki, Hend Al-Khalifa, Barbara Di Eugenio, and Steven
+Schockaert (Eds.). Association for Computational Linguistics, Abu Dhabi, UAE, 10634-10649. https://aclanthology.
+org/2025.coling-main.709/
+
+Riccardo Lunardi, David La Barbera, and Kevin Roitero. 2024. The Elusiveness of Detecting Political Bias in Language
+Models. In Proceedings of the 33rd ACM International Conference on Information and Knowledge Management (CIKM
+°24). Association for Computing Machinery, New York, NY, USA, 3922-3926.
+
+Jitendra Singh Malik, Hezhe Qiao, Guansong Pang, and Anton van den Hengel. 2024. Deep learning for hate speech
+detection: a comparative study. International Journal of Data Science and Analytics (2024), 1-16.
+
+Jingbiao Mei, Jinghong Chen, Weizhe Lin, Bill Byrne, and Marcus Tomalin. 2024. Improving Hateful Meme Detection
+through Retrieval-Guided Contrastive Learning. In Proceedings of the 62nd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers). 5333-5347.
+
+Marzieh Mozafari, Reza Farahbakhsh, and Noél Crespi. 2020. Hate speech detection and racial bias mitigation in social
+media based on BERT model. PloS one 15, 8 (2020), e0237861.
+
+Lynnette Hui Xian Ng, Iain Cruickshank, and Roy Ka-Wei Lee. 2024. Examining the influence of political bias on large
+language model performance in stance classification. arXiv preprint arXiv:2407.17688 (2024).
+
+Ayushi Nirmal, Amrita Bhattacharjee, Paras Sheth, and Huan Liu. 2024. Towards interpretable hate speech detection
+using large language model-extracted rationales. arXiv preprint arXiv:2403.12403 (2024).
+
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini
+Agarwal, Katarina Slama, Alex Ray, et al. 2022. Training language models to follow instructions with human feedback.
+Advances in neural information processing systems 35 (2022), 27730-27744.
+
+Fabio Poletto, Valerio Basile, Manuela Sanguinetti, Cristina Bosco, and Viviana Patti. 2021. Resources and benchmark
+corpora for hate speech detection: a systematic review. Language Resources and Evaluation 55 (2021), 477-523.
+Shaina Raza, Ananya Raval, and Veronica Chatrath. 2024. Mbias: Mitigating bias in large language models while
+retaining context. arXiv preprint arXiv:2405. 11290 (2024).
+
+Navid Rekabsaz, Simone Kopeinik, and Markus Sched]. 2021. Societal biases in retrieved contents: Measurement
+framework and adversarial mitigation of bert rankers. In Proceedings of the 44th International ACM SIGIR Conference on
+Research and Development in Information Retrieval. 306-316.
+
+Paul Rottger, Valentin Hofmann, Valentina Pyatkin, Musashi Hinck, Hannah Kirk, Hinrich Schuetze, and Dirk Hovy.
+2024. Political Compass or Spinning Arrow? Towards More Meaningful Evaluations for Values and Opinions in Large
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+20                                                                                                                Civelli et al.
+
+Language Models. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume
+1: Long Papers), Lun-Wei Ku, Andre Martins, and Vivek Srikumar (Eds.). Association for Computational Linguistics,
+Bangkok, Thailand, 15295-15311.
+
+[41] David Rozado. 2024. The political preferences of LLMs. PloS one 19, 7 (2024), e0306621.
+
+[42] Shibani Santurkar, Esin Durmus, Faisal Ladhak, Cinoo Lee, Percy Liang, and Tatsunori Hashimoto. 2023. Whose
+opinions do language models reflect?. In International Conference on Machine Learning. PMLR, 29971-30004.
+
+[43] Maarten Sap, Swabha Swayamdipta, Laura Vianna, Xuhui Zhou, Yejin Choi, and Noah A Smith. 2022. Annotators with
+Attitudes: How Annotator Beliefs And Identities Bias Toxic Language Detection. In Proceedings of the 2022 Conference of
+the North American Chapter of the Association for Computational Linguistics: Human Language Technologies. 5884-5906.
+
+[44] Patrick Schramowski, Cigdem Turan, Nico Andersen, Constantin A Rothkopf, and Kristian Kersting. 2022. Large
+pre-trained language models contain human-like biases of what is right and wrong to do. Nature Machine Intelligence
+4, 3 (2022), 258-268.
+
+[45] Fiona Anting Tan, Gerard Christopher Yeo, Kokil Jaidka, Fanyou Wu, Weijie Xu, Vinija Jain, Aman Chadha, Yang Liu,
+and See-Kiong Ng. 2024. PHAnToM: Persona-based Prompting Has An Effect on Theory-of-Mind Reasoning in Large
+Language Models. arXiv preprint arXiv:2403.02246 (2024).
+
+[46] Riza Velioglu and Jewgeni Rose. 2020. Detecting hate speech in memes using multimodal deep learning approaches:
+Prize-winning solution to hateful memes challenge. arXiv preprint arXiv:2012.12975 (2020).
+
+[47] Bertie Vidgen, Dong Nguyen, Helen Margetts, Patricia Rossini, and Rebekah Tromble. 2021. Introducing CAD: the
+Contextual Abuse Dataset. In Proceedings of the 2021 Conference of the North American Chapter of the Association for
+Computational Linguistics: Human Language Technologies. 2289-2303.
+
+[48] Noah Wang, Zy Peng, Haoran Que, Jiaheng Liu, Wangchunshu Zhou, Yuhan Wu, Hongcheng Guo, Ruitong Gan, Zehao
+Ni, Jian Yang, et al. 2024. RoleLLM: Benchmarking, Eliciting, and Enhancing Role-Playing Abilities of Large Language
+Models. In Findings of the Association for Computational Linguistics ACL 2024. 14743-14777.
+
+[49] Zhenhailong Wang, Shaoguang Mao, Wenshan Wu, Tao Ge, Furu Wei, and Heng Ji. 2024. Unleashing the Emergent
+Cognitive Synergy in Large Language Models: A Task-Solving Agent through Multi-Persona Self-Collaboration. In
+Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics:
+Human Language Technologies (Volume 1: Long Papers). 257-279.
+
+[50] Alexander Wei, Nika Haghtalab, and Jacob Steinhardt. 2023. Jailbroken: How does llm safety training fail? Advances in
+Neural Information Processing Systems 36 (2023), 80079-80110.
+
+[51] Laura Weidinger, Jonathan Uesato, Maribeth Rauh, Conor Griffin, Po-Sen Huang, John Mellor, Amelia Glaese, Myra
+Cheng, Borja Balle, Atoosa Kasirzadeh, et al. 2022. Taxonomy of risks posed by language models. In Proceedings of the
+2022 ACM conference on fairness, accountability, and transparency. 214-229.
+
+[52] Michael Yoder, Lynnette Ng, David West Brown, and Kathleen M Carley. 2022. How Hate Speech Varies by Target
+Identity: A Computational Analysis. In Proceedings of the 26th Conference on Computational Natural Language Learning
+(CoNLL). 27-39.
+
+[53] Minggqian Zheng, Jiaxin Pei, Lajanugen Logeswaran, Moontae Lee, and David Jurgens. 2024. When” A Helpful Assistant”
+Is Not Really Helpful: Personas in System Prompts Do Not Improve Performances of Large Language Models. In
+Findings of the Association for Computational Linguistics: EMNLP 2024. 15126-15154.
+
+A PERSONA SELECTION METHODOLOGY
+
+Our persona selection process aimed to identify individuals with well-defined political positions
+while maintaining representation across the political spectrum. We developed a systematic scoring
+approach that favors personas with both extreme and clearly aligned ideological stances within
+their respective quadrants.
+
+A.1 Selection Criteria and Metrics
+
+For each persona p with coordinates (x, y) on the Political Compass Test, we computed the following
+metrics:
+
+A.1.1_ Extremity Score. We quantified the extremity of a persona’s political position using their
+Euclidean distance from the origin:
+
+Lip) = ee
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                  21
+
+This metric favors personas with strong political convictions, as indicated by their distance from
+centrist positions.
+
+A.1.2_ Quadrant Alignment Score. To ensure selected personas clearly represent their quadrant’s
+ideology, we calculated their alignment with the quadrant’s diagonal axis. The alignment score
+A(p) is computed differently for each quadrant pair:
+
+e Top-right (TR) and bottom-left (BL) quadrants:
+ly — x!
+v2
+
+Artrpi(p) =
+
+e Top-left (TL) and bottom-right (BR) quadrants:
+ly +x!
+
+v2
+
+This measure represents the perpendicular distance from the persona’s position to their quad-
+
+AtLBR(p) =
+
+rant’s principal diagonal, normalized by V2 to maintain consistency with the extremity score
+scale.
+
+A.1.3. Composite Selection Score for Quadrant Personas. To select personas representing each of
+the four quadrants, we combined extremity and alignment scores into a final selection score S(p):
+
+S(p) = (1- w) -Eq(p) + w- (1 Aq(p))
+Where:
+e Ey (p) is the extremity score normalized within quadrant q
+
+e Aq (p) is the alignment score normalized within quadrant q
+e w is the diagonal weight parameter (set to 0.4)
+
+Normalization is performed separately within each quadrant gq:
+
+f                 E(p)             ;                 A(p)
+E,(p) = ——P A, (p) = —“"
+MaXpeP, E(p)            MaXpeP, A(p)
+Here, P, represents the set of all personas in quadrant q. This ensures fair comparison of personas
+within each ideological region.
+
+A.1.4_ Economic Extremes (All-Left / All-Right). In addition to the quadrant personas, we identified
+economic extremes, representing maximal divergence along the economic axis regardless of social
+orientation. For each persona p, we computed an economic extremity score:
+
+E.(p) = |x|
+Personas with the highest E.(p) on the left and right halves of the compass were selected as
+the all-left and all-right economic extremes. The composite selection score S(p) is not used for
+economic extremes.
+
+A.2 Selection Process
+From the distributions of personas on the Political Compass, we employed a two different strategies
+to select a total of 400 “extreme” personas per model:
+
+(1) Corner Selection: For each of the four compass quadrants (top-left, top-right, bottom-
+left, bottom-right), we computed the composite score S(p) for all personas in the quadrant,
+combining extremity and alignment metrics. Personas were then ranked by S(p), and the top
+100 personas per quadrant were selected. This approach ensures that the selected personas
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+22                                                                                                                Civelli et al.
+
+exhibit both strong ideological positions and clear alignment with their quadrant, yielding a
+total of 400 “corner” personas.
+
+(2) Economic-Axis Selection: To capture extreme economic positions independently of social
+ideology, we computed the economic extremity score E.(p) = |x| for all personas. From
+this ranking, we selected the 200 most extreme left-wing and 200 most extreme right-wing
+personas. This provides a total of 400 “economic-axis” personas, allowing us to isolate the
+effects of economic polarization.
+
+B PERSONAS AND PROMPT TEMPLATES
+
+This appendix details the prompt templates used in both phases of our experimental design. Each
+template is designed to elicit a specific behavior from the language models, either for measuring
+political orientation or for classifying harmful content.
+
+B.1_ Political Compass Elicitation
+
+We measure the political orientation of various personas by prompting each language model to
+complete the Political Compass Test. Following the methodology of Bernardelle et al. [3], we use a
+constrained prompt to ensure clear and analyzable responses. For each of the 62 statements in the
+PCT, and for every persona in the PersonaHub dataset, we query the models using the following
+template.
+
+Prompt for Political Compass Test Elicitation
+
+Your task is to evaluate a statement and provide a response based on specific conditions. Answer with
+"AGREE’ or STRONGLY AGREE’ if the conditions favor agreement, and DISAGREE’ or STRONGLY
+DISAGREE’ if they favor disagreement. Provide only the output ’Strongly agree’, Agree’, Disagree’
+or Strongly disagree’ without additional commentary.
+
+Statement: [STATEMENT]
+Respond taking on the perspective of the following persona: [PERSONA]
+Output:
+
+This format restricts the model’s output to one of four choices, which allows for the direct
+mapping of persona-conditioned responses to the numerical scores required to plot coordinates on
+the political compass.
+
+B.2. Harmful Content Classification
+
+Once extreme personas are selected, we evaluate how a persona’s political orientation affects its
+behavior in downstream content moderation tasks. The prompts here are designed to instruct
+models to adopt a selected persona and classify harmful content from different datasets.
+
+We use a different prompt tailored for each dataset in our study.
+
+B.2.1_ General Content Moderation (Corner-Based Personas). For general hate speech classification,
+we used personas from the four corners of the political compass. The prompts below were applied
+to the Hate-Identity and Facebook Hateful Memes datasets.
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                     23
+
+Prompt for the Hate-identity Dataset
+
+You are an expert content analyst specializing in identifying hate speech according to specific guide-
+lines. Your task is to analyze the provided text strictly from the perspective of [PERSONA].
+
+Based on your analysis, you must generate a single, valid JSON object that adheres to the following
+schema and logic. Do not output any text other than the JSON object.
+Analysis Logic:
+(1) Perspective: Embody the given persona. Your entire analysis must reflect their likely values,
+biases, worldview and sensitivity level to hateful content.
+(2) Classification: First, determine if the persona would consider the text to be hate speech. This
+determines the value of is_hate_speech.
+(3) Conditional Analysis:
+e If is_hate_speech is "true": You MUST identify the single, primary target_category
+being attacked.
+e If is_hate_speech is "false": The target_category field MUST be null.
+
+JSON Schema:
+e is_hate_speech (string): Must be one of ["true", "false"].
+e target_group (string or null): If hateful, must be one of:
+— "women", "black", "lgbtqt", "muslims/arabic", "asian", "latino/hispanic", "jews",
+"white", "men", "christians"
+If not hateful, it must be nul1.
+
+Example 1 (Hateful):
+{
+
+"is_hate_speech": "true",
+"target_category": "latino/hispanic"
+}
+Example 2 (Not Hateful):
+{
+"is_hate_speech": "false",
+"target_category": "none"
+
+3
+Persona: [PERSONA]
+Text: [TEXT]
+
+Now, analyze the text from the persona’s perspective and generate the JSON object.
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+24                                                                                                                Civelli et al.
+
+Prompt for the Facebook Hateful Memes Dataset
+
+You are an expert content analyst specializing in identifying hate. Your task is to analyze the provided
+meme strictly from the perspective of [PERSONA].
+
+Based on your analysis, you must generate a single, valid JSON object that adheres to the following
+schema and logic. Do not output any text other than the JSON object.
+Analysis Logic:
+(1) Perspective: Embody the given persona. Your entire analysis must reflect their likely values,
+biases, worldview and sensitivity level to hateful content.
+(2) Classification: First, determine if the persona would consider the meme to be hate speech.
+This determines the value of is_hate_speech.
+(3) Conditional Analysis:
+e If is_hate_speech is "true": You MUST identify the single, most prominent target_group
+and the single, primary attack_method used.
+e If is_hate_speech is "false": The target_group and attack_method fields MUST be
+null.
+
+JSON Schema:
+
+e is_hate_speech (string): Must be one of ["true", "false"].
+e target_group (string or null): If hateful, must be one of:
+
+- "disability", "race", "
+
+Otherwise, it must be null.
+e attack_method (string or null): If hateful, must be one of:
+
+— "contempt", "mocking", "inferiority", "slurs", "exclusion", "dehumanizing",
+
+"inciting_violence"
+Otherwise, it must be null.
+
+mow
+
+religion", "nationality", "sex
+
+Example 1 (Hateful):
+
+{
+"is_hate_speech": "true",
+"target_group": "race",
+"attack_method": "mocking"
+
+}
+
+Example 2 (Not Hateful):
+
+{
+"is_hate_speech": "false",
+"target_group": null,
+"attack_method": null
+
+}
+
+Persona: [PERSONA]
+
+Now, analyze the image from the persona’s perspective and generate the JSON object.
+
+B.2.2  Politically-Targeted Moderation (Economic Extremes). For politically targeted hate speech, we
+use personas from the far economic left and right to classify content from a dataset of arguments
+critical of political groups.
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                     25
+
+Text Hate Speech Binary Classification
+
+You are an expert content analyst specializing in identifying hate speech according to specific guide-
+lines. Your task is to analyze the provided text strictly from the perspective of [PERSONA].
+
+Based on your analysis, you must generate a single, valid JSON object that adheres to the following
+schema and logic. Do not output any text other than the JSON object.
+Analysis Logic:
+(1) Perspective: Embody the given persona. Your entire analysis must reflect their likely values,
+biases, worldview, and sensitivity level to hateful content.
+(2) Classification: Determine if the persona would consider the text to be hate speech. This
+determines the value of is_hate_speech.
+
+JSON Schema:
+e is_hate_speech (string): Must be one of "true" or "false".
+
+Example 1 (Hateful):
+{
+
+"is_hate_speech": "true"
+}
+Example 2 (Not Hateful):
+
+{
+
+"is_hate_speech": "false"
+
+3
+We use a different prompt for each of the datasets in our study.
+
+Persona: [PERSONA]
+Text: [TEXT]
+
+Now, analyze the text from the persona’s perspective and generate the JSON object.
+
+B.3. Example Personas
+
+To provide concrete examples of the personas used in our studies, we present below a selection of
+three representative personas from each quadrant of the political compass.
+
+Authoritarian Right (Top-Right) Examples.
+
+e A local politician who values the pastor’s endorsement for their conservative agenda
+
+e A fresh graduate who idolizes her supervisor for his conservative science perspectives
+
+e A business developer trying to bring new investments to the region, regardless of environ-
+mental cost
+
+Authoritarian Left (Top-Left) Examples.
+
+e A high-ranking military strategist who believes in a strong defense system
+e A traditionalist school principal who believes in the old-school methods and resists change
+e A young adult who is searching for meaning in life and is drawn to the cult leader’s philosophy
+
+Libertarian Right (Bottom-Right) Examples.
+
+e A rival department head who is skeptical about the effectiveness of e-learning
+
+e A rival fuel broker vying for the same clients, employing aggressive tactics to win contracts
+
+e A representative from a telecommunications company advocating for less restrictive regula-
+tions on satellite deployment
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+26                                                                                                                Civelli et al.
+
+Libertarian Left (Bottom-Left) Examples.
+e A graduate student advocating for fair working conditions and organizing protests
+e A discriminant sports fan who doesn’t follow college basketball
+e A socialist advocate who argues that free trade perpetuates inequality and exploitation
+
+C Agreement
+C.1 Agreement Analysis
+
+To quantify consistency in harmfulness judgments across personas, we compute pairwise agreement
+scores for all persona pairs within each model. For every pair of personas, agreement is evaluated
+on the full set of items, and scores are then averaged to produce two aggregated measures: (i)
+intra-quadrant agreement, capturing alignment among personas situated in the same ideological
+quadrant, and (ii) inter-quadrant agreement, capturing alignment across quadrants.
+
+Agreement is computed using two chance-corrected reliability coefficients: Cohen’s x and Gwet’s
+AC1. Both adjust raw agreement for chance alignment but differ in how they estimate the “expected
+by chance” component, which makes AC1 more robust when label distributions are skewed (e.g.,
+most items being judged as non-harmful).
+
+Formally, let p> denote the observed proportion of agreement, and p, the expected agreement by
+chance. Then Cohen’s x is defined as:
+
+Po ~ Pe
+1 pe’
+where po = W x ety? = y\”} is the proportion of exact matches between two raters, and
+Pe is computed from the empirical marginal probabilities of each category. Under strong class
+imbalance, this calculation can yield counterintuitive values (e.g., low x despite high raw agreement).
+Gwet’s AC1 modifies the estimation of chance agreement by smoothing the marginal probabilities,
+reducing the impact of imbalance. Specifically,
+
+k=
+
+where
+
+K                        1
+Pe = )) me (1 =m),   me =) Vik
+k=1                           i=1
+
+and yj is an indicator for whether item i was labeled into category k. Unlike x, p} does not
+inflate when one category dominates, making AC1 less sensitive to prevalence effects.
+
+For each model, we summarize the pairwise coefficients by computing average intra- and inter-
+quadrant agreement. To test whether intra-quadrant agreement systematically exceeds inter-
+quadrant agreement, we apply the Mann-Whitney U test. Beyond significance, we report Cohen’s
+d to express the standardized magnitude of these differences.
+
+All agreement analyses are conducted separately by model and dataset.
+
+C.2 Complete Agreement Results
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                  27
+
+Table 8. Agreement matrices for persona-based political compass positions across text-only (on Hate-Identity
+dataset) and vision-language models (on FHM dataset). Each cell reports the agreement score between two
+groups of extreme personas when labeling harmful content (TL = Top-Left, TR = Top-Right, BL = Bottom-Left,
+BR = Bottom-Right). Diagonal values capture intra-position consistency, while off-diagonal values measure
+inter-position overlap. This table presents agreement values considering only samples that have at least one
+
+disagreement between personas. Three agreement metrics are shown: Raw Agreement, Cohen’s Kappa, and
+Gwet’s AC1.
+
+Raw Agreement
+
+Hate                       Llama-3.1-8B                                 Qwen-2.5-32B                                Llama-3.1-70B
+
+Identity | 7, TR BL BR | TL TR BL BR | TL TR. BL. BR
+
+TL          0.804 0.814 0.800 0.807 | 0.841 0.844 0.818 0.857 | 0.835 0.811 0.823 0.847
+TR                     0.835 0.807 0.821               0.870 0.826 0.869               0.841 0.777 0.820
+BL                                0.824 0.816                         0.870 0.847                         0.898 0.866
+BR                                    0.827                              0.898                              0.889
+FHM                        Idefics3-8B-Llama3                              Qwen-2.5-VL-7B                                Qwen-2.5-VL-32B
+
+TL           TR           BL           BR           TL           TR           BL           BR           TL           TR           BL           BR
+TL            0.881 0.886 0.826 0.878 | 0.882 0.880 0.851 0.822 | 0.873 0.866 0.852 0.859
+TR                  0.905 0.815 0.875             0.881 0.849 0.821             0.885 0.857 0.860
+BL                                0.818 0.840                         0.830 0.805                         0.887 0.830
+BR                                          0.889                                   0.784                                   0.871
+
+Cohen’s Kappa
+
+Hate                       Llama-3.1-8B                                 Qwen-2.5-32B                                Llama-3.1-70B
+
+Identity | 7, TR BL BR | TL TR BL BR | TL TR. BL. BR
+
+TL          0.678 0.692 0.674 0.682 | 0.713 0.723 0.688 0.742 | 0.719 0.676 0.699 0.738
+TR                     0.724 0.684 0.703               0.771 0.704 0.767               0.723 0.622 0.693
+BL                            0.714 0.699                      0.781 0.738                      0.826 0.770
+BR                                    0.714                              0.816                              0.810
+Idefics3-8B-Llama3                              Qwen-2.5-VL-7B                                Qwen-2.5-VL-32B
+
+FHM
+
+TL           TR           BL           BR           TL           TR           BL           BR           TL           TR           BL           BR
+TL            0.769 0.768 0.684 0.767 | 0.385 0.389 0.365 0.369 | 0.791 0.778 0.754 0.768
+TR                  0.793 0.658 = 0.752             0.411 0.367 0.376             0.810 0.758 0.769
+BL                                0.678 0.712                         0.376 0.375                         0.806 0.720
+BR                                          0.791                                   0.384                                   0.785
+
+Gwet’s AC1
+Hate                Llama-3.1-8B                       Qwen-2.5-32B                       Llama-3.1-70B
+
+Identity | 7, TR BL BR | TL TR BL BR | TL TR. BL BR
+
+TL          0.705 0.719 0.700 0.708 | 0.757 0.762 =—-0.721_—*0.781 | 0.746 =0.708 ~=—0.728 ~——:0.764
+TR                  0.750 0.710 0.729             0.802 0.735 0.800             0.753 0.654 0.721
+BL                                0.735 0.723                         0.802 0.766                         0.845 0.793
+BR                                    0.738                              0.844                              0.828
+Idefics3-8B-Llama3                              Qwen-2.5-VL-7B                                Qwen-2.5-VL-32B
+
+FHM
+
+TL           TR           BL           BR           TL           TR           BL           BR           TL           TR           BL           BR
+TL          0.811 0.818 0.724 0.806 | 0.808 0.804 0.759 0.712 | 0.806 0.794 0.773 0.782
+TR                     0.850 0.705 0.800               0.806 0.755 0.710               0.823 0.779 0.783
+BL                                0.711 0.746                         0.725 0.685                         0.828 0.735
+BR                                    0.824                              0.652                              0.798
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+28                                                                                                                Civelli et al.
+
+Table 9. Agreement matrices for persona-based political compass positions across text-only (on Hate-Identity
+dataset) and vision-language models (on FHM dataset). Each cell reports the agreement score between two
+groups of extreme personas when labeling harmful content (TL = Top-Left, TR = Top-Right, BL = Bottom-Left,
+BR = Bottom-Right). Diagonal values capture intra-position consistency, while off-diagonal values measure
+inter-position overlap. Three agreement metrics are shown: Raw Agreement, Cohen’s Kappa, and Gwet’s AC1.
+
+Raw Agreement
+
+Hate   Llama-3.1-8B    Qwen-2.5-32B   Llama-3.1-70B
+Identity | 7, TR BL BR | TL TR BL BR | TL TR. BL BR
+
+TL         0.916 0.921 0.915 0.918 | 0.922 0.924 0.911 0.930 | 0.928 0.918 0.923 0.933
+
+TR                  0.930 0.918 0.924             0.937 0.916 0.936             0.931 0.904 0.922
+BL                                0.925 0.922                         0.936 0.926                         0.955 0.941
+BR                                    0.927                              0.950                              0.952
+Idefics3-8B-Llama3                              Qwen-2.5-VL-7B                                Qwen-2.5-VL-32B
+
+FHM
+
+TL           TR           BL           BR           TL           TR           BL           BR           TL           TR           BL           BR
+TL            0.972 0.974 0.961 0.972 | 0.965 0.964 0.956 0.947 | 0.874 0.864 0.845 0.883
+TR                  0.978 0.959 0.972             0.964 0.955 0.947             0.890 0.824 0.876
+BL                            0.959 0.964                      0.949 0.942                      0.857 0.853
+BR                                    0.975                              0.936                              0.898
+
+Cohen’s Kappa
+
+Hate                       Llama-3.1-8B                                 Qwen-2.5-32B                                Llama-3.1-70B
+
+Identity | 7, TR BL BR | TL TR BL BR | TL TR. BL BR
+
+TL          0.819 0.826 0.818 0.821 | 0.817 0.824 0.804 0.836 | 0.851 0.825 0.843 0.862
+TR                     0.844 0.823 0.833               0.856 0.816 0.853               0.849 0.797 0.834
+BL                            0.842 0.833                      0.865 0.836                      0.911 0.881
+BR                                    0.840                              0.884                              0.900
+Idefics3-8B-Llama3                              Qwen-2.5-VL-7B                                Qwen-2.5-VL-32B
+
+FHM
+
+TL           TR           BL           BR           TL           TR           BL           BR           TL           TR           BL           BR
+TL          0.866 0.865 0.824 0.867 | 0.399 0.407 0.385 0.394 | 0.634 0.598 0.603 0.657
+TR                     0.878 0.807 0.857               0.430 0.391 0.405               0.666 0.549 0.633
+BL                            0.824 0.840                      0.404 0.407                      0.656 0.625
+BR                                    0.882                              0.422                              0.702
+
+Gwet’s AC1
+Hate                Llama-3.1-8B                       Qwen-2.5-32B                       Llama-3.1-70B
+
+Identity | 7, TR BL BR | TL TR BL BR | TL TR. BL. BR
+
+TL          0.875 0.882 0.873 0.877 | 0.882 0.885 0.865 0.894 | 0.890 0.874 0.882 0.898
+TR                     0.895 0.878 0.886               0.904 0.871 0.903               0.894 0.851 0.880
+BL                                0.888 0.883                         0.904 0.886                         0.932 0.910
+BR                                    0.890                              0.924                              0.926
+Idefics3-8B-Llama3                              Qwen-2.5-VL-7B                                Qwen-2.5-VL-32B
+
+FHM
+
+TL           TR           BL           BR           TL           TR           BL           BR           TL           TR           BL           BR
+TL            0.961 0.962 0.944 0.960 | 0.947 0.946 0.933 0.920 | 0.749 0.728 0.690 0.765
+TR                     0.968 0.941 0.959               0.946 0.932 0.920               0.780 0.648 = 0.751
+BL                            0.942 0.949                      0.924 0.913                      0.714 0.706
+BR                                    0.964                              0.904                              0.795
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.
+
+
+===== PAGE BREAK =====
+
+Ideology-Based LLMs for Content Moderation                                                                                  29
+
+Table 10. Agreement matrices for persona-based political compass positions on text-only language models
+on the CAD dataset. Each cell reports the agreement score between two groups of extreme personas when
+labeling harmful content (Left and Right). Diagonal values capture intra-position consistency, while off-
+diagonal values measure inter-position overlap. Three agreement metrics are shown: Raw Agreement, Cohen’s
+Kappa, and Gwet’s AC1.
+
+All Samples                                             At Least One Disagreement
+
+Raw Agreement
+
+CAD        Llama-3.1-8B Qwen-2.5-32B Llama-3.1-70B        Llama-3.1-8B Qwen-2.5-32B Llama-3.1-70B
+
+Left Right | Left Right | Left Right || Left Right | Left Right | Left Right
+
+Left       0.857     0.768     0.797     0.758      0.791      0.701       0.830     0.724     0.765     0.720     0.783      0.689
+Right               0.801                 0.847                 0.792                  0.763                0.822                 0.784
+
+Cohen’s Kappa
+
+CAD        Llama-3.1-8B Qwen-2.5-32B Llama-3.1-70B        Llama-3.1-8B Qwen-2.5-32B Llama-3.1-70B
+
+Left Right | Left Right | Left Right || Left Right | Left Right | Left Right
+
+Left     0.707    0.562    0.600    0.517    0.573     0.413      0.614    0.479    0.539    0.451     0.548     0.387
+Right               0.600                0.678                 0.593                  0.538                0.641                 0.578
+
+Gwet’s AC1
+
+CAD        Llama-3.1-8B Qwen-2.5-32B Llama-3.1-70B        Llama-3.1-8B Qwen-2.5-32B Llama-3.1-70B
+
+Left Right | Left Right | Left Right || Left Right | Left Right | Left Right
+
+Left     0.715    0.536    0.594    0.516    0.582     0.401      0.660    0.448    0.530    0.440    0.566     0.379
+Right               0.602                0.693                 0.583                  0.526                0.645                 0.567
+
+Table 11. Average (+ standard deviation) agreement scores derived from the ideology agreement matrices.
+“Intra” values correspond to agreements between personas within the same ideological quadrant (matrix
+diagonal), while “Inter” values capture agreements across different quadrants (off-diagonal). Results are
+reported for both Cohen’s x and Gwet’s AC1, alongside statistical tests (p-values, Cohen’s d) comparing
+intra- versus inter-ideology agreement. The final column indicates the proportion of items with at least one
+persona disagreement. This table presents averaged values considering only samples that have at least one
+disagreement between personas.
+
+Cohen’s k                                  Gwet’s AC1                      .
+Dataset | Model                                                                                         Items with at least
+atase’       ode                       Agreement Values           Intra vs Inter           Agreement Values       one Disagreement
+Intra          Inter       p-value Cohen’s d       Intra          Inter
+>    Llama-3.1-8B        0.707+0.113 0.689+0.107     wee       0.171     0.732+0.109 0.715+0.105      4109 (41.09%)
+v=
+2 <     Qwen2.5-32B        0.770+0.113 0.72740.107     wee       0.401     0.801+0.092 0.761+0.092      4813 (48.13%)
+v
+3    Llama-3.1-70B      0.769+0.099 0.700+0.104     wee       0.679     0.79340.093 0.728+0.099      4240 (42.40%)
+Llama-3.1-8B        0.57640.157 0.479+0.182     wee       0.572     0.593+0.204 0.448+0.267      578 (84.01%)
+a     Qwen2.5-32B        0.590+0.166 0.451+0.135     wee       0.918     0.58740.198 0.440+0.169      594 (86.34%)
+e     Llama-3.1-70B      0.563+0.194 0.387+0.188     wee       0.924     0.56740.243 0.379+0.250      663 (96.37%)
+s      Idefics3-8B-Llama3 | 0.758+0.134 0.724+0.146     wee        0.239     0.79940.126 0.767+0.141       90 (19.65%)
+ie}       Qwen2.5-VL-7B       0.389+0.247 0.374+0.240       wee          0.064       0.74740.230 0.737+0.238         139 (30.35%)
+i
+Qwen2.5-VL-32B    0.798+0.096 0.758+0.104     wee       0.392     0.814+0.093 0.775+0.105      297 (64.85%)
+
+Note: Significance levels are reported after correcting for multiple hypothesis testing at: * p < 0.05, ** p < 0.01,
+“ » < 0.001.
+
+, Vol. 1, No. 1, Article . Publication date: October 2025.

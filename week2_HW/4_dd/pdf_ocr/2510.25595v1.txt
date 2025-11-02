@@ -1,0 +1,3316 @@
+arX1v:2510.25595v1 [cs.CL] 29 Oct 2025
+
+Communication and Verification in LLM Agents
+towards Collaboration under Information Asymmetry
+
+Run Peng!*       Ziqiao Ma'!*
+Zhang Xi-Jia*' = Yingzhuo Yu**
+
+Amy Pang!        Sikai Li?’
+
+Cristian-Paul Bara®®' — Joyce Chai!
+
+‘University of Michigan 7UNC, Chapel Hill *Georgia Tech
+‘Apple °Robert Bosch SRL °Babes-Bolyai University
+
+Abstract
+
+While Large Language Model (LLM) agents
+are often approached from the angle of action
+planning/generation to accomplish a goal (e.g.,
+given by language descriptions), their abilities
+to collaborate with each other to achieve a joint
+goal are not well explored. To address this lim-
+itation, this paper studies LLM agents in task
+collaboration, particularly under the condition
+of information asymmetry, where agents have
+disparities in their knowledge and skills and
+need to work together to complete a shared
+task. We extend Einstein Puzzles, a classical
+symbolic puzzle, to a table-top game. In this
+game, two LLM agents must reason, communi-
+cate, and act to satisfy spatial and relational con-
+straints required to solve the puzzle. We apply
+a fine-tuning-plus-verifier framework in which
+LLM agents are equipped with various com-
+munication strategies and verification signals
+from the environment. Empirical results high-
+light the critical importance of aligned com-
+munication, especially when agents possess
+both information-seeking and -providing ca-
+pabilities. Interestingly, agents without com-
+munication can still achieve high task perfor-
+mance; however, further analysis reveals a lack
+of true rule understanding and lower trust from
+human evaluators. Instead, by integrating an
+environment-based verifier, we enhance agents’
+ability to comprehend task rules and complete
+tasks, promoting both safer and more inter-
+pretable collaboration in AI systems. https:
+//github.com/Roihn/EinsteinPuzzles
+
+1 Introduction
+
+In recent years, there has been growing interest in
+Large Language Model (LLM) agents (e.g., Web-
+Agents) and their diverse applications (Wang et al.,
+2024a). While much of the current work focuses
+on action planning or goal completion in LLM
+agents (Ahn et al., 2022; Durante et al., 2024; Song
+
+“Equal contributions.
+"Work done while at the University of Michigan.
+
+et al., 2023) (e.g., based on natural language in-
+structions), their ability to collaborate with one an-
+other toward a shared goal remains underexplored.
+This paper addresses this gap by studying LLM
+agents in the context of task collaboration, particu-
+larly under conditions of information asymmetry.
+
+Information asymmetry is a fundamental and
+pervasive feature of human interaction. In daily
+life, we often possess different knowledge, perspec-
+tives, or intention. We must reason about others’
+knowledge and beliefs and coordinate our differ-
+ences in order to collaborate (Ma et al., 2023). As
+LLM agents become increasingly integrated into
+real-world workflows — not just to perform tasks
+independently, but to act as human proxies and col-
+laborators — it becomes essential to examine how
+well these agents can coordinate under asymmetric
+information, and what mechanisms might enhance
+their collaborative capabilities in such settings.
+
+To this end, we adapt Einstein Puzzles (Groza,
+2021), a classical logic problem, into a table-
+top environment where two agents must solve
+spatial and relational constraints, despite having
+partial, asymmetric information. Using a fine-
+tuning—plus—verifier framework, we equip LLM
+agents with different communicative abilities (e.g.,
+asking, sharing, or both) and study their collabora-
+tive behaviors under various configurations.
+
+Furthermore, we introduce an environment-
+based verifier to guide and evaluate agent decisions.
+This verifier leverages environmental signals to de-
+termine whether the proposed actions and known
+constraints are consistent, mirroring the implicit
+feedback mechanisms in interactive test-and-trials.
+It is training-free, lightweight, and broadly appli-
+cable across various environments. We examine
+whether this simple yet generalizable approach can
+greatly improve collaboration among LLM agents.
+
+Our empirical results have shown that under
+information asymmetry, LLM agents with both
+information-seeking and -providing capabilities
+
+
+===== PAGE BREAK =====
+
+collaborate most effectively. Meanwhile, mis-
+matched agent communicative abilities leads to
+significant performance degradation, highlighting
+the importance of aligned interaction protocols. Ad-
+ditionally, through detailed error analysis, we show
+that environment-based verification, using naturally
+available feedback without additional training, of-
+fers a simple but powerful mechanism to improve
+agent performance on both task completion and
+understanding. Finally, our human study reveals a
+gap between task efficiency and human preference:
+participants favor agents that proactively share in-
+formation, even if such agents are less optimal in
+task completion. These findings indicate the need
+for communication-aware and interpretable design
+in LLM-based collaborative systems.
+
+2 Related work
+
+Collaboration among LLM Agents The field of
+multi-agent coordination and communication has a
+long-established history (Albrecht and Stone, 2018;
+Gronauer and Diepold, 2022; Stone and Veloso,
+2000), with applications increasingly extending
+to human-AI collaboration (Carroll et al., 2019;
+Puig et al., 2020). Recently, multi-agent systems
+built upon Large Language Models (LLMs) (Guo
+et al., 2024; Tran et al., 2025) have pushed the
+boundaries of collaborative intelligence in a wide
+range of downstream tasks, including collaborative
+coding (Gao et al., 2024; Hong et al., 2024; Qian
+et al., 2024), social simulation (Li et al., 2023; Wu
+et al., 2024; Yang et al., 2024; Zhou et al., 2024c),
+and problem-solving (Chen et al., 2023; Qian et al.,
+2025; Wang et al., 2024c; Zhang et al., 2024a).
+However, most existing work focuses on settings
+with information transparency (Chen et al., 2023;
+Gao et al., 2024; Li et al., 2023; Wu et al., 2024;
+Yang et al., 2024), one-way communication (Qian
+et al., 2025), or information asymmetry within
+asymmetric role assignments (Hong et al., 2024;
+Qian et al., 2024; Zhou et al., 2024c). In contrast,
+this work centers on LLM agents operating under
+information asymmetry in symmetric, collabora-
+tive roles, as well as involves human studies to
+assess real-world human-AlI interaction. Liu et al.,
+2024a studied autonomous agents for collaborative
+tasks under information asymmetry, while there
+were no environments involved. As echoed in re-
+cent efforts (Liu et al., 2024b; Zhou et al., 2024b),
+addressing collaboration under information asym-
+metry—especially in human-AI contexts—remains
+
+a core challenge for LLM-based systems.
+
+Test-time Compute in LLM Recent works have
+demonstrated the effectiveness of leveraging addi-
+tional computational resources at inference time
+to improve response quality in LLMs. One line
+of research introduces a verification model to eval-
+uate the correctness and utility of generated re-
+sponses. Typically, this involves sampling multiple
+responses from an LLM and applying a best-of-n
+strategy (Charniak and Johnson, 2005; Cobbe et al.,
+2021), where a verifier model selects the most ap-
+propriate response. Such approaches have been
+widely adopted across domains including mathe-
+matics (Cobbe et al., 2021; Lifshitz et al., 2025;
+Lightman et al., 2023; Wang et al., 2024b; Yao
+et al., 2023), code generation (McAleese et al.,
+2024; Wang et al., 2025), and web navigation (Koh
+et al., 2024; Putta et al., 2024). We refer readers
+to (Guan et al., 2024; Zhang et al., 2025) for com-
+prehensive reviews of verification-based methods.
+
+While most existing approaches employ a sep-
+arate value model, often another LLM, with (Lif-
+shitz et al., 2025; Lightman et al., 2023; McAleese
+et al., 2024; Wang et al., 2025, 2024b; Zhang et al.,
+2024b; Zhou et al., 2024a) or without (Yao et al.,
+2023; Yu et al., 2023) further training, we propose
+an alternative verification mechanism that directly
+leverages environmental feedback. In interactive
+tasks within simulated environments, the environ-
+ment itself provides fine-grained, up-to-date, and
+objective signals about task progression and action
+validity. This enables a training-free, compute-
+efficient form of verification that naturally inte-
+grates with agent decision-making.
+
+3 Collaboration Under Information
+Asymmetry
+
+3.1 Understanding Einstein’s Puzzle on the
+tabletop setup
+
+Einstein Puzzles is a logical game requiring de-
+ductive reasoning and constraint satisfaction. We
+modify it into a collaborative game in which two
+agents work together to place a set of objects into
+designated bins. Each object has a target bin as its
+destination, but the information about these destina-
+tions is split between the two agents. Importantly,
+agents are unaware of which pieces of information
+their partner possesses. To succeed, agents must
+engage in rich communication and apply strategic
+reasoning to solve the task collaboratively.
+
+
+===== PAGE BREAK =====
+
+Final Goal
+
+Placement Constraints
+« Qinboron-tee bin)
+2. , % same row
+3. ©), & same column
+4. g. eons diagonal —-
+
+&  O.        same row
+
+tell
+> Y
+P
+
+Initial State   q
+
+gS 6 Area
+
+is  ee
+
+Game Play
+Sy;      & and 6) are on the
+y-¢      same row, and 6) should
+
+go in bottom-left bin. So
+
+is in bottom-right.
+Move(     , bottom-right)
+
+| know where       should
+go, but | cannot reach that
+bin. Let me inform my
+partner before passing it.
+
+Share( Oo. in, bottom-left)
+
+Now only 2¥ in the front,
+but | have no idea where
+to place it. Let me ask.
+
+Ask( 3 )
+
+Figure |: Illustration of our collaborative game. Each game features a final goal (top-left), where objects are assigned
+to specific goal bins (e.g. toy bear to top-left bin). Placement constraints are generated based on this final goal and
+are distributed to the two players. At the start, objects are randomly positioned in front of the players. Players must
+collaborate and communicate effectively to reason the final goal and accordingly complete the placement.
+
+The setup consists of a rectangular table with two
+collaborators sitting on opposite sides of the table
+(See Figure 1). The table is split into three regions:
+a region immediately in front of each collaborator
+and a common area in the center. Each collaborator
+can only reach the area directly in front of them
+and the common area in the center. They can also
+each reach the two corner bins on either side of the
+area in front of them, totaling four destination bins.
+In the beginning, several objects are distributed be-
+tween the two players’ bins, so they are exclusively
+reachable by one of the collaborators. No objects
+start in any bins.
+
+We describe the task as a distributed constraint
+satisfaction problem. A goal configuration is de-
+fined, which is where the objects should be placed,
+and can be described with a set of constraints.
+There are four types of constraints that describe
+the relationship of a pair of objects or between an
+object and a bin. Given a pair of objects, it must
+either be:
+
+¢ in the same bin: both objects have the same
+destination.
+
+¢ in the same column: the two objects must end
+up in bins on either exclusive side of the table
+but on the same side, left or right, from either
+collaborator’s perspective.
+
+¢ in the same row: both objects must end up on
+one of the collaborator’s exclusive zones but in
+bins on opposite sides, left or right.
+
+* or on the same diagonal: the two objects must
+end up in opposite areas and opposite sides.
+
+The exhaustive set of rules between all pairs of
+
+objects is overly descriptive. We select a random,
+
+minimal subset of these rules (denoted as C). A
+
+minimal subset C must satisfy the following:
+
+¢ Eliminating any rule will describe more than one
+final configuration.
+
+¢ Moving any object from the final configuration
+will violate at least one rule.
+
+An additional starting constraint is given, which
+
+grounds one of the objects to a specific bin. To-
+
+gether, the minimal set of object pair rules and the
+
+one object-to-bin grounding uniquely describe the
+
+goal configuration.
+
+The set of constraints that uniquely determines
+the final placement of the objects is then divided
+between the two players (denoted as C; and C2), cre-
+ating information asymmetry. This distribution
+ensures that neither player can complete the task
+independently, but together, they possess all the
+necessary information to succeed, i.e., Cy UC2 = C.
+Coupled with the fact that some objects must end
+on the opposite side of the table, this constitutes
+the disparity in knowledge and skills as described
+in (Bara et al., 2021).
+
+The two players take turns, each consisting of
+a single move. A move can be placing an object
+into an available destination bin or the center of the
+table, sharing a piece of information, or requesting
+information from their partner. Task performance
+is measured by the number of moves taken to com-
+plete the task. Since both object placement and
+information exchange count as a move, this scoring
+system encourages players to communicate con-
+cisely. The players’ objective is to achieve the
+final configuration using the least number of moves
+
+
+===== PAGE BREAK =====
+
+within the set of given constraints.
+
+3.2 Information Providing & Seeking
+
+We study two communicative actions in collabo-
+rative contexts with information asymmetry: in-
+formation seeking and information providing. We
+want to investigate whether LLM agents are able to
+exchange necessary information with their partners,
+as well as perform collaborative reasoning for task
+completion. To systematically analyze the role of
+communication actions in this process, we design
+four action space configurations for communica-
+tion as below:
+
+1. Information Providing Only: agents are allowed
+to proactively share their knowledge of con-
+straints with their partners, but they cannot ask
+for this information.
+
+2. Information Seeking Only: agents can ask about
+constraints of specific objects with their partners.
+They are allowed to share a constraint only when
+their partner first asks about a object involved
+in it. In other words, agents cannot initiate the
+information providing.
+
+3. Information Providing & Seeking: agents can
+both share and ask freely.
+
+4. No Information Exchange: no communicative
+actions are enabled. Agents can only choose to
+move an object or to pass the turn. Since neither
+player has complete knowledge about the place-
+ment constraints, this configuration inevitably
+involves random guessing for objects that may
+have goal bins that are not deducible.
+
+We enabled LLMs to complete the games under
+these different action space configurations. To be
+specific, we applied supervised fine-tuning (SFT)
+on several well-known open-source models, includ-
+ing Meta-Llama-3-8B-Instruct (AI@ Meta, 2024),
+Llama3.1-8B-Instruct (Grattafiori et al., 2024) and
+Qwen2.5-7B-Instruct (Team, 2024) models. To pre-
+pare data for fine-tuning, we designed a planner to
+generate solutions under different configurations of
+action space. Please refer to the appendix for the
+details of planner design. We varied the number
+of objects per game and collected trajectories for
+games with 4, 5, and 6 objects, totaling 250, 500,
+and 500 games, respectively. For each game, we
+generated five distinct solution trajectories (both op-
+timal and near-optimal solutions), creating a large
+pool from which we sampled 1,000 trajectories for
+fine-tuning. Each trajectory averages around 10
+steps, resulting in approximately 10,000 training
+
+samples in the chat form. We evaluated the models
+on 300 unseen games (100 games for each object
+count) and reported average performance across
+them. We also evaluated models with and with-
+out chain-of-thought (CoT) reasoning (Wei et al.,
+2022). The reasoning traces for the training data
+are generated using GPT-40. Examples of the rea-
+soning traces can be found in the game play section
+of Figure 1. A full example of a game play can be
+found in Appendix A.
+
+4 Environment-based Verifier
+
+Inspired by the trial-and-error paradigm, we draw
+an analogy to how agents refine decisions through
+iterative interaction with their environment. Rather
+than training a dedicated verifier, we directly lever-
+age environment-provided feedback as a source of
+verification during inference. We evaluate whether
+this lightweight, training-free approach is sufficient
+to support LLM agents in collaborative reasoning
+tasks under information asymmetry.
+
+We design a reasoning verifier based on envi-
+ronment feedback. Firstly, It is capable to examine
+the generated action with the game rules (e.g. phys-
+ical affordance) and previous communication (e.g.
+redundant information sharing). Secondly, as a
+strategy-driven game, we implement a graph expan-
+sion algorithm to enhance agents’ reasoning ability.
+It treats objects and bins as nodes and constraints
+as edges, and infers new constraints by combin-
+ing existing ones. It is expanded iteratively using
+the transitivity of adjacent edges until no new con-
+straints emerge. For example, objects A and C can
+be inferred to be on the same row if both A and B,
+and B and C, are known to be on the same row. This
+enables the verifier to assess whether a proposed
+action aligns well with the current knowledge, and
+avoids unnecessary trials.
+
+Further, we tested several alternatives of
+environment-based verifiers, and discussed their ef-
+fectiveness and potential generality in Appendix C.
+
+5 Experiments and Results
+
+We conduct extensive experiments to evaluate the
+
+performance of language models in reasoning and
+
+communication under information asymmetry. Our
+
+experiments address four key research questions:
+
+¢ RQ1: Collaboration under Varying Commu-
+nicative Action Space. How do agents col-
+laborate under information asymmetry when
+equipped with different communicative actions?
+
+
+===== PAGE BREAK =====
+
+RQ2: Effectiveness of Environment-Based
+Verification. To what extent can environment-
+based verification enhance the performance?
+
+RQ3: Collaboration under Mismatched Com-
+municative Action Space. What happens when
+agents with mismatched communication capabil-
+ities are paired together?
+
+RQ4: Human Preferences Toward Different
+Communication Behaviors. While agents may
+perform well in self-play, do these behaviors
+align with human preferences in collaboration?
+
+5.1 Experiment Setup
+
+To systematically investigate our research ques-
+tions, we design a series of experiments to investi-
+gate specific aspects of the collaboration:
+
+Exp1: Collaboration with Different Commu-
+nicative Action Spaces (RQ1) We evaluated
+both closed-source language models via API
+calls and open-source models with supervised
+fine-tuning (SFT). We deploy the same model
+(with the same action space) to perform self-play
+in the game. This setting allows direct compari-
+son of collaboration with different communica-
+tive action space.
+
+Exp2: Environment-Based Verifier (RQ2) We
+augment the base models with an environment-
+based verifier, which provides binary feedback
+indicating whether each sampled action is valid.
+At each decision step, we sample 4 candi-
+date responses using temperature=0.2 and
+top-p=0.9, and apply the verifier to filter out
+invalid actions, selecting the first valid one as the
+final output. This setup enables a direct compari-
+son of model performance with and without the
+verifier.
+
+Exp3: Collaboration with Mismatched Action
+Spaces (RQ3) We select the well-performing
+models from those action spaces (Llama3.1-8B
+without CoT for no information exchange, and
+Llama3.1-8B with CoT for the rest), equipped
+with reasoning verifier, and let them play with
+each other. This setting further reveals the behav-
+iors of collaboration between agents with differ-
+ent communication capabilities.
+
+Exp4: Human Performance (RQ4) Once we
+identified the most effective configuration of
+communicative action space for collaborative
+reasoning among LLM agents, we further exam-
+ined whether such models are also preferred by
+human users. We recruited 12 college students
+
+as human participants to interact with the best-
+performing models, each equipped with different
+communicative action spaces and supported by
+the reasoning verifier. We sampled 27 unseen
+games (9 games for each object count) and mea-
+sured both task completion rate and efficiency.
+Each participant was assigned a sequence of
+9 games—3 games each with 4, 5, and 6 ob-
+jects—while being given the complete commu-
+nicative action space. In each game, they in-
+teracted with a model configured with a specific
+communicative action space, which remained un-
+known to the participant. To complement quanti-
+tative metrics, we also collected qualitative feed-
+back from participants after each game using the
+following three questions:
+
+1. Did you find the information communicated by
+the bot useful?
+
+2. Did the bot make effective use of the informa-
+tion you shared?
+
+3. Were you ever confused by the bot’s behavior?
+
+These questions allowed us to assess the per-
+ceived helpfulness, responsiveness, and clarity
+of the model’s behavior from a human-centered
+perspective.
+Evaluation Metrics We employ complementary
+metrics to assess both effectiveness and efficiency.
+For effectiveness, we report the Success Rate (SR)
+and subgoal success rate (Sub . R) at the first attempt
+(Pass@1). SR measures the percentage of games
+successfully completed within a limited number
+of steps (30 for all the experiments), while Sub.R
+reflects partial progress by capturing the propor-
+tion of objects correctly placed, even when the full
+game is not successfully completed. For efficiency,
+we track the number of steps taken to complete
+each game and compare it to the optimal solution
+calculated by our planner. We then compute the
+Step Ratio (StepR), defined as the ratio of the num-
+ber of executed steps to the number of steps in
+the optimal solution. When a verifier is applied,
+we additionally report the correction rate (Corr .R),
+indicating the proportion of responses corrected
+by the verifier. We report standard error for each
+metrics.
+
+5.2 Result Analysis
+
+Effects of Communicative Action Space (RQ1)
+Across all model families, we observe a generally
+clear hierarchy in task performance: Information
+Seeking & Providing > Seeking Only > No Infor-
+
+
+===== PAGE BREAK =====
+
+No Verifier                                             With Reasoning Verifier
+Model                  SRT(%) Sub.RT(%)        StepRJ         SRT(%)         Sub.RT(%)        StepR| Corr.R(%)
+Information Providing & Seeking
+GPT4o0 CoT        51.00+2.89    76.73+1.64 1.92x+0.04x 80.00 (+29.00)+2.31    91.3441.17  1.65x+0.03x    17.42+0.57
+Llama3-8B         13.6741.98    60.0441.37 1.47x+0.0sx 32.33 (+18.66)+2.70    73.2841.36  1.40x+0.05x    6.36+40.43
+Llama3.1-8B        27.3342.57    68.7441.44 1.50x+0.05x 53.00 (+12.67)+2.88    81.05+140 1.36x+0.03x    7.19+0.44
+Qwen2.5-7B        27.00+2.56    72.3141.26 1.56x+0.06x 47.00 (+20.00)+2.88    83.96+4105 1.45x+0.04x     8.34+40.42
+Llama3-8B CoT     29.67 42.64    62.5141.75 1.94x+0.09x 70.00 (+40.33)-+2.65    87.264134 1.61x+0.04x    14.28+0.58
+Llama3.1-8B CoT  58.67+2.84     79.3941.64  1.87x+0.05x 89.33 (+30.66)41.78     95.644081 1.52x+003x 14.38+0.59
+Qwen2.5-7B CoT  44.67+2.87    74.3141.66 1.91x+0.07x 81.00 (+36.33)+2.26    92.53+41.03 1.61x+0.03x    14.59+0.54
+Information Providing Only
+Llama3-8B          9.33+1.68    62.4641.19  1.26x+0.08x 27.00 (+17.67)+2.56    74.8141.23  1.45x+0.08x    6.43 +£0.38
+Llama3.1-8B        26.00+2.53    69.7141.40 = 1.56x+0.06x 40.33 (4+14.33)+2.83    80.43+41.19 1.43x+0.05x    6.38 +£0.39
+Qwen2.5-7B         8.00-+41.57    51.9641.30 1.12x+0.02x 24.67 (4+16.67)+2.49    67.5341.43 1.17x+0.04x    6.00+0.40
+Llama3-8B CoT     26.00+2.53    60.06+1.76 1.62x-+0.10x 56.00 (+30.00)-+2.87    80.274154  1.56x+0.05x    10.70+0.56
+Llama3.1-8B CoT  37.00+2.79     68.3441.72 1.70x+007x 65.33 (+28.33)+2.75     84.2541.44 1.52x+004 11.54+0.56
+Qwen2.5-7B CoT    17.00+2.17    52.61+1.69 1.81x+010x 38.00 (+21.00)+2.80    70.40+1.69  1.59x+0.06x    11.01 +0.53
+Information Seeking Only
+Llama3-8B         17.67+2.20    63.704139 = 1.21x+0.05x 37.33 (+19.66)+2.79    76.87+1.30  1.28xX+0.04x    7.61+40.47
+Llama3.1-8B        33.6742.73    74.764139 = 1.50x+0.05x 52.00 (+18.33)+2.88    84.0741.19  1.37x+0.03x    6.41 +0.36
+Qwen2.5-7B        14.00+2.00    60.06+1.29 1.06x+0.03x 24.33 (4+10.33)+2.48    70.1841.29  1.14x-0.04x    3.68+0.28
+Llama3-8B CoT     52.3342.88    77.91+164 1.35x+0.03x $2.33 (+30.00)+2.20    91.8441.15 1.28x+003x 10.15+0.47
+Llama3.1-8B CoT  56.67+2.86     81.1441.45  1.42x+0.04x 82.67 (+24.00)+2.19     93.4240.93 1.25x+002x  10.59+0.47
+Qwen2.5-7B CoT  39.33+2.82    69.5741.77.  1.59x+0.05x 76.67 (+37.34)-+2.44    89.90+4127 = 1.35x+0.03x    14.44+0.53
+No Information Exchange
+Llama3-8B                81.3342.25       92.79+0.98 1.88x+0.04x 97.67 (4+16.34)+0.87       99.39+0.25 1.61x-+0.03x 11.66+0.57
+Llama3.1-8B        84.67+2.08    96.13+0.62 2.08x+0.04x 94.33 (+9.66)+1.33    98.50+042 1.68x+003x 11.09+0.60
+Qwen2.5-7B              34.6742.75       76.9041.24 1.91x+007x 61.33 (4+26.66)+2.81       88.21+4103  1.79x+0.05x      10.28 +0.49
+Llama3-8B CoT       33.3342.72      66.78+1.79 2.21x+0.10x 73.00 (4+39.67)+2.56      90.51+1.06 1.91x+0.06x      17.14+0.62
+Llama3.1-8B CoT  38.33+2.81     73.8341.53 2.16x+0.08x 54.33 (+16.00)+2.88     83.374128  1.82x+0.06x    14.35+0.58
+Qwen2.5-7B CoT  39.67+2.82     71.02+41.73 2.43x+0.10x 65.33 (+25.66)-+2.75     85.99+131  1.96x+0.06x     15.79 +0.58
+
+Table 1: Performance comparison of models with and without verifier assistance across four communicative action
+space configurations. In each game, both agents are assigned the same action space.
+
+mation Exchange > Providing Only (See Table 1).
+Enabling both seeking and providing actions con-
+sistently yields the highest Success Rate (SR) and
+the lower Step Ratio (StepR). confirming that bi-
+directional exchange is both expressive and effec-
+tive for coordinating constraints, especially when
+enhanced with chain-of-though reasoning.
+Permitting only information seeking is better
+than permitting only information providing. Tar-
+geted queries minimize redundant traffic and let
+agents actively access the missing piece of informa-
+tion, whereas blind sharing often floods the channel
+with constraints that are irrelevant or already known
+by their partners. Therefore, the result suggests that
+information seeking is a more task-efficient option
+than unprompted information providing.
+Surprisingly, disabling communication alto-
+gether (“No Information Exchange”) ranks high
+for some variants. Without communication and
+reasoning process through CoT, the task reduces
+to pure object manipulation and random guess-
+ing; therefore, the model’s entire capacity is de-
+voted to mastering game rules and action affor-
+dance. Llama variants exploit this by memoriz-
+ing high-probability transition patterns, achieving
+
+a success rate greater than 81%. Qwen, which is
+pre-trained on a different instruction distribution,
+does not show the same effect, suggesting the phe-
+nomenon is model-specific rather than an intrinsic
+property of the environment.
+
+Verifier Assistance (RQ2) As shown in Table 1,
+adding the reasoning verifier (our best verifier) to
+the base models leads to large absolute SR gains
+(labeled in red), ranging from 10 to 40% increment.
+This reflects the high potential capabilities of the
+base models, as well as the effectiveness of the
+assistance from our verifier.
+
+To better understand the underlying behaviors,
+we further conduct the error analysis across four
+different action configurations on variants with the
+best performance (LLaMA-3.1-8B without CoT
+for no information exchange, and with CoT for the
+rest, the same for later experiments). We provide
+detailed explanations on the error taxonomy in Ap-
+pendix E. Each cell in the table presents error rates
+in two forms:
+¢ (ERRORS/TOTAL STEPS)%: The proportion of
+
+steps affected by this error type.
+
+* (ERRORS/RELEVANT ACTION TYPE)%: The
+
+
+===== PAGE BREAK =====
+
+Category                                                        No Verifier                                                         With Reasoning Verifier
+
+Provide & Seek Provide Only Seek Only          None       Provide & Seek Provide Only Seek Only          None
+Format Following                      0.19%               0.59%               0.00%               0.00%                0.08%                0.48%               0.02%               0.00%
+Physical Understanding
+Object not in source bin —-8.34%/11.27% —4.17%/7.75% 10.81%/15.16% 1.47%/1.60% | 2.92%/4.06%  1.94%/3.39% 4.89%/7.05% 1.11%/1.19%
+Source bin not reachable —-1.43%/1.94% —0.77%/1.43% 0.84%/1.18% 0.02%/0.02% | 0.97%/1.34%  1.00%/1.75% 0.24%/0.35% 0.02%/0.03%
+Dest. bin not reachable      4.27%/5.771%  3.83%/7.11% 3.67%/5.15% 0.00%/0.00% | 2.36%/3.28%  2.50%/4.37%  2.06%/2.98% 0.00%/0.00%
+Source & destination same 0.19%/0.26% — 0.70%/1.30% 0.81%/1.13% 0.02%/0.02% | 0.18%/0.26% 0.60%/1.04% 0.24%/0.35% 0.02%/0.03%
+
+Communication
+
+Redundant knowl. sharing 14.04%/59.86% 33.20%/79.35% 0.08%/0.89%
+
+No share after seek            0.30%/12.99%           -           0.93%/9.65%
+Wrong share after seek       0.04%/0.19%           -           0.00%/0.00%
+Seek known object             0.34%/14.94%            =            1.21%/12.54%
+
+0.10%/0.83%                     -
+0.16%/1.31%                  -
+0.00%/0.00%                  -
+0.24%/1.96%               -
+
+-        9.60%/39.44% 27.61%/69.37%
+-           0.14%/4.00%           -
+-           0.04%/0.17%           -
+-           0.02%/0.57%           -
+
+Task Reasoning
+Wrong rule understanding 28.22%/38.15%
+
+Wrong random guessing = 8.64%/11.64% — 4.25%/7.90%
+
+19.07%/35.46% 27.40%/38.4 1% 27.35%/29.79%
+5.76%/8.07% 16.11%/17.54%
+
+14.12%/19.62% 13.13%/22.94% 17.53%/25.27% 19.31%/20.67%
+6.12%/8.51%  4.90%/8.56% 3.57%/5.14% 14.77%/15.81%
+
+No Error                                 44.29%              38.80%             59.61%             55.92%              67.19%              51.37%             5.68%             65.60%
+Total Actions                                6704                   7293                   6427                   5308                    4867                    5881                   4991                   4143
+Table 2: Error analysis across different communicative action space with/without verifier.
+proportion of a specific action type affected by       Act.Mode1 Act. Mode2_ SRT(%) _‘StepR|
+.                                                                                              Provide & Seek Provide Only 67.33+4271  1.57xX+0.04x
+this error (e.g., move, share, seek).                      Provide & Seek Seek Only = 78.67+2.37 — 1.33x+0.02x
+For example, in the "Wrong Rule Understand-     Provide & Seek      None      78.674237 — 1.68x-0.04x
+Provide Only       Seek Only  41.00+2.84  1.63x+0.07x
+
+ing" row under the “Provide & Seek” column with-
+out verifier, the value 28.22% indicates that 28.22%
+of all 6704 total steps contain this error. The accom-
+panying 38.15% denotes that this error occurred
+in 38.15% of the 4681! total "move" actions. One
+wrong action may fall into multiple error types.
+
+Without using verifier, agents across all action
+configurations demonstrate a similar level of skill
+in task reasoning. The relatively better performance
+of the "no information exchange" might be primar-
+ily due to fewer distractions from communication,
+allowing agents to focus more on enhancing physi-
+cal understanding and trying all possible solutions.
+Also, agents struggle with efficient communica-
+tion. When they are allowed to proactively share
+information, a large portion of their sharing actions
+are labeled as redundant (59.86% and 79.35%, re-
+spectively). Moreover, responding to partners’ re-
+quests and actively seeking necessary information
+are challenging. Interestingly, when agents are
+restricted to only share information upon request,
+the redundancy issue is reduced. However, their
+overall performance still lags behind agents with
+full abilities, indicating that balanced, bidirectional
+communication remains crucial for effective col-
+laboration.
+
+With the integration of the reasoning verifier, we
+observe a consistent reduction in error rates and a
+decrease in the total number of actions taken by
+the agents. Notably, there is a significant improve-
+ment in rule understanding, which aligns well
+with the design objective of the reasoning verifier.
+In addition, several issues in communication are
+
+'The total number of "move" action, 4681, is not presented
+on the table.
+
+Table 3: Comparison across different action space com-
+binations. All of them are using reasoning verifier.
+
+also well improved with the involvement of the
+reasoning verifier, indicating its effectiveness in
+guiding more efficient and purposeful communica-
+tion behaviors.
+
+These findings support our central claim: al-
+though agents may achieve good performance with-
+out information exchange, they do so without
+truly learning the underlying rules, posing severe
+safety risks. In contrast, with the support of an
+environment-based verifier, agents with full com-
+munication capabilities exhibit gains both in
+task performance and rule comprehension. This
+combination offers a promising path toward devel-
+oping safer, more interpretable AI systems.
+
+Mismatched Action Spaces (RQ3) We further
+examine model behavior in scenarios where two
+agents are assigned different communicative action
+spaces. Specifically, we evaluate four asymmetric
+pairings of action spaces, as shown in Table 3. We
+exclude the pair Provide only vs. None, as it is
+functionally equivalent to Provide & Seek vs. None.
+In both cases, one agent is unable to respond to
+queries. Similarly, Seek only vs. None is the same
+as None vs. None, since the None agent cannot
+initiate or respond to communication.
+
+Across the evaluated pairings, we observe a con-
+sistent drop in performance when agents have mis-
+matched communicative abilities. This finding
+highlights the importance of aligning communi-
+cation protocols in collaborative tasks and provides
+
+
+===== PAGE BREAK =====
+
+Action Mode                SRT(%)                StepR|
+
+Provide & Seek     100.00+0.00     1.39x+0.10x
+Provide Only       100.00+0.00     1.41x+0.08x
+Seek Only          100.00+0.00     1.33x+0.06x
+None              100.00+0.00     1.86x+0.11x
+
+Table 4: Performance of collaboration between best-
+performing agents and 12 human participants.
+
+insights into designing agent communication strate-
+gies in multi-agent systems. Notably, in the last
+two pairings listed in Table 3, agents are some-
+times forced to rely on random guessing. For in-
+stance, a Seek only agent cannot proactively share
+unless asked—yet its Provide only partner lacks
+the ability to initiate queries. These structural
+mismatches lead to particularly sharp declines in
+task success, strengthening the need for matched-
+communication agent design.
+
+Human Preference (RQ4) We follow the model
+selection in Table 3 from RQ3 and recruit human
+participants to play games with them. As shown in
+Table 4, human participants, with complete commu-
+nicative action space, achieve 100% success rate
+across all action space configurations within 30
+steps for each game. Agents with communicative
+actions perform efficient collaboration with human
+participants, while agents that cannot communicate
+spend far more rounds completing tasks.
+
+In addition to qualitative metrics, we also con-
+duct quantitative analyses to better understand the
+perceived helpfulness, responsiveness, and clarity
+of the models from a human-centered perspective.
+Figure 2 presents the distributions of participant
+responses across these three dimensions. We find
+that most participants agree the agents generally
+communicate useful information and make effec-
+tive use of the information shared by the human.
+Notably, agents with the Seek only configuration
+are rated as especially helpful—tlikely because they
+have learned to selectively share the most relevant
+information when prompted. Interestingly, in the
+None condition for QI! (usefulness of communi-
+cated information), participants often interpret the
+agents’ physical actions as implicit communication
+from which they base their evaluations.
+
+However, we observe strong disagreement re-
+garding the clarity of agent behavior. Agents
+with Seek only or None configurations tend to
+cause more confusion. Specifically, while Seek
+only agents are seen as helpful and responsive, they
+still leave users uncertain—possibly because they
+never proactively offer information before making
+
+Q1: Shared info is useful.
+
+Agree
+Slightly
+Agree
+Neutral                                                                                     p
+Slightly                                                d                                d
+Disagree
+Disagree                    -                                                                                                -
+
+Qe2: Al uses your info well.
+
+Agree
+
+Slightly
+Agree
+
+Neutral
+
+Slightly
+Disagree
+
+Disagree
+
+Agree
+
+Slightly
+Agree
+
+Neutral
+
+Slightly
+Disagree
+
+Disagree
+
+Provide Only         Seek Only              None
+
+Provide&Seek
+
+Figure 2: Distributions of answers with 108 data points
+from 12 human participants for each question. Each
+participant plays 9 games with one model. The white
+dots represent the average scores.
+
+a move. This suggests that even if an agent is ef-
+fective and efficient in completing the task, a lack
+of initiative in communication can reduce the per-
+ceived clarity of its behavior. Similarly, models
+without any communicative capabilities achieve
+near perfect performance in self-play (94.33% SR),
+yet they are perceived as unclear in human-AI col-
+laboration. Instead, although models that can initi-
+ate information providing take slightly more steps,
+they offer better clarity in human-AI collaboration.
+These results highlight that beyond task success,
+proactive and transparent communication plays
+a critical role in fostering human trust and un-
+derstanding in collaborative settings.
+
+6 Conclusion
+
+We adapted Einstein’s Puzzle to a tabletop envi-
+ronment to study collaboration under information
+asymmetry between LLM agents. Our empirical
+results show the critical role of aligned communica-
+tion, especially information seeking and providing
+abilities in the success of collaboration. Through
+detailed error analysis, we identify general limita-
+tions in task understanding, which are effectively
+mitigated by incorporating environment-based ver-
+ification. Furthermore, a human study highlights
+the importance of proactive and transparent com-
+munication in fostering trust and interpretability.
+These findings point to a pressing need for reliable,
+
+
+===== PAGE BREAK =====
+
+communication-aware, and interpretable design in
+future LLM-based collaborative systems.
+
+Limitations
+
+Still our study has known limitations. First, a ready-
+to-use environment-based verifier relies on the as-
+sumption that invalid actions are always recover-
+able—a prerequisite for trial-and-error-style inter-
+action. While this holds in many simulated envi-
+ronments, extending the approach to real-world set-
+tings remains challenging. Doing so would require
+agents to possess richer perceptual capabilities and
+a deeper understanding of the environment’s dy-
+namics. Nevertheless, the verifier is readily ap-
+plicable and easily deployable in a wide range of
+simulated environments, where structured feedback
+is available.
+
+Second, our human evaluation was conducted
+on a relatively small scale. Due to constraints in
+time and computational resources, we were unable
+to deploy multiple models simultaneously, limit-
+ing the ability to compare different configurations
+within a single user study. In future work, we plan
+to expand the study by recruiting more participants
+and enabling broader comparisons across models.
+This will allow us to conduct more robust analyses
+of both human preferences and model behaviors in
+collaborative settings.
+
+Acknowledgments
+
+This work has benefited from the Microsoft Accel-
+erate Foundation Models Research (AFMR) grant
+program. We thank all the human-study partici-
+pants for their contributions.
+
+References
+
+Michael Ahn, Anthony Brohan, Noah Brown, Yev-
+gen Chebotar, Omar Cortes, Byron David, Chelsea
+Finn, Chuyuan Fu, Keerthana Gopalakrishnan, Karol
+Hausman, Alex Herzog, Daniel Ho, Jasmine Hsu,
+Julian Ibarz, Brian Ichter, Alex Irpan, Eric Jang,
+Rosario Jauregui Ruano, Kyle Jeffrey, and 26 oth-
+ers. 2022. Do as i can and not as i say: Grounding
+language in robotic affordances. In arXiv preprint
+arXiv:2204.01691.
+
+AI@Meta. 2024. Llama 3 model card.
+
+Stefano V Albrecht and Peter Stone. 2018. Autonomous
+agents modelling other agents: A comprehensive
+survey and open problems. Artificial Intelligence,
+258:66-95.
+
+Cristian-Paul Bara, Sky CH-Wang, and Joyce Chai.
+2021. MindCraft: Theory of mind modeling for situ-
+ated dialogue in collaborative tasks. In Proceedings
+of the 2021 Conference on Empirical Methods in Nat-
+ural Language Processing, pages 1112-1125, Online
+and Punta Cana, Dominican Republic. Association
+for Computational Linguistics.
+
+Micah Carroll, Rohin Shah, Mark K Ho, Tom Griffiths,
+Sanjit Seshia, Pieter Abbeel, and Anca Dragan. 2019.
+On the utility of learning about humans for human-ai
+coordination. Advances in neural information pro-
+cessing systems, 32.
+
+Eugene Charniak and Mark Johnson. 2005. Coarse-
+to-fine n-best parsing and MaxEnt discriminative
+reranking. In Proceedings of the 43rd Annual Meet-
+ing of the Association for Computational Linguistics
+(ACL ‘05), pages 173-180, Ann Arbor, Michigan. As-
+sociation for Computational Linguistics.
+
+Justin Chih-Yao Chen, Swarnadeep Saha, and Mohit
+Bansal. 2023. Reconcile: Round-table conference
+improves reasoning via consensus among diverse
+Ilms. arXiv preprint arXiv:2309. 13007.
+
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,
+Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias
+Plappert, Jerry Tworek, Jacob Hilton, Reiichiro
+Nakano, and 1 others. 2021. Training verifiers
+to solve math word problems. arXiv preprint
+arXiv:2110.14168.
+
+Tri Dao. 2024. FlashAttention-2: Faster attention with
+better parallelism and work partitioning. In Jnter-
+national Conference on Learning Representations
+(ICLR).
+
+Zane Durante, Qiuyuan Huang, Naoki Wake, Ran Gong,
+Jae Sung Park, Bidipta Sarkar, Rohan Taori, Yusuke
+Noda, Demetri Terzopoulos, Yejin Choi, and | others.
+2024. Agent ai: Surveying the horizons of multi-
+modal interaction. arXiv preprint arXiv:2401.03568.
+
+Jie Gao, Yuchen Guo, Gionnieve Lim, Tiangin Zhang,
+Zheng Zhang, Toby Jia-Jun Li, and Simon Tangi Per-
+rault. 2024. Collabcoder: a lower-barrier, rigorous
+workflow for inductive collaborative qualitative anal-
+ysis with large language models. In Proceedings
+of the 2024 CHI Conference on Human Factors in
+Computing Systems, pages 1-29.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten,
+Alex Vaughan, and | others. 2024. The llama 3 herd
+of models. arXiv preprint arXiv:2407.21783.
+
+Sven Gronauer and Klaus Diepold. 2022. Multi-agent
+deep reinforcement learning: a survey. Artificial
+Intelligence Review, 55(2):895-943.
+
+Adrian Groza. 2021. Einstein Puzzles, pages 103-130.
+Springer International Publishing, Cham.
+
+
+===== PAGE BREAK =====
+
+Xinyan Guan, Yanjiang Liu, Xinyu Lu, Boxi Cao, Ben
+He, Xianpei Han, Le Sun, Jie Lou, Bowen Yu, Yaojie
+Lu, and | others. 2024. Search, verify and feedback:
+Towards next generation post-training paradigm of
+foundation models via verifier engineering. arXiv
+preprint arXiv:2411.11504.
+
+Taicheng Guo, Xiuying Chen, Yaqi Wang, Ruidi Chang,
+Shichao Pei, Nitesh V. Chawla, Olaf Wiest, and Xi-
+angliang Zhang. 2024. Large language model based
+multi-agents: A survey of progress and challenges.
+In Proceedings of the Thirty-Third International Joint
+Conference on Artificial Intelligence, IJCAI-24.
+
+Sirui Hong, Mingchen Zhuge, Jonathan Chen, Xiawu
+Zheng, Yuheng Cheng, Jinlin Wang, Ceyao Zhang,
+Zili Wang, Steven Ka Shing Yau, Zijuan Lin, Liyang
+Zhou, Chenyu Ran, Lingfeng Xiao, Chenglin Wu,
+and Jiirgen Schmidhuber. 2024. MetaGPT: Meta pro-
+gramming for a multi-agent collaborative framework.
+In The Twelfth International Conference on Learning
+Representations.
+
+Edward J Hu, Phillip Wallis, Zeyuan Allen-Zhu,
+Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen,
+and 1 others. 2022. Lora: Low-rank adaptation of
+large language models. In International Conference
+on Learning Representations.
+
+Jian Hu, Xibin Wu, Zilin Zhu, Xianyu, Weixun Wang,
+Dehao Zhang, and Yu Cao. 2024. Openrlhf: An easy-
+to-use, scalable and high-performance rlhf frame-
+work. arXiv preprint arXiv:2405.11143.
+
+Jing Yu Koh, Stephen McAleer, Daniel Fried, and Rus-
+lan Salakhutdinov. 2024. Tree search for language
+model agents. arXiv preprint arXiv:2407.01476.
+
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying
+Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E.
+Gonzalez, Hao Zhang, and Ion Stoica. 2023. Effi-
+cient memory management for large language model
+serving with pagedattention. In Proceedings of the
+ACM SIGOPS 29th Symposium on Operating Systems
+Principles.
+
+Guohao Li, Hasan Hammoud, Hani Itani, Dmitrii
+Khizbullin, and Bernard Ghanem. 2023. Camel:
+Communicative agents for" mind" exploration of
+large language model society. Advances in Neural
+Information Processing Systems, 36:51991-—52008.
+
+Shalev Lifshitz, Sheila A MclIlraith, and Yilun Du.
+2025. Multi-agent verification: Scaling test-time
+compute with multiple verifiers. arXiv preprint
+arXiv:2502.20379.
+
+Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harri-
+son Edwards, Bowen Baker, Teddy Lee, Jan Leike,
+John Schulman, Ilya Sutskever, and Karl Cobbe.
+2023. Let’s verify step by step. In The Twelfth Inter-
+national Conference on Learning Representations.
+
+Wei Liu, Chenxi Wang, YiFei Wang, Zihao Xie, Rennai
+Qiu, Yufan Dang, Zhuoyun Du, Weize Chen, Cheng
+Yang, and Chen Qian. 2024a. Autonomous agents
+
+10
+
+for collaborative task under information asymmetry.
+In The Thirty-eighth Annual Conference on Neural
+Information Processing Systems.
+
+Wei Liu, Chenxi Wang, Yifei Wang, Zihao Xie, Rennai
+Qiu, Yufan Dnag, Zhuoyun Du, Weize Chen, Cheng
+Yang, and Chen Qian. 2024b. Autonomous agents
+for collaborative task under information asymmetry.
+arXiv preprint arXiv:2406. 14928.
+
+Ziqiao Ma, Jacob Sansom, Run Peng, and Joyce Chai.
+2023. Towards a holistic landscape of situated the-
+ory of mind in large language models. Findings of
+Empirical Methods in Natural Language Processing.
+
+Sourab Mangrulkar, Sylvain Gugger, Lysandre De-
+but, Younes Belkada, Sayak Paul, and Benjamin
+Bossan. 2022. Peft: State-of-the-art parameter-
+efficient fine-tuning methods. https://github.
+com/huggingface/peft.
+
+Nat McAleese, Rai Michael Pokorny, Juan Felipe Ceron
+Uribe, Evgenia Nitishinskaya, Maja Trebacz, and Jan
+Leike. 2024. Llm critics help catch Ilm bugs. arXiv
+preprint arXiv:2407.00215.
+
+Xavier Puig, Tianmin Shu, Shuang Li, Zilin Wang,
+Yuan-Hong Liao, Joshua B Tenenbaum, Sanja Fi-
+dler, and Antonio Torralba. 2020. Watch-and-help:
+A challenge for social perception and human-ai col-
+laboration. arXiv preprint arXiv:2010.09890.
+
+Pranav Putta, Edmund Mills, Naman Garg, Sumeet
+Motwani, Chelsea Finn, Divyansh Garg, and Rafael
+Rafailov. 2024. Agent q: Advanced reasoning and
+learning for autonomous ai agents. arXiv preprint
+arXiv:2408.07199.
+
+Chen Qian, Wei Liu, Hongzhang Liu, Nuo Chen, Yufan
+Dang, Jiahao Li, Cheng Yang, Weize Chen, Yusheng
+Su, Xin Cong, and 1 others. 2024. Chatdev: Com-
+municative agents for software development. In Pro-
+ceedings of the 62nd Annual Meeting of the Associa-
+tion for Computational Linguistics (Volume 1: Long
+Papers), pages 15174-15186.
+
+Chen Qian, Zihao Xie, YiFei Wang, Wei Liu, Kunlun
+Zhu, Hanchen Xia, Yufan Dang, Zhuoyun Du, Weize
+Chen, Cheng Yang, Zhiyuan Liu, and Maosong Sun.
+2025. Scaling large language model-based multi-
+agent collaboration. In The Thirteenth International
+Conference on Learning Representations.
+
+Chan Hee Song, Jiaman Wu, Clayton Washington,
+Brian M Sadler, Wei-Lun Chao, and Yu Su. 2023.
+Llm-planner: Few-shot grounded planning for em-
+bodied agents with large language models. In Pro-
+ceedings of the IEEE/CVF international conference
+on computer vision, pages 2998-3009.
+
+Peter Stone and Manuela Veloso. 2000. Multiagent sys-
+tems: A survey from a machine learning perspective.
+Autonomous Robots, 8:345-383.
+
+Qwen Team. 2024. Qwen2.5: A party of foundation
+models.
+
+
+===== PAGE BREAK =====
+
+Khanh-Tung Tran, Dung Dao, Minh-Duong Nguyen,
+Quoc-Viet Pham, Barry O’Sullivan, and Hoang D
+Nguyen. 2025. Multi-agent collaboration mech-
+anisms: A survey of Ilms.    arXiv preprint
+arXiv:2501.06322.
+
+Jian Wang, Yinpei Dai, Yichi Zhang, Ziqiao Ma, Wen-
+jie Li, and Joyce Chai. 2025. Training turn-by-turn
+verifiers for dialogue tutoring agents: The curious
+case of Ilms as your coding tutors. arXiv preprint
+arXiv:2502. 13311.
+
+Lei Wang, Chen Ma, Xueyang Feng, Zeyu Zhang, Hao
+Yang, Jingsen Zhang, Zhiyuan Chen, Jiakai Tang,
+Xu Chen, Yankai Lin, and | others. 2024a. A survey
+on large language model based autonomous agents.
+Frontiers of Computer Science, 18(6):186345.
+
+Peiyi Wang, Lei Li, Zhihong Shao, Runxin Xu, Damai
+Dai, Yifei Li, Deli Chen, Yu Wu, and Zhifang Sui.
+2024b. Math-shepherd: Verify and reinforce LLMs
+step-by-step without human annotations. Association
+for Computational Linguistics.
+
+Yulong Wang, Tianhao Shen, Lifeng Liu, and Jian Xie.
+2024c. Sibyl: Simple yet effective agent framework
+for complex real-world reasoning. arXiv preprint
+arXiv:2407. 10718.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+and | others. 2022. Chain-of-thought prompting elic-
+its reasoning in large language models. Advances
+in neural information processing systems, 35:24824—
+
+24837.
+
+Zengqing Wu, Run Peng, Shuyuan Zheng, Qianying Liu,
+Xu Han, Brian Kwon, Makoto Onizuka, Shaojie Tang,
+and Chuan Xiao. 2024. Shall we team up: Exploring
+spontaneous cooperation of competing LLM agents.
+In Findings of the Association for Computational
+Linguistics: EMNLP 2024.
+
+Ziyi Yang, Zaibin Zhang, Zirui Zheng, Yuxian Jiang,
+Ziyue Gan, Zhiyu Wang, Zijian Ling, Jinsong Chen,
+Martz Ma, Bowen Dong, and | others. 2024. Oasis:
+Open agents social interaction simulations on one
+million agents. arXiv preprint arXiv:2411.11581.
+
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+Tom Griffiths, Yuan Cao, and Karthik Narasimhan.
+2023. Tree of thoughts: Deliberate problem solving
+with large language models. Advances in neural
+information processing systems, 36:11809-11822.
+
+Xiao Yu, Maximillian Chen, and Zhou Yu. 2023.
+Prompt-based monte-carlo tree search for goal-
+oriented dialogue policy planning. arXiv preprint
+arXiv:2305. 13660.
+
+Hongxin Zhang, Weihua Du, Jiaming Shan, Qinhong
+Zhou, Yilun Du, Joshua B. Tenenbaum, Tianmin Shu,
+and Chuang Gan. 2024a. Building cooperative em-
+bodied agents modularly with large language models.
+In The Twelfth International Conference on Learning
+Representations.
+
+11
+
+Lunjun Zhang, Arian Hosseini, Hritik Bansal, Mehran
+Kazemi, Aviral Kumar, and Rishabh Agarwal. 2024b.
+Generative verifiers: Reward modeling as next-token
+prediction. arXiv preprint arXiv:2408.15240.
+
+Qiyuan Zhang, Fuyuan Lyu, Zexu Sun, Lei Wang,
+Weixu Zhang, Zhihan Guo, Yufei Wang, Irwin King,
+Xue Liu, and Chen Ma. 2025. What, how, where,
+and how well? a survey on test-time scaling in large
+language models. arXiv preprint arXiv:2503.24235.
+
+Andy Zhou, Kai Yan, Michal Shlapentokh-Rothman,
+Haohan Wang, and Yu-Xiong Wang. 2024a. Lan-
+guage agent tree search unifies reasoning acting and
+planning in language models. URL https://arxiv.
+org/abs/2310.04406.
+
+Xuhui Zhou, Zhe Su, Tiwalayo Eisape, Hyunwoo Kim,
+and Maarten Sap. 2024b. Is this the real life? is
+this just fantasy? the misleading success of simu-
+lating social interactions with Ilms. arXiv preprint
+arXiv:2403.05020.
+
+Xuhui Zhou, Hao Zhu, Leena Mathur, Ruohong Zhang,
+Haofei Yu, Zhengyang Qi, Louis-Philippe Morency,
+Yonatan Bisk, Daniel Fried, Graham Neubig, and
+Maarten Sap. 2024c. SOTOPIA: Interactive evalu-
+ation for social intelligence in language agents. In
+The Twelfth International Conference on Learning
+Representations.
+
+
+===== PAGE BREAK =====
+
+Appendix
+
+We include the following contents as our supple-
+mentary materials.
+¢ A. Example of Game Play — An illustrative
+walkthrough of a full game session demon-
+strating player turns, actions, and reasoning
+strategies.
+
+B. Data Generation — A detailed description
+of how we generate trajectories using a planner
+with perspective-taking, inference, and com-
+munication modeling.
+
+C. Ablation on Verifiers - A detailed expla-
+nation and experiment on different design of
+verifier, which is potentially generalizable to
+other simulated environments.
+
+D. Error Taxonomy - A detailed explanation
+on the error types we analyze in Exp2 in sec-
+tion 4.
+
+E. Experiment Details — Technical and pro-
+cedural specifications of model training, de-
+ployment, and human evaluation setup.
+
+F. Code of Ethics — Statement of ethical com-
+pliance, consent protocol, and risk mitigation
+measures approved by the IRB.
+
+G. Human Study Interface — Screenshot
+and description of the web interface and tuto-
+rial used for guiding participants in the human
+study.
+
+H. Prompts Used — A comprehensive collec-
+tion of system and user prompts used across
+training, evaluation, and reasoning trace gen-
+eration for different agent configurations.
+
+In terms of generative AI usage, we use it for
+purely improving the language of the paper.
+
+A Example of Game Play
+
+To provide a clear understanding of the Einstein
+Puzzle gameplay, we illustrate a complete game
+session in Figure 3, building on the initial setup
+introduced in Figure 1. This example demonstrates
+how players are expected to take turns, make deci-
+sions, and communicate throughout the game. We
+hope this serves as a helpful reference for under-
+standing the nature of the task, as well as the types
+of reasoning and interaction involved.
+
+It is worth noting that the ask action—used to
+seek information—is not utilized in this example.
+This is primarily due to the relative simplicity of
+the case. The ask action tends to be used more
+
+12
+
+frequently in scenarios involving a larger number
+of objects, or when agents need to inquire about
+specific object-related information.
+
+B. Data Generation
+
+B.1_ Perspective Taking
+
+To prepare data for fine-tuning, we designed a plan-
+ner to generate solutions under different configura-
+tions of action space.
+
+The planner operates from the perspective of a
+single player in each turn, selecting moves based
+on the player’s limited knowledge of the constraints
+and their specific communicative action space. It
+performs breadth-first search to explore possible
+action sequences until a valid solution is found.
+Throughout the search process, the planner main-
+tains an up-to-date representation of the player’s
+knowledge, incorporating both the communication
+history and the current positions of objects on the
+board. Based on this evolving knowledge state,
+it selects valid next actions—such as sharing con-
+straints that have not yet been communicated, or
+asking about objects that remain unknown from the
+player’s perspective.
+
+To improve search efficiency, we incorporate
+inferred knowledge into action selection, which is
+also used by the reasoning verifier introduced in
+Section 4. This inferred knowledge enables the
+planner to determine whether:
+
+1. The goal of an object is already known, in
+which case redundant information-seeking is
+avoided, and a valid move (placing the object
+into its goal bin, if reachable) is added;
+
+The goal of an object is still unknown, in
+which case the agent may ask for information
+about that object.
+
+By tracking communication history, the planner can
+also avoid redundant sharing by identifying which
+constraints have already been communicated.
+
+If no valid move is available in a given search
+step, we manually add a pass action to allow the
+player to skip their turn. This mechanism is impor-
+tant when the two players take different numbers
+of actions to complete a task. Any trajectory end-
+ing with two consecutive passes is pruned to avoid
+unnecessary stalling.
+
+In scenarios where no communication is allowed,
+or where information flow is unidirectional, the
+agent may have to randomly guess the goals of
+some objects. This is triggered only after all valid
+actions have been exhausted, before skipping their
+
+
+===== PAGE BREAK =====
+
+Known Constraints
+. Bin
+3. on 62 same column
+4 g. §@ same diagonal
+
+This follows the setting
+from Figure 1. We will
+display agent’s rationale
+and action here.
+
+Player 2 Area
+
+1
+1
+1
+1
+1
+1
+'
+1
+'       Common Bin
+1
+1
+1
+1
+1
+1
+1
+1
+if
+
+Bottom-
+
+PL 1A  .  .
+a | Right Bin
+
+Known Constraints
+
+«© in bottom-teft bin]
+
+,      same row
+:      same row
+
+Known Constraints
+
+1. (o) in bottom-left bin
+3. on 62 same column
+4 g. §@ same diagonal
+
+Player 2 Area
+
+Common Bin
+
+& I
+
+Player 1 Area
+
+and @Jare on the
+same row, and () should
+go in bottom-left bin. So
+
+is in bottom-right.
+Move(      , bottom-right)
+
+Bottom-
+
+Known Constraints
+
+Right Bin
+i          9            1 (o) in bottom-left bin
+2. @, ~& same row
+<3                           2
+5.         same row
+
+'  Player 1: Move( 2B, bottom-right)
+
+Step 1
+
+Known Constraints
+Din
+3. e € same column
+4   ,@@ Same diagonal
+SO
+
+a Bin         |
+Known Constraints
+
+8 & Area
+1
+.O
+
+Player 2 Area
+
+and Oare on the
+same column, while
+goes in bottom-left bin. So
+Gi is in top-left bin.
+
+Move( 4 , top-left)
+
+(6) in bottom-left bin
+same row
+same row
+
+Player 2: a— top-left)
+Step J
+
+Known Constraints
+
+1 Bi in bottom-| left bin
+3, 0.8     same column
+4. Bé     same diagonal
+
+ey
+
+<>
+
+Player 2 Area
+
+Common Bin
+
+and 2 are on the
+same row, and! see
+has been placed to the
+top-left bin. So | should
+
+pass      to my partner.
+Move(     , common bin)
+Known Constraints
+
+Q        © in bottom-lef bin
+8.
+
+=                                                  same row
+.O,
+
+t   Player 1: Move( ray , common bin)
+
+Player 1 Area
+
+same row
+
+Known Constraints
+
+1. on in bottom- left bin
+3, 0.8     same column
+4. Bé      same diagonal
+
+Known Constraints
+
+L in bottom-left bin| left bin
+
+same row
+
+Step 3
+Player 2 Area
+
+3 ie
+
+Player 2: So  common bin)
+
+Partner pass me * but |
+don’t where to place. |
+should pass       since it
+should go to bottom-left.
+Move( oy common bin)
+
+5.            same row
+
+Step J                                               Known Constraints
+1 on in bottom- left bin
+3, 0.8     same column
+pO                                            4. Bé      same diagonal
+constraint with her.
+Share(4> my. same row)
+Known Constraints
+
+8 1 Area                                                 .
+1 ) in bottom-left bin
+2 2 pore row
+
+5.            same row
+
+Player 2 Area
+
+I'm not sure if my partner
+know where to place * .
+Let me share the related
+
+Player 1: o— ®., same row)
+
+Step 5
+
+Known Constraints
+
+Oin
+2. g. ra same row *New
+3 Oo.    same column
+
+4. g.    same diagonal
+
+Q
+
+Known Constraints
+
+L Oi in bottom-left bin| left bin
+
+8 1 Area
+same row
+0.
+
+Player 2: an top-right)
+
+Player 2 Area
+
+According to the shared
+constraint, now | know a
+should go to top-right bin!
+
+Move( %. , top-right)
+
+same row
+
+Step M
+
+Known Constraints
+1. (o) in bottom-left bin
+2. g. my. same row
+
+3 oO.     same column
+4. g.     same diagonal
+
+Known Constraints
+
+1 ) in bottom-left bin
+
+2      ’      same row
+
+Player 2 Area
+
+Now only @)  is left and |
+know where it should go.
+Let me move it to the left
+to end the game!
+
+Move(@), bottom-left)
+8 1 Area
+
+5.            same row
+
+Player 1: a bottom-left)
+
+a Clear!
+
+Figure 3: Full game playthrough with actions and rationales. The game begins with Player 1, and the two players
+take turns performing physical moves, sharing information, or asking questions until all objects are correctly placed.
+
+turn. The agent will then attempt to place reachable,
+unplaced objects into all reachable bins (including
+the common bin), one by one, until the correct
+placement is accepted by the environment. Since
+the environment prevents invalid placements, this
+process can still lead to a valid solution. However,
+agents are discouraged from guessing prematurely
+and are designed to prioritize valid actions before
+
+13
+
+resorting to this strategy.
+
+B.2. Optimal And Near-Optimal Trajectories
+
+We collect both optimal and near-optimal trajec-
+tories—those that deviate from the optimal solu-
+tion by only one or two steps but exhibit diverse
+strategies. This diversity ensures that both types
+of communicative actions—information providing
+
+
+===== PAGE BREAK =====
+
+and information seeking—are well represented in
+the demonstrations. Without this balance, solutions
+dominated by unprompted sharing would dispro-
+portionately appear, as they often require fewer
+steps to complete.
+
+In scenarios involving random guessing, the opti-
+mal trajectories are those in which agents correctly
+guess the target location on the first attempt. How-
+ever, such demonstrations provide little guidance
+for learning robust guessing strategies. To address
+this, we also include trajectories where agents try
+multiple possible bins—an approach we observe
+being learned by several fine-tuned models in Ta-
+ble 1.
+
+C. Ablation on Environment-Based
+Verifiers
+
+C.1_ Verifier Design
+
+In addition to the reasoning verifier introduced in
+Section 4, we design two more types of verifiers as
+is illustrated in Figure 4.
+
+1. Affordance Verifier: The environment inher-
+ently enforces physical rules that govern the ac-
+tions an agent can take under different conditions.
+In our game, this refers to whether the selected
+action is executable, such as whether a object or
+bin is reachable, or whether the chosen object is
+in the correct source bin. This helps validate the
+agent’s decision from the perspective of physical
+feasibility.
+
+. Communication Verifier: In multi-agent envi-
+ronments, other agents can be viewed as part of
+the environment, and their interactions can pro-
+vide additional feedback. In our game, the com-
+munication verifier assesses whether the com-
+municative action selected by the agent is mean-
+ingful. For example, it identifies when an agent
+shares already-known knowledge, repeats shar-
+ing an existing constraint, or asks about a object
+that has already been placed.
+
+These three verifiers (including reasoning veri-
+fier) are hierarchically related in our design. The
+affordance and communication verifiers address
+physical actions and communication, respectively,
+while the reasoning verifier builds upon both and
+extends coverage through inferred knowledge.
+
+The affordance verifier is widely applicable
+and available in most environments. The com-
+munication verifier is similarly accessible when-
+ever the task involves communication. In con-
+trast, the reasoning verifier is more environment-
+
+14
+
+and task-specific, although it can often be enabled
+through custom algorithm design. Used together,
+the environment-based verifier framework can be
+viewed as a general and flexible approach that can
+be adapted to a wide range of simulated environ-
+ments.
+
+C.2 Ablation Study
+
+We follow the same setting of Exp2 (see Section 4
+with two additional verifiers that separately target
+action affordance and communication. We com-
+pare performance across different verifier settings
+with Llama3.1-8B CoT model as base, and assess
+whether the environment-based verifier is poten-
+tially generalizable to other environments.
+
+As is shown in Table 5, the affordance verifier
+evaluates physical preconditions of actions and im-
+proves success rates (SR) by 2—7%. The communi-
+cation verifier filters out redundant or uninforma-
+tive exchanges, contributing up to a 9% SR increase
+in task completion. Importantly, these verifiers op-
+erate solely on feedback from the environment and
+interaction history, requiring no additional training
+or computational overhead.
+
+We argue that such a mechanism offers a
+promising alternative to recent agent modeling
+approaches, especially in simulated environments
+where rich, structured feedback is readily available.
+These results invite a broader reconsideration of
+the environment’s role—not merely as a testing
+ground, but as an active, model-free verifier that
+can guide agent behavior in a lightweight manner.
+
+D_ Experiment Details
+
+D.1 Model Configuration, Fine-tuning and
+Deployment
+
+We utilize the Azure OpenAI services for our GPT
+models. For GPT-40, we employ the GPT-40-
+20241120 version, and in all experiments, the tem-
+perature is set to 0.2 and the top-p value to 0.9.
+For all the model fine-tuning, we employ LoRA
+(Ht et al., 2022) with a rank of 32, training with
+a global batch size of 128 and a learning rate of
+2e-4 using a cosine decay schedule for 1 epoch.
+Fine-tuning is conducted using OpenRLHF (Hu
+et al., 2024), while FlashAttention-2 (Dao, 2024)
+is used to speed up training. The process takes
+approximately 30 minutes on 4 A40 GPUs with
+48GB RAM each. For evaluation, we deploy the
+model using PeFT (Mangrulkar et al., 2022). For
+inference in the human study, we deploy the model
+
+
+===== PAGE BREAK =====
+
+Affordance Verifier
+
+vp» Move( a , top-right)
+
+x4
+
+   Error! Bin out of reach!        eb =
+X
+
+Communication Verifier
+   Share( ©) , in, bottom-left)
+<>
+
+!                                           .
+ae      Your partner has shared it
+
+before. She knows this!
+
+XR
+
+Reasoning Verifier  1. @ in [bottom-left bin
+
+q  Ask( & )
+
+You can infer its final bin since you already know
+where 6) should go and Ss is on the same column.
+
+Known Constraints
+
+Explicitly
+Stated     Affordance
+Constraints        ce
+
+3. ox gS same column              implicitly         Verifier
+
+Inferrable
+Constraints
+
+4. 8. ay same diagonal
+
+Comm.
+Verifier
+
+Reasoning
+Verifier
+
+Same     Same
+Column      Diagonal
+
+Hierarchical
+Relationship
+
+Figure 4: Illustration of three types of verifications we consider. Following the same setup as we showed in Figure
+1, the game environment supports providing feedbacks related to action affordance, communication and strategies,
+which can be directly used as verifiers for agents’ decisions.
+
+Action Mode    No Verifier (Pass @1)    Affordance Verifier © Communication Verifier    Reasoning Verifier
+SRT(%)     StepRJ     SRT(%)     StepRJ     SRT(%)      StepRJ      SRT(%)     StepRJ
+Provide & Seek 58.67+4284 1.87x+0.05x 65.6742.74 1.83x+0.05x 65.0042.75  1.74x+0.05x 89.3341.78 1.52X+0.03x
+Provide Only    37.00+42.79 1.70x+0.07x 38.674281 1.72x+0.06x 46.00+288  1.65x+0.05x 65.3342.75 1.52x+0.04x
+Seek Only       56.6742.86 1.42x+004x 62.334280 1.43x+0.04x 55.33+287 1.40x+0.04x 82.6742.19 1.25x+0.02x
+None           38.3342.81 2.16x-+0.08 42.67+2.86 2.18x-+0.09x      -            -        54.3342.88  1.82x+0.06x
+
+Table 5: Performance under different verification settings tested on Llama3.1-8B model with CoT.
+
+using VLLM (Kwon et al., 2023).
+
+We follow the license requirement of Llama3.1,
+Qwen2.5, and GPT-40 model when using these
+artifacts, and our implementation is licensed under
+the MIT License.
+
+D.2
+
+We recruited 12 human subjects with no prior expe-
+rience in Einstein Puzzles on Tabletop to evaluate
+the models under four different action space config-
+urations. Before the experiment began, each partici-
+pant signed a consent form. We prepared 27 unseen
+game scenarios across the four configurations and
+divided them into three groups, each containing 9
+distinct games (3 games each with 4, 5, and 6 ob-
+jects). Each participant was assigned to one group
+and paired with a model using one of the action
+space configurations, without being informed of
+which model they were interacting with. As a re-
+sult, each group was tested by 4 participants—one
+per configuration. Each session lasted approxi-
+mately 30 minutes, and participants received a $20
+Amazon gift card as compensation.
+
+At the start of the study, participants were in-
+troduced to the task environment via a detailed
+tutorial that explained the environment, task setup,
+and interface (see Appendix G). After the tutorial,
+participants completed 10 sessions sequentially, be-
+
+Human Evaluation Setup
+
+15
+
+ginning with a practice session which is not taken
+into the result. In each session, they were presented
+with an initial game board layout and explicit con-
+straints, and were required to communicate with
+the model with communicative actions to solve the
+task. Upon task completion, a feedback form with
+three questions was shown. Once the form was sub-
+mitted, the interface advanced to the next session,
+continuing until all games in the assigned group
+were completed. Participants were allowed to give
+up at any point if they felt stuck or not comfortable.
+Additionally, a maximum step limit of 30 was im-
+posed to prevent excessive task duration. This same
+constraint was applied in all the evaluations (see
+Table 1) to ensure a fair comparison.
+
+E_ Error Taxonomy
+
+To better understand LLM agents’ behaviors, we
+define several error types that LLM agents may
+encounter during interaction. Broadly, these fall
+into four categories: format following, physical
+understanding, communication, and task reasoning.
+
+¢ LLM’s format following
+
+— Invalid Action: The LLM fails to follow the
+required output format or exceeds the token
+limit.
+
+
+===== PAGE BREAK =====
+
+¢ Physical Understanding
+
+— Object not in source bin: The agent specifies
+a move involving an incorrect source location
+for the object.
+
+— Source bin not reachable: The agent attempts
+to move an object from a bin that is not reach-
+able (only bins at the front and the common
+bin are reachable).
+
+— Destination bin not reachable: The agent at-
+tempts to place an object into a non-reachable
+bin.
+
+— Source and destination bin are same: The
+agent mistakenly assigns the same bin as both
+the source and destination.
+
+¢ Communication
+
+— Redundant knowledge sharing: The agent
+redundantly shares knowledge already commu-
+nicated by itself or its partner.
+
+— No share after seek: The agent fails to re-
+spond to its partner’s information-seeking re-
+quest.
+
+— Wrong share after seek: The agent provides
+incorrect or irrelevant information in response
+to a request.
+
+— Seek known object: The agent asks for the
+location of an object whose location it already
+knows, indicating inefficient behavior.
+
+¢ Task Reasoning
+
+— Wrong rule understanding: The agent failed
+to interpret or infer the right location, leading
+to incorrect moves when it should be able to
+do so.
+
+— Wrong random guessing: The agent, lacking
+sufficient information, guesses randomly and
+places the object incorrectly.
+
+F Code of Ethics
+
+The institution’s Institutional Review Board (IRB)
+considered this project exempt from ongoing re-
+view. The data collection process among re-
+searchers and participants is in line with standard
+ethical practice.
+
+Consent Statement. You are invited to partici-
+pate in a research study that intends to evaluate
+generative AI agents that can communicate and
+collaborate with their human partners to complete
+tasks. If you agree to be part of the research study,
+
+16
+
+you will be asked to interact with the AI agents to
+accomplish a set of tasks. The tasks include: (1).
+completing a logical board game with AI agents;
+(2). sharing necessary information with AI agents
+to help them complete the tasks; (3). asking AI
+agents for necessary information that will help you
+to complete the tasks. The study will last approxi-
+mately an hour. The interaction history, i.e., only
+the text generated by AI models and the subjects’
+symbolic inputs, and numerical evaluations, will
+be recorded in a datafile. The data collected in this
+study will be analyzed and used for research pur-
+poses. No personally identifiable information will
+be stored in the datafile.
+
+Potential Harm. The game setting and the tasks
+assigned to participants were designed and strictly
+controlled by the research team. This ensured that
+the potential for safety concerns was minimized,
+allowing participants to engage with the study with
+minimal risk. Data collection involved only non-
+personal information, adhering to standard ethical
+practices and was used exclusively for research
+purposes. We ensured confidentiality and privacy,
+and the data will not be published publicly. Please
+refer to Appendix D.2 for implementation details
+of our human study.
+
+G Human Study Interface
+
+We deploy a web-based interface to facilitate our
+human study. To ensure that all participants un-
+derstand the task, interface elements, and available
+actions, we provide a detailed tutorial at the begin-
+ning of the study. This tutorial is displayed before
+the first game session and serves as a self-contained
+guide covering the game objective, interaction me-
+chanics, and platform layout. For completeness
+and transparency, we include the full tutorial con-
+tent below, as it was shown to participants, without
+modification. This also naturally serves as the in-
+troduction of the interface we design.
+
+G.1 Overview
+
+In this study, you will play a logic-based tabletop
+game in collaboration with an AI agent. The goal
+of the game is for you and the AI agent to work
+together to place objects into designated bins ac-
+cording to a given set of constraints.
+
+Each constraint defines either a relationship be-
+tween two objects or between an object and a bin.
+The bins are the two player bins, the four destina-
+tion bins, and the common area bin. The types of
+
+
+===== PAGE BREAK =====
+
+Final Goal                Initial State
+
+eth | Sek
+
+Placement Constraints
+
+oO iisann                                                       Qs
+% same row                                          & 8   » Be Are:
+3        same column —~                                                gx   o
+4 gE lesa >
+
+here
+raeisn  eit. Let me ask.
+same row
+
+ask)
+
+Game Play
+ a
+
+yht.
+&* Qe. bottom-right)
+
+I know wher E@i= af
+90. but Ic
+
+Figure 5: A visual overview of the collaborative game
+setting. Two players (you and the AI agent) work to-
+gether to place objects into goal bins based on a set of
+relational constraints.
+
+constraints that you may receive include the follow-
+ing:
+1.
+2.
+
+Object1 and Object2 must be in the same row
+Object1 and Object2 must be in the same col-
+umn
+. Object1 and Object2 must be on the same di-
+
+agonal
+
+4. Objectl and Object2 must be in the same bin
+
+5. Object! must be placed in binA
+
+To avoid ambiguity, each pair of objects has only
+
+one constraint type describing their relationship.
+For example, if Objectl and Object2 are said to
+be in the same row, it implies that they are not
+in the same bin. Below is a visualization of our
+collaborative game.
+
+G.2. Actions
+
+You can choose from four possible actions during
+your turn:
+1. Move -
+2. Share — Share one of your constraints with the
+Al partner.
+
+Move a block from one bin to another.
+
+. Ask — Ask your AI partner about the place-
+ment of an object.
+
+4. Skip — Pass your turn without taking any ac-
+
+tion.
+
+You and the AI agent will take turns performing
+actions. The objective is to complete the task using
+the fewest possible steps. Note that the AI agent
+is not perfect and may make suboptimal decisions.
+
+Your collaboration and guidance are key to success.
+
+G.3 Platform Introduction
+
+Once the game begins, you will see the following
+components:
+
+1. The game board
+
+2. The objects within your reach (which you can
+move)
+
+17
+
+These are the objects within
+
+your reach.
+
+Al 4|
+
+Figure 6: Overview of the user interface layout.
+
+3. The constraints available to you (which you
+can share)
+
+4. The objects you can ask about
+
+5. The Skip button, if you wish to pass your turn
+
+G.4 Game Board Description
+
+s— Partner can reach
+Top left bin
+
+a, \
+
+Le Top right bin
+
+Both players
+can reach
+
+Bottom left bin                                   Bottom right bin
+
+—— You can reach —————”
+
+Common Bin — >          a
+
+Figure 7: Layout and bin positions on the game board.
+
+The board includes four colored bins (top-left,
+top-right, bottom-left, bottom-right) and one com-
+mon bin in the center. You (Player 1) are positioned
+at the bottom, and the AI agent (Player 2) is at the
+top.
+
+You can only move objects to the bins in front
+of you and the common bin. To move an object to
+a bin that is out of your reach, you must place it in
+the common bin so your partner can complete the
+move.
+
+G.5 How to Move
+
+These are
+your reach.
+
+4)
+
+@ Click on this
+
+the objects within             Select Where to place
+
+the object:
+
+@ select the destination bin
+{scroll down to see the common bin)
+
+—>            —>
+
+@ Click ‘Submit’ below the game board
+
+Figure 8: Step-by-step instructions for moving objects.
+
+
+===== PAGE BREAK =====
+
+To move an object:
+
+. Click on the object you want to move.
+
+. Select the destination bin (scroll down if
+needed to see all bins).
+
+. Click ’Submit’ below the game board to con-
+firm the move.
+
+G.6 Share and Ask Actions
+
+To share a constraint or ask about an object:
+
+1. Click the blue button under the relevant con-
+straint or object.
+
+2. Click ’Submit’ to confirm your action.
+
+G.7 Understanding Constraints
+
+Complete the task with the
+information below
+
+You can click to share with your
+
+<---- and e are on the same diagonal
+
+C2 A = — ~---- ye A are on the same row
+
+*A vertical line represents same column
+
+r  YU | |     <---- r  in orange bin (top left bin)
+
+Figure 9: Example of constraint-sharing interface.
+
+Constraints specify how objects should be ar-
+ranged. You may share one constraint per turn,
+and you may repeat the same constraint if needed
+for clarification.
+
+G.8 Action History
+
+Action History                                                            Beginning
+
+You:
+
+Moved          from Player 1 Bin to Bottom Right Bin
+
+Partner:
+
+Moved           from Player 2 Bin to Common Bin
+
+You:
+
+Shared relation:     '    and
+Partner:
+
+are in the same row
+
+Moved           from Player 2 Bin to Top Left Bin                         Latest
+
+Figure 10: The action history log at the bottom-right
+corner.
+
+In the bottom-right corner of the screen, you'll
+find the action history. This log shows all actions
+taken by both you and the AI since the beginning
+of the game. Use this to:
+
+1. Review your partner’s most recent action
+
+18
+
+2. Check whether each action was successfully
+executed
+
+Mistakes made by either player will also appear
+in this log, helping you keep track of progress and
+errors.
+
+G.9_ At the End of the Game
+The game ends when:
+1. All objects are correctly placed, or
+
+2. The maximum number of turns (30 in this
+game) is reached
+
+At the end of each game, you will be prompted
+to complete a short survey with three questions:
+
+Game Successful! You can start a new game!
+
+Please answer the following survey!
+Do you believe the information communicated to you by the bot was
+
+useful?
+
+ODisagree
+
+Oslightly Disagree
+
+ONeutral
+
+OSlightly Agree
+
+Oagree
+
+Do you believe the bot effectively used the information you shared?
+
+ODisagree
+OSlightly Disagree
+ONeutral
+Oslightly Agree
+Oagree
+
+Do you feel confused about the bot’s behavior?
+Obisagree
+Oslightly Disagree
+ONeutral
+Oslightly Agree
+Oagree
+
+Start New Game
+Figure 11: End-of-game feedback form.
+
+Please answer based on your experience in this
+particular game and click ’Start New Game’ to
+proceed. You will play 10 games in total (the
+first game is mainly for familiarization, and the
+performance will not be taken into account), with
+each game taking approximately 3-8 minutes.
+
+G.10 Final Notes
+
+Once you start the game, you will not be able to
+return to this tutorial. Please read all instructions
+carefully before beginning. If you feel uncomfort-
+able at any point or wish to exit the study, you may
+simply close the browser window.
+
+If you’re ready to begin, click "Go To Game’
+below.
+
+H Prompts Used
+H.1 Prompts for Model Training &
+Evaluation
+
+We prepare prompts for four distinct action space
+configurations, each with and without chain-of-
+thought (CoT) reasoning. While the system prompt
+
+
+===== PAGE BREAK =====
+
+is tailored to each configuration, the user prompt
+remains consistent across all four. For configura-
+tions with CoT, the system prompt includes several
+illustrative examples to demonstrate the expected
+reasoning process.
+
+To enhance readability, we provide the full sys-
+tem prompt for the Providing & Seeking configu-
+ration with CoT. For the remaining configurations,
+we highlight only the differences relative to this
+version. The primary distinctions among the four
+configurations lie in their permitted action spaces
+and the corresponding reasoning examples. Al-
+though the reasoning examples are largely shared
+across configurations, minor variations are intro-
+duced to reflect the specific situations each agent
+may encounter.
+
+For the output format, models with CoT reason-
+ing are expected to output their reasoning traces
+and actions in the format of: <THINK><your
+reasoning></THINK><ACTION><your
+action></ACTION>, while the one with no
+CoT reasoning capability needs to follow the
+format of: <ACTION><your action></ACTION>.
+
+You are playing a cooperative game where you and another
+player must sort blocks into the correct bins as quickly as
+possible. Each player has knowledge about the expected
+placement of the blocks, such as whether blocks should be
+aligned in the same row, column, or diagonal. You can only
+move blocks into bins near you or into a shared bin
+accessible to both players. You cannot access the other
+player's bins.
+
+The game concludes when all blocks are correctly placed in
+the bins. During your turn, you have several options:
+
+- Move a block from a bin to another bin. Both bins must be
+accessible to you.
+
+- Share a piece of knowledge with the other player. The
+shared knowledge should be selected from the knowledge you
+have. You cannot share knowledge you do not have.
+
+- Request knowledge from the other player about a specific
+block.
+
+- Pass your turn.
+
+## General Guidance
+- You can only move blocks to bins accessible to you.
+
+- You can only share knowledge you have. DO NOT share
+knowledge you do not have, nor request knowledge you already
+have.
+
+- You can only request knowledge abou
+not have knowledge of.
+
+- You can only move one block at a time.
+
+- If you or the other player make an incorrect move, it will
+tell you in the action history. DO NOT make the same
+incorrect move again.
+
+t a block that you do
+
+## Action Format
+Your actions must be formatted as follows:
+
+- Move block: "move <block> from <bin> to <bin>”
+- Share knowledge: "share <knowledge>”
+
+- Request knowledge: "ask <block>”
+
+- Pass your turn: "pass”
+
+where we have the following bin names:
+- player1l_bin
+
+- player2_bin
+
+- commonbin
+
+- top_left_bin
+
+- top_right_bin
+
+- bottom_left_bin
+
+- bottom_right_bin
+
+and the following knowledge types:
+
+- (<block1>, <block2>, same, row)
+
+- (<block1>, <block2>, same, column)
+
+- (<block1>, <block2>, same, diagonal)
+- (<block1>, <block2>, same, bin)
+
+- (<block1>, in, <bin>)
+
+and the following block names:
+
+- blockd
+
+- block1
+
+- block2
+
+Please strictly follow the format above to ensure the game
+runs smoothly.
+
+## Reasoning Phase
+
+Before you take an action, you should reason about the
+current state of the game.
+
+Some examples:
+
+- "According to my knowledge, block® should be in top-right
+bin. Since I cannot reach the top-right bin, I should pass it
+to the common bin so that my partner can take it.”
+
+- "I know block1 and block2 should be in the same row.
+know block1 should be placed in the top-right bin. So I
+should move block2 to the top-left bin, which is also in the
+same row with the top-right bin.”
+
+- "Block1 is not in the correct position according to my
+knowledge but I cannot reach it. I should share my knowledge
+about block1 with my partner so that it can move it to the
+correct position.”
+
+- "All the blocks are in the correct position except block2.
+However, according to my knowledge I don't know where the
+block2 should go in. I may randomly try one of the block in
+front of me.”
+- "I don't know where the block3 should go in. I should ask
+
+I also
+
+my partner about the knowledge of block3.”
+## Output Format
+Please provide your output in this format:
+
+<THINK><your reasoning></THINK><ACTION><your action></ACTION>
+
+Listing 1: System prompt for fine-tuned Providing &
+Seeking agents with chain-of-thought reasoning.
+
+19
+
+You are playing a cooperative game ...
+
+The game concludes when all blocks are correctly placed in
+the bins. During your turn, you have several options:
+
+- Move a block from a bin to another bin. Both bins must be
+accessible to you.
+
+- Share a piece of knowledge with the other player. The
+shared knowledge should be selected from the knowledge you
+have. You cannot share knowledge you do not have.
+
+- Pass your turn.
+
+## General Guidance
+
+- You can only move blocks to bins accessible to you.
+
+- You can only share knowledge you have. DO NOT share
+knowledge you do not have.
+
+- You can only move one block at a time.
+
+- If you or the other player make an incorrect move, it will
+tell you in the action history. DO NOT make the same
+incorrect move again.
+
+## Action Format
+
+Your actions must be formatted as follows:
+
+- Move block: "move <block> from <bin> to <bin>”
+- Share knowledge: "share <knowledge>”
+
+- Pass your turn: "pass”
+
+## Reasoning Phase
+
+Before you take an action, you should reason about the
+current state of the game.
+
+Some examples:
+
+- "According to my knowledge, block® should be in top-right
+bin. Since I cannot reach the top-right bin, I should pass it
+to the common bin so that my partner can take it.”
+
+
+
+===== PAGE BREAK =====
+
+- "I know block1 and block2 should be in the same row. I also
+know block1 should be placed in the top-right bin. So I
+should move block2 to the top-left bin, which is also in the
+same row with the top-right bin.”
+
+- "Block1 is not in the correct position according to my
+knowledge but I cannot reach it. I should share my knowledge
+about block1 with my partner so that it can move it to the
+correct position.”
+
+- "All the blocks are in the correct position except block2.
+However, according to my knowledge I don't know where the
+block2 should go in. I may randomly try one of the block in
+front of me.”
+
+- "I don't know where the block3 should go in. I should wait
+for my partner to inform me about where to place block3.”
+
+Listing 2: System prompt for fine-tuned Seeking-Only
+agents with chain-of-thought reasoning. Redundant part
+is omitted.
+
+You are playing a cooperative game ...
+
+## General Guidance
+
+- You can only move blocks to bins accessible to you.
+
+- You can only share knowledge you have and share it when you
+are asked. DO NOT share knowledge you do not have, nor
+request knowledge you already have.
+
+- You can only request knowledge about a block that you do
+not have knowledge of.
+
+- Pass your turn: "pass”
+
+Notice that you cannot initiate sharing the knowledge. Only
+when you are asked by your partner can you share the
+knowledge.
+
+## Reasoning Phase
+
+Before you take an action, you should reason about the
+current state of the game.
+
+Some examples:
+
+- "According to my knowledge, block®@ should be in top-right
+bin. Since I cannot reach the top-right bin, I should pass it
+to the common bin so that my partner can take it.”
+
+- "I know block1 and block2 should be in the same row.
+know block1 should be placed in the top-right bin. So I
+should move block2 to the top-left bin, which is also in the
+same row with the top-right bin.”
+
+- "Block1 is not in the correct position according to my
+knowledge but I cannot reach it. I should wait for my partner
+to ask about block1l so that I can share the related
+knowledge.”
+
+- "All the blocks are in the correct position except block2.
+However, according to my knowledge I don't know where the
+block2 should go in. I may randomly try one of the block in
+front of me.”
+
+- "I don't know where the block3 should go in. I should ask
+my partner about the knowledge of block3.”
+
+I also
+
+- If you or the other player make an incorrect move, it will
+tell you in the action history. DO NOT make the same
+incorrect move again.
+
+## Action Format
+
+Your actions must be formatted as follows:
+
+- Move block: "move <block> from <bin> to <bin>”
+- Pass your turn: "pass”
+
+## Reasoning Phase
+
+Before you take an action, you should reason about the
+current state of the game.
+
+Some examples:
+
+- "According to my knowledge, block® should be in top-right
+bin. Since I cannot reach the top-right bin, I should pass it
+to the common bin so that my partner can take it.”
+
+- "I know block1 and block2 should be in the same row.
+know block1 should be placed in the top-right bin. So I
+should move block2 to the top-left bin, which is also in the
+same row with the top-right bin.”
+
+- "Block1 is not in the correct position according to
+knowledge but I cannot reach it. I should wait for my
+to put it into the common bin so that I can reach it.”
+- "All the blocks are in the correct position except block2.
+However, according to my knowledge I don't know where the
+block2 should go in. I may randomly try to place it to one of
+the bins in front of me.”
+
+- "I can reach Block1 and Block3 since they are in front of
+me. I know they should be in the same row, but I do not know
+either of their exact expected locations. I will try with
+moving Block1 to the top-left bin as a start, supposing they
+are both on the top row.”
+
+I also
+
+my
+partner
+
+Listing 4: System prompt for fine-tuned No-
+Information-Exchange agents with chain-of-thought
+reasoning. Redundant part is omitted.
+
+You are Player{player_id} on the {side} side of the game
+board. You have the following knowledge for your goal:
+
+{knowledge}
+
+Currently, the blocks are located as follows:
+{blocks}
+
+You can access these bins:
+
+{bins}
+
+The history of the game till now:
+{move_history}
+
+What action would you like to take? Please provide your
+reasoning before your action.
+
+Listing 5: User prompt for fine-tuned agents with chain-
+of-thought reasoning.
+
+Listing 3: System prompt for fine-tuned Provide-Only
+agents with chain-of-thought reasoning. Redundant part
+is omitted.
+
+You are playing a cooperative game ...
+
+The game concludes when all blocks are correctly placed in
+the bins. During your turn, you have several options:
+
+- Move a block from a bin to another bin. Both bins must be
+accessible to you.
+
+- Pass your turn.
+
+## General Guidance
+- You can only move blocks to bins accessible to you.
+- You can only move one block at a time.
+
+You are Player{player_id} on the {side} side of the game
+board. You have the following knowledge for your goal:
+{knowledge}
+
+Currently, the blocks are located as follows:
+
+{blocks}
+
+You can access these bins:
+
+{bins}
+
+The history of the game till now:
+{move_history}
+
+What action would you like to take?
+
+20
+
+Listing 6: User prompt for fine-tuned agents without
+chain-of-thought reasoning.
+
+H.2 Prompts for Evaluation with GPT4o0
+
+The prompts used for GPT4o evaluation is slightly
+different than the ones we use for fine-tuned model
+
+
+
+===== PAGE BREAK =====
+
+training and evaluation. The prompts designed for
+GPT4o involves more detailed explanations and
+proper guidance to make sure the comparison is
+relatively fair. We have also tried using the same
+prompts for evaluation, while the preliminary result
+shows that GPT4o is hard to understand the game
+setting. This drives us to add extra guidance for a
+better comparison.
+
+You are playing a cooperative game where you and another
+player must sort blocks into the correct bins as quickly as
+possible. Each player has knowledge about the expected
+placement of the blocks, such as whether blocks should be
+aligned in the same row, column, or diagonal. You can only
+move blocks into bins near you or into a shared bin
+accessible to both players. You cannot access the other
+player's bins.
+
+The game concludes when all blocks are correctly placed in
+the bins. During your turn, you have several options:
+
+- Move a block from a bin to another bin. Both bins must be
+accessible to you.
+
+- Share a piece of knowledge with the other player. The
+shared knowledge should be selected from the knowledge you
+have. You cannot share knowledge you do not have.
+
+- Request knowledge from the other player about a specific
+block.
+
+- Pass your turn.
+
+## General Guidance
+
+- You can only move blocks to bins accessible to you.
+
+- You can only share knowledge you have. DO NOT share
+knowledge you do not have, nor request knowledge you already
+have.
+
+- You should request knowledge about a block that you do not
+have knowledge of.
+
+- You can only move one block at a time.
+
+- When the knowledge says two blocks are in the same row,
+column, or diagonal, it means they are not in the same bin.
+
+- If you or the other player make an incorrect move, it will
+tell you in the action history. You MUST NOT make the same
+incorrect move again. You MUST carefully check the action
+history before you make a move.
+
+- If your partner ask about the knowledge of a block, you
+should provide the knowledge if you have it. Carefully think
+about which piece of knowledge is the most helpful to share.
+- The game will stop players from placing the blocks into the
+wrong bins. So if you see a block placed in a bin, that means
+it is the correct bin for that block.
+
+## Reasoning Format
+
+You need to reason about which action to take before you make
+the decision. Some examples of reasoning:
+
+- "According to my knowledge, block®@ should be in top-right
+bin. Since I cannot reach the top-right bin, I should pass it
+to the common bin so that my partner can take it.”
+
+- "I know block1 and block2 should be in the same row.
+know block1 should be placed in the top-right bin. So I
+should move block2 to the top-left bin, which is also in the
+same row with the top-right bin.”
+
+- "Block1 is on the same row with block2. Block2 is on the
+same column with block3. So I can deduce that block1 and
+block3 should be on the same diagonal.”
+
+- "Block1 is still not moved but I cannot reach it. I should
+share my knowledge about block1 with my partner so that it
+can move it to the correct position.”
+
+- "All the blocks are in the correct position except block2.
+However, according to my knowledge I don't know where the
+block2 should go in. I may ask my partner about the knowledge
+of it.”
+
+- "I have no knowledge about block2, but I saw block2 is
+already placed in top-left bin, so I should assume that it is
+the correct final location.”
+
+I also
+
+## Action Format
+
+Your actions must be formatted as follows:
+
+- Move block: "move <block> from <bin> to <bin>”
+- Share knowledge: "share <knowledge>”
+
+- Request knowledge: "ask <block>”
+
+- Pass your turn: "pass”
+
+where we have the following bin names:
+
+21
+
+- playerl_bin
+
+- player2_bin
+
+- commonbin
+
+- top_left_bin
+
+- top_right_bin
+
+- bottom_left_bin
+- bottom_right_bin
+
+and the following knowledge types:
+
+- (<block1>, <block2>, same, row)
+
+- (<block1>, <block2>, same, column)
+
+- (<block1>, <block2>, same, diagonal)
+- (<block1>, <block2>, same, bin)
+
+- (<block1>, in, <bin>)
+
+and the following block names:
+
+- blockd
+
+- block1
+
+- block2
+
+Please strictly follow the format above to ensure the game
+runs smoothly.
+
+## Output Format
+Please provide your output in this format:
+<THINK><your reasoning></THINK><ACTION><your action></ACTION>
+
+Listing 7: System prompt for GPT40 agents with chain-
+of-thought reasoning.
+
+You are Player{player_id} on the {side} side of the game
+board. You have the following knowledge for your goal:
+{knowledge}
+
+Currently, the blocks are located as follows:
+
+{blocks}
+
+You can access these bins:
+
+{bins}
+
+The history of the game till now:
+{move_history}
+
+What action would you like to take? You need to be fully
+convinced of your action before you make a move. Please
+provide your reasoning before your action. Your reasoning
+should be concise enough within 3 sentences.
+
+Listing 8: User prompt for GPT4o agents without chain-
+of-thought reasoning.
+
+H.3 Prompts for Generating Reasoning
+Traces with GPT4o0 for Model
+Fine-tuning
+
+Using a large, well-trained language model to gen-
+erate reasoning traces as supervision for smaller
+models has been widely recognized as an effec-
+tive strategy to enhance reasoning capabilities. In
+our setup, we leverage GPT-40 to generate such
+reasoning traces, following the pipeline outlined
+below:
+
+1. We first use a planner to generate a good solu-
+tion for a given game instance. The generation
+process can be found in Appendix B.
+
+2. At each turn, we present GPT-40 with both
+
+the current game state and the corresponding
+action suggested by the planner.
+GPT-4o is then prompted to assume it is the
+agent taking the given action, and to generate
+a rationale for this decision from a first-person
+perspective.
+
+
+
+===== PAGE BREAK =====
+
+The prompts used for this process are provided
+below. As with the training setup, we employ
+distinct system prompts for each of the four ac-
+tion space configurations, while keeping the user
+prompt consistent across all settings.
+
+You are the assistant that provides the reasoning process for
+the given plays of one player in the game.
+
+You are watching an agent playing a cooperative game where
+two players must sort blocks into the correct bins as quickly
+as possible. Each player has knowledge about the expected
+placement of the blocks, such as whether blocks should be
+aligned in the same row, column, or diagonal. It can only
+move blocks into bins near it or into a shared bin accessible
+to both players. It cannot access the other player's bins.
+
+The game finishes when all blocks
+required bins. During the agent's
+options:
+- Move a block to a nearby bin or the shared bin.
+
+- Share a piece of knowledge with the other player.
+
+- Request knowledge from the other player about a specific
+block.
+
+- Pass its turn.
+
+are correctly placed in the
+turn, it has several
+
+Its actions must be formatted as follows:
+
+Move block: "move <block> from <bin> to <bin>”
+Share knowledge: "share <knowledge>”
+
+Request knowledge: "ask <block>”
+
+Pass its turn: "pass”
+
+## Your Task
+
+You are given the agent's action and you need to provide the
+reasoning behind the action. Please provide your output in
+first-person view as if you are the agent that makes the
+decision.
+
+Some examples:
+
+- "According to my knowledge, block®@ should be in top-right
+bin. Since I cannot reach the top-right bin, I should pass it
+to the common bin so that my partner can take it.”
+
+"I know block1 and block2 should be in the same row.
+know block1 should be placed in the top-right bin. So I
+should move block2 to the top-left bin, which is also in the
+same row with the top-right bin.”
+
+- "Block1 is not in the correct position according to my
+knowledge but I cannot reach it. I should share my knowledge
+about block1 with my partner so that it can move it to the
+correct position.”
+
+- "All the blocks are in the correct position except block2.
+However, according to my knowledge I don't know where the
+block2 should go in. I may randomly try one of the block in
+front of me.”
+
+- "I don't know where the block3 should go in. I should ask
+my partner about the knowledge of block3.”
+
+I also
+
+## General Guidelines
+
+- Provide a clear and concise explanation for the agent's
+action. No more than 2-3 sentences are needed.
+
+- The given action may not be the best move, but you should
+explain the reasoning behind it.
+
+- You can refer to the agent as "I” or “me” in your response.
+
+- Pass its turn: "pass”
+
+Some examples:
+
+- "According to my knowledge, block® should be in top-right
+bin. Since I cannot reach the top-right bin, I should pass it
+to the common bin so that my partner can take it.”
+
+- "I know block1 and block2 should be in the same row.
+know block1 should be placed in the top-right bin. So I
+should move block2 to the top-left bin, which is also in the
+same row with the top-right bin.”
+
+- "Block1 is not in the correct position according to my
+knowledge but I cannot reach it. I should share my knowledge
+about block1 with my partner so that it can move it to the
+correct position.”
+
+- "All the blocks are in the correct position except block2.
+However, according to my knowledge I don't know where the
+block2 should go in. I may randomly try one of the block in
+front of me.”
+
+- "I don't know where the block3 should go in. I should wait
+for my partner to inform me about where to place block3.”
+
+I also
+
+Listing 10: System prompt for GPT4o0 generating
+reasoning traces for Seeking-Only agents. Redundant
+part is omitted.
+
+Listing 9: System prompt for GPT4o0 generating
+reasoning traces for Providing & Seeking agents.
+
+You are the assistant that provides the reasoning process for
+the given plays of one player in the game.
+
+The game finishes when all blocks are correctly placed in the
+required bins. During the agent's turn, it has several
+options:
+
+- Move a block to a nearby bin or the shared bin.
+
+- Share a piece of knowledge with the other player.
+
+- Pass its turn.
+
+Its actions must be formatted as follows:
+- Move block: "move <block> from <bin> to <bin>”
+- Share knowledge: "share <knowledge>”
+
+You are the assistant that provides the reasoning process for
+the given plays of one player in the game.
+
+The game finishes when all blocks are correctly placed in the
+required bins. During the agent's turn, it has several
+options:
+
+- Move a block to a nearby bin or the shared bin.
+
+- Share a piece of knowledge with the other player.
+
+- Request knowledge from the other player about a specific
+block.
+
+- Pass its turn.
+
+Its actions must be formatted as follows:
+
+- Move block: "move <block> from <bin> to <bin>”
+- Share knowledge: "share <knowledge>”
+
+- Request knowledge: "ask <block>”
+
+- Pass its turn: "pass”
+
+Notice that the agent cannot initiate sharing the knowledge.
+Only when the agent is asked, it can share the knowledge.
+
+Some examples:
+
+- "According to my knowledge, block® should be in top-right
+bin. Since I cannot reach the top-right bin, I should pass it
+to the common bin so that my partner can take it.”
+
+- "I know block1 and block2 should be in the same row.
+know block1 should be placed in the top-right bin. So I
+should move block2 to the top-left bin, which is also in the
+same row with the top-right bin.”
+
+- "Block1 is not in the correct position according to
+knowledge but I cannot reach it. I should wait for my
+to ask about block1 so that I can share the related
+knowledge.”
+
+- "All the blocks are in the correct position except block2.
+However, according to my knowledge I don't know where the
+block2 should go in. I may randomly try one of the block in
+front of me.”
+
+- "I don't know where the block3 should go in. I should ask
+my partner about the knowledge of block3.”
+
+I also
+
+my
+partner
+
+Listing 11: System prompt for GPT4o0 generating
+reasoning traces for Provide-Only agents. Redundant
+part is omitted.
+
+22
+
+You are the assistant that provides the reasoning process for
+the given plays of one player in the game.
+
+
+
+===== PAGE BREAK =====
+
+The game finishes when all blocks are correctly placed in the
+required bins. During the agent's turn, it has several
+options:
+
+- Move a block to a nearby bin or the shared bin.
+
+- Pass its turn.
+
+Its actions must be formatted as follows:
+- Move block: "move <block> from <bin> to <bin>”
+- Pass its turn: "pass”
+
+Some examples:
+
+- "According to my knowledge, block®@ should be in top-right
+bin. Since I cannot reach the top-right bin, I should pass it
+to the common bin so that my partner can take it.”
+
+- "I know block1 and block2 should be in the same row. I also
+know block1 should be placed in the top-right bin. So I
+should move block2 to the top-left bin, which is also in the
+same row with the top-right bin.”
+
+- "Block1 is not in the correct position according to my
+knowledge but I cannot reach it. I should wait for my partner
+to put it into the common bin so that I can reach it.”
+
+- "All the blocks are in the correct position except block2.
+However, according to my knowledge I don't know where the
+block2 should go in. I may randomly try to place it to one of
+the bins in front of me.”
+
+- "I can reach Block1 and Block3 since they are in front of
+me. I know they should be in the same row, but I do not know
+either of their exact expected locations. I will try with
+moving Block1 to the top-left bin as a start, supposing they
+are both on the top row.”
+
+## General Guidelines
+
+- Provide a clear and concise explanation for the agent's
+action. No more than 2-3 sentences are needed.
+
+- If you are not sure about the reasoning, this may because
+the given action is a random guess, and it is correct by
+luck. In this case, you should reason about what you know
+(briefly) and don't know (important), and clarify that the
+action is a guess.
+
+- The given action may not be the best move, but you should
+explain the reasoning behind it.
+
+- You can refer to the agent as "I” or “me” in your response.
+
+Listing 12: System prompt for GPT4o generating
+reasoning traces for No-Information-Exchange agents.
+Redundant part is omitted.
+
+Player{player_id} is on the {side} side of the game board. It
+has the following information for its goal:
+
+{knowledge}
+
+Currently, the blocks are located as follows:
+{blocks}
+
+It can access these bins:
+
+{bins}
+
+The history of the game till now:
+{move_history}
+
+It takes the action: {cur_move}
+What is the reasoning behind this action? Please provide your
+thoughts as if you are the player
+
+Listing 13: User prompt for GPT40 generating
+reasoning traces for agents.
+
+23

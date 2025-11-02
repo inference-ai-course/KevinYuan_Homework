@@ -1,0 +1,1864 @@
+2510.26274v1 [cs.CR] 30 Oct 2025
+
+arXiv
+
+PVMark: Enabling Public Verifiability for LLM
+Watermarking Schemes
+
+Haohua Duan, Liyao Xiang*, Member, IEEE, and Xin Zhang
+
+Abstract—Watermarking schemes for large language models
+(LLMs) have been proposed to identify the source of the generated
+
+text, mitigating the potential threats emerged from model theft.
+
+However, current watermarking solutions hardly resolve the trust
+issue: the non-public watermark detection cannot prove itself
+faithfully conducting the detection. We observe that it is attributed
+to the secret key mostly used in the watermark detection — it
+cannot be public, or the adversary may launch removal attacks
+provided the key; nor can it be private, or the watermarking
+detection is opaque to the public. To resolve the dilemma, we
+propose PVMark, a plugin based on zero-knowledge proof (ZKP),
+enabling the watermark detection process to be publicly verifiable
+by third parties without disclosing any secret key. PVMark hinges
+upon the proof of ‘correct execution’ of watermark detection
+on which a set of ZKP constraints are built, including mapping,
+random number generation, comparison, and summation. We
+implement multiple variants of PVMark in Python, Rust and
+Circom, covering combinations of three watermarking schemes,
+three hash functions, and four ZKP protocols, to show our
+approach effectively works under a variety of circumstances.
+By experimental results, PVMark efficiently enables public
+verifiability on the state-of-the-art LLM watermarking schemes yet
+without compromising the watermarking performance, promising
+to be deployed in practice.
+
+Index Terms—LLM watermarking, zero-knowledge proof,
+public verifiability.
+
+I. INTRODUCTION
+
+N recent years, large language models (LLMs) have made
+Livenitican impact to the community by generating high-
+quality texts akin to human-written ones. However, this
+advancement also brings many real-world threats such as the
+spread of generated fake news (1). misuse of LLMs in academic
+misconduct (21. etc. To achieve responsible AI, it is important
+to trace the provenance of the generated texts by LLMs.
+
+Towards this end, various watermarking schemes (3)-(12)
+are proposed for LLMs. The mainstream of the watermarking
+schemes embeds the watermark by altering the probability
+distribution of the generated tokens depending on the context
+and owner’s secret key. The watermark is later extracted by
+detecting the statistical significance in the word distribution of
+the suspected text. However, such watermarking schemes face
+a trust crisis in practical applications. As shown in Figure [I]
+when the LLM owner proclaims its right against unauthorized
+use, it may face questions from a third party, e.g., the court,
+about the legitimacy of the watermark, due to the opaque
+watermark detection involving a secret key. In such a case,
+
+H. Duan, L. Xiang (xiangliyao08 @sjtu.edu.cn, the corresponding author)
+are with Shanghai Jiao Tong University, Shanghai 200240, China. E-mail:
+{duanhaohua, xiangliyao08 } @sjtu.edu.cn. X. Zhang is with Ant Group. E-mail:
+evan.zx @ antgroup.com.
+
+—— Unauthorized behavior                                     —— Attack
+
+Detect zl   GQ
+Be key J  ZO
+
+Watermark
+
+—— Right Protection
+
+Generate
+
+@) oO Unauthorized use
+
+Suspect        Suspicious LLM Published text LLM Owner
+
+“| found someone misused my LLM without        hy ty         “Please       jc
+ind                s                                                               provide the
+@  &         permission by detecting my watermark from   ¢    7
+ou
+
+the published text.”
+
+®                 Cal “This is my secret key, you can use it to                   Detect  E)      BE
+reproduce the watermark detection process.”             Secret ke  S ~B
+LLM Owner                                                       urt            y     Watermark
+1S)   Sf Eavesdropping     Be  S   E                 Detect  =
+2 cavescronin|                                      SUSE a
+e=e@jfpjRe—
+
+.
+
+Secret key No watermark
+
+Removal attack
+
+Attacker                                Processed text LLM Owner            Effective Attack
+    “This is the proof that proves the                           ip [=           Win the trial
+L  &      Ee amiss of the watermark detection        ny ta   Verify    K
+LLM Owner         process from the published text.”              Court                                  (G)
+‘ou
+EE] Eavesdropping             =
+Analyze |          .
+Attacker                                                   Nothing about 6        Failed Attack
+
+Fig. 1: From top to bottom: © The LLM owner detects
+unauthorized use of the LLM by watermark detection. ® The
+LLM owner sues the suspected model and the the court requests
+evidence. ® The LLM owner’s secret key gets exposed in
+answering the court’s request. ® The LLM owner provides the
+proof as evidence under PVMark thus preventing the attack.
+
+the owner has to risk its secret key to third-party detection,
+while the third party may be non-confidential allowing an
+eavesdropper to acquire the secret key, threatening the validity
+of the watermark. The root cause of this problem is the use of
+a secret key which cannot be public — otherwise putting the
+watermarked model under the threat of removal or ambiguity
+attacks; nor private — for hardly convincing others that the
+detection is legitimate. Overall, LLM watermarking schemes
+lack public verifiability.
+
+Previous efforts have been devoted to resolve the issue.
+Fairoze et al. attempt to use a private key for watermark
+embedding and a public key for detection (13). However, the
+detection relies much on extracted features of the generated
+texts, which can be exploited by adversaries. Liu et al. address
+the problem by training two separate neural networks as
+watermark embedding and detection modules respectively
+14}. but the exposure of the detection network still enables
+the adversary to train a reverse network to remove the
+watermark. Kirchenbauer et al. propose a private detection
+scheme, allowing only authorized parties to access the detection
+APIs (3). yet without convincing others of the faithful execution
+of APIs.
+
+To resolve the dilemma, we design a plugin named PV-
+Mark, which augments the state-of-the-art LLM watermarking
+schemes with public verifiability while preserving the original
+schemes’ properties of effectiveness, fidelity, and robustness.
+
+
+===== PAGE BREAK =====
+
+Specifically, without revealing the secret key, the owner or an
+authorized party can perform a publicly verifiable detection
+to convince others that the detection is faithfully done, thus
+preventing any attack raised by theft of secret key.
+
+PVMark achieves public verifiability by integrating zero
+knowledge proof (ZKP) into watermark detection. ZKP is a
+protocol in which the prover can convince the verifier that a
+given statement is true, without conveying to the verifier any
+information beyond the fact that the statement is true. It is
+aligned with our goal of verifying the watermark detection is
+correctly done yet without revealing the secret key.
+
+To instantiate the idea, we select three representative LLM
+watermarking schemes, i.e., KGW [3], SynthID-Text [4], and
+Segment- Watermark (12), to implement PVMark. We found
+these schemes share a common token-sampling-alteration
+framework: at each sampling round, all candidate tokens are
+randomly divided into different groups based on the secret
+key and the watermark. Then tokens in the ‘green’ group are
+given a slightly higher probability to be sampled as the output.
+Hence the statistical attributes of the output can be used to
+extract the watermark.
+
+Our core idea is to provide evidence that the statistical results
+of green tokens in the produced text are faithfully collected
+without exposing the secret key, thereby demonstrating that
+the text indeed contains watermarks. Hence two criteria need
+to satisfy: the watermark is extracted from the text, and the
+proof of the detection passes verification. In applying ZKP to
+watermarking, we mainly resovle two technical challenges: 1)
+how to model the watermark detection by circuits on which
+ZKP protocols run, and 2) how to minimize the overhead
+introduced by ZKP thereby improving detection efficiency.
+
+To tackle challenge 1, we decompose the watermark de-
+tection into four components for reconstruction — mapping
+table check, hashing, comparison, and summation, replacing
+the original components by ZKP-friendly ones. For example,
+the pseudorandom function (PRF) instantiated by a modular
+operation-based linear congruential generator is inefficient for
+ZKP, which is substituted by cryptographic hash functions. The
+identification of ‘green’ tokens is reconfigured as comparing
+the generated random numbers against a fixed threshold. We
+show that the reconstruction of the watermarking schemes not
+only preserves the watermark properties, but also tailor them
+to ZKP protocols.
+
+Apart from reconstruction, we propose multiple approaches
+to improve the efficiency of PVMark (addressing challenge
+2). Since hash functions are heavily used in detection, we
+combine them into three-to-one hash functions for more
+succinct constraints. Observing the watermark detection is
+a repeated procedure on a sequence of tokens, we treat the
+detection on a subsequence of tokens as an instance and
+reduce checking of multiple instances into checking one by
+folding (15). Hence we reduce the ZKP overhead for proving
+multiple instances into proving one final instance and the
+folding steps, significantly mitigating the cost of PVMark.
+
+Highlights of our contributions are as follows. We propose
+PVMark that enables public verifiability on zero- and multi-bit
+LLM watermarking schemes, achieving a compromise between
+public detection and authorized detection, resolving the trust
+
+issue in watermarking detection. PVMark is built upon ZKP
+techniques and incorporates application-specific optimizations.
+Implementation-wise, we realize multiple variants of PVMark
+on Python, Rust and Circom, including different combina-
+tions of three LLM watermarking schemes, three hash functions,
+and four ZKP protocols. The security analysis and experimental
+results have demonstrated that PVMark is applicable to be
+deployed in LLM watermarking service with low costs for
+public verification.
+
+II. RELATED WORK
+
+Currently, multiple schemes are proposed for LLM water-
+marking. One is retrieval-based schemes that require ac-
+cessing and storing all the texts generated during the interaction
+process of LLM. This largely destroys the privacy of users using
+LLM. The second is post hoc detection schemes [17|-[19] that
+usually train a machine learning model to distinguish human-
+written text from LLM-generated text. These schemes require
+a lot of computing resources and the performance is not good
+enough 20}. The third is represented by KGW scheme [3]. The
+high-level idea of KGW is to divide the vocabulary into green
+and red token lists, and modify logits to shift the distribution of
+candidate tokens toward the green lists. This approach allows
+watermark embedding without requiring any LLM fine-tuning,
+making it general and less costly to deploy.
+
+Many watermarking schemes based on probability shifting
+have been proposed subsequently. Lee ef al. and Wang
+et al. (6) reduce the impact of logits modification on text
+quality by only watermarking high-entropy tokens. Yoo et al.
+propose to assign different message bits to distinct positions
+within the text to increase the payload of the watermark in (7).
+Qu et al. propose using dynamic programming algorithms to
+allocate tokens to each position of the message to be embedded
+in a balanced manner to improve the accuracy of watermark
+detection. For robustness, Kirchenbauer et al. study the effects
+of different hash strategies on watermarking robustness in (8).
+Zhao et al. demonstrate that using a globally fixed vocabulary
+partitioning scheme provides better resistance against removal
+attacks in [9]. Hu er al. and Wu ef al. {11} propose an
+unbiased weighting method to improve the imperceptibility of
+KGW. Dathathri et al. propose Tournament sampling algorithm
+to improve watermark detection rate while preserving text
+quality in [4].
+
+However, the aforementioned schemes are only suitable for
+private watermark detection scenarios and cannot be applied to
+public detection, as exposing the detector would face various
+threats.
+
+To address the public verifiability of watermark, Fairoze et
+al. utilize the asymmetric encryption to embed the watermark
+using a private key and detect it by a public key (13). However,
+this approach relies on text features for watermark detection,
+which can also be exploited by adversaries for spoofing attacks.
+Liu et al. propose training two additional neural network
+models in (14). one for watermark embedding and another for
+watermark detection. But, when the window size, which decides
+the partition of vocabulary for the current token, is relatively
+small, the method would suffer from reverse engineering
+
+
+===== PAGE BREAK =====
+
+attack, i.e., reverse training of the embedding network from the
+detection network, threatening the robustness of the system.
+
+III]. PRELIMINARY
+A. Zero Knowledge Proof
+
+Zero knowledge proofs (ZKPs) is a tool whereby a compu-
+tationally unbounded party (the prover) can prove to another
+party (the verifier) that a given statement is true, while avoiding
+conveying any additional information apart from the fact that
+the statement is indeed true. ZKP ensures that if the prover
+has the correct private input w and public input wu, it can
+convince the verifier of the statement’s validity with a very high
+probability (completeness property), without revealing anything
+about w (zero-knowledge property). Conversely, if the prover
+does not have w, the verifier will reject the proof with a very
+high probability (soundness property). The formal definitions
+of zero knowledge arguments can be found in supplementary
+file.
+
+In the context of ZKPs, an arithmetic circuit is a system of
+equations that models a problem and on which ZKP protocols
+run to verify. Common circuits include GKR-based ones, rank-1
+constraint system (R1CS), PLONKish arithmetization, etc. For
+simplicity, we use PLONKish as an example type of circuit to
+introduce our system. From a high-level perspective, PLONKish
+arithmetization encompasses the numerical values of both
+public and private inputs, along with equations that describe
+the relationships among these values, denoted as constraints.
+The form of constraints used by the standard PLONKish is as
+follows:
+
+Sp°ULp+SrR°tR+S0°'tO+SuM: tL: tR+S8c:c=0, (1)
+where 57,5R,580,5uM,5c ©  F are selectors, and
+XL,£R,xLoO,c € F denotes the left input, the right input, the
+output and the constant value, respectively.
+
+Recursive ZKP. Nova is an effective recursive zero-
+knowledge protocol from folding schemes to realize incremen-
+tally verifiable computation (IVC). IVC refers to recursively
+verifiable computations of the form
+
+Un = F(wy-1, F(Wy-2, FC... F(wi, F (wo, uo))))) 2)
+where F’,w,u and 7 denote the computation function, private
+input, public input and the number of computations, respec-
+tively. Nova can fold two relaxed R1CS instances into one and
+the relaxed R1ICS can be expressed as follows:
+
+(A-Z)©(B-Z) =p(C-Z)+y      (3)
+where A, B, C are matrices containing ZKP circuits information,
+ju is a scalar and v is used to store redundant items. The ©
+denotes the hadamard product. Z = [u,w, 1] is the instance
+vector including the witness w, public input u and the constant
+1. Two relaxed RICS instance (Z1, 1,1) and (Zo, 2, v2) can
+be folded into one instance (Z, 4, ) as follows:
+
+= py + CZy = fig CZ) +r? + V2,        (4)
+=p +r La,                     (3)
+Z=Z, +1r-Za,                                (6)
+
+where r denotes randomness. It suffices to provide proofs for
+the correctness of Eq. (4), (5), (6p, and the folded instance,
+
+eliminating the need for proofs of the original two instances.
+With careful design, savings are achieved if the constraints for
+a single fold are fewer than those for an individual instance.
+
+B. Language Model Watermarking
+
+A language model (LM) is a type of machine learning model
+trained to predict the next most appropriate word to fill in a
+blank space in a sentence or phrase, based on the given text.
+Given an input prompt # = [2o,...,%m_1] of length m, a
+language model M is a function that iteratively computes the
+logit scores 9 (0<i<n-—1,j € |V)) of the next n tokens
+over the vocabulary V. These logits are transformed into a
+probability distribution p“ via the softmax and the LM M
+samples the next n tokens y = [yo,---, Ym—1] from p™. We
+overload the syntax y; to denote the index of the corresponding
+token in the vocabulary without causing confusion.
+
+Language model watermarking is a technique that allows
+the model owner to embed identifiable messages known as
+watermarks within the sequence y generated by a watermarked
+LM M. We give the formal definition of language model
+watermarking in the supplementary file due to space limitation.
+
+Common LLM watermarking frameworks. Existing LLM
+watermarking schemes based on probability shifting can be
+categorized into zero-bit watermarking schemes [3]-[TT],
+and multi-bit watermarking schemes  [12  based on their
+capability to embed messages into LLM-generated text. The
+former type only injects features to differentiate AI-generated
+text from human-produced text without embedding any explicit
+information, whereas the latter can embed multi-bit metadata —
+such as a model owner’s identity — into text for more precise
+identification and traceability.
+
+Despite differences in technical details, these two categories
+of probability-shifting-based watermarking schemes share a
+common high-level framework. We select representative works
+in zero-bit watermarking schemes, namely KGW  and
+SynthID-Text [4], as well as Segment-Watermark in multi-
+bit watermarking schemes to showcase these watermarking
+schemes.
+
+The watermark embedding process is summarized in Table [I]
+and can be divided into three steps: random seed generation,
+vocabulary partitioning, and probability shifting and sampling.
+Particularly for SynthID-Text, the latter two steps are indistin-
+guishable.
+
+In each round i, the first step is to generate a random seed
+sd; based on the secret key sk and contextual information y,,
+where wv denotes the recent context window width. This step
+in multi-bit watermarking additionally requires the mapping of
+tokens into positions (jp) and the position index is used to pick
+the corresponding message bit (msg|[p]) to generate the random
+seed. The seed sd; is then employed to partition candidate
+tokens into groups for the second step. In Step 3, the logits of
+tokens in the selected groups are adjusted accordingly by means
+of adding a bias to increase the probability of being sampled. In
+essence, this probability-shifting mechanism inclines the LLM
+to preferentially output tokens from the selected group, thereby
+embedding watermark information into the LLM-generated
+text. In particular for SynthID-Text, the probability shifting is
+
+
+===== PAGE BREAK =====
+
+TABLE I: The watermark embedding process of zero-bit and multi-bit LLM watermarking schemes. Steps requiring adjustment
+for PVMark are marked in brackets. PRF(-) denotes a pseudo-random function.
+
+Step 1: Random seed generation.         Step 2: Vocabulary partitioning.
+
+Step 3: Probability shift-
+ing and sampling.
+
+Compute random seed sd;     aaa
+PRF(sk, y,,). => [Adjustment for
+KGW     Py Compute  ondomn   seed | Partition the all candidate tokens as follows:
+
+sd; < Hash(sk, y,).]
+
+a) Assign random number g@p = = PRF(sd;,y;) to each token y; € V; = [Adjustment for PVMark:
+Assign random number gi) = Hash(sd;,y;) to each token y; € V;]
+
+b) Sort V by all the random numbers g(¥1),...,
+designate the top y|V|, 7 € (0, 1) tokens in the ‘Sorted V as green list G. > [Adjustment for PVMark:
+
+Candidate token y; € {
+
+for 7 € |V|, where R and F denotes the red list and finite field, respectively. ]
+
+Add a bias 6 to logits
+of all tokens in G and
+compute the new prob-
+ability distribution p
+using new logits over
+V. Sample y; from po
+and append y; to y.
+
+g¥lvD corresponding to token yi,..., yy) € V and
+
+G, 9%) <+- IF |
+R, gi) >: \E|
+
+Generate top K candidate set V for this round and
+assign € random numbers gt?) = PRF(sdj, yj, k)
+to each token y; € V for k € {],..
+[Adjustment for PVMark: Generate top K = 2§
+
+fork =1,...,€ do
+for j =0,...,25-* — 1 do
+J                    (k-1). (k-1)           .
+5h >            J=    (yo;     Yoj41 ] (may contain repeats).
+
+J*=[yeJ st. gf = max, wer ge, 4
+
+sy                                                candidate set V for this round and assign € random            (may contain repeats).
+ex!                                                           5     2           .                                             ks
+                                                 numbers to each token yj € V by                            Sample y from the uniform distribution of
+gt) _   1, Hash(sd;,y;,k) < |F|/2,              J*.
+vk       0, Hash(sd;,y;,k) > |F|/2,           end for
+end for
+for k € {1,...,€}: ]    (0)                             Append ys to y.
+For each y; € V, set Yi = Ui
+a) Find position index pj = M{y,];
+Segment-     b) Compute random seed sdj <<
+Watermark | PRF(sk, y,,,™msgl[pi]). => [Adjust- | The same as KGW                                                                                  The same as KGW.
+
+ment for PVMark: Compute random
+seed sd; < Hash(sk, y,,, msg[pi])-]
+
+TABLE II:
+for PVMark are marked in brackets.
+
+The watermark detection process of zero-bit and multi-bit LLM watermarking schemes. Steps requiring adjustment
+
+Step 1: Compute random seed    Step 2: Check and count green tokens                                   Step 3: Compute score / message
+a) Similar to Step 2 of the watermark embedding process, assign a
+random number to each token in the vocabulary using sd; and reorder
+Compute random seed sd; <— | the vocabulary to find G;; = [Adjustment for PVMark: Compute the
+PRF(sk, yy). = [Adjustment | random number g¥* = Hash(sd;, yi) corresponding to the current token             _       _        [RV
+KGW    for PVMark: Compute random | y;;]                                                              Seore(y) = (lula — yn)/vny(l ~ 7)
+seed sd; «~ Hash(sk, y,,).]       b) Count the number of green tokens |y|g += 1(y; € Gi) where 1(-)
+is the indicator function. = [Adjustment for PVMark: Count the number
+of green tokens |y|g += 1(g¥ < y- |F|).]
+a) Compute € random number oR! corresponding to the current token y;
+where k € {1,...,€}; = [Adjustment for PVMark: Compute € random
+number corresponding to the current token y; by
+SynthID-                                                                1, Hash(sd;        < |F\/2                                   Sg
+Text                                                       gt?) Ji     sh(sdi, yi,k) < |F\/2,                   Score(y) = me
+0, Hash(sdi, yi, k) > |F|/2,
+fork € {1,...,€}; ]
+b) Update Sg: Sy +=  =  19k:
+a) Find position index pj =      for j = 0,1,...,2” —1do                                   ;
+Mlyy);            ;                     Assign a random number to each token in the vocabulary using sdi
+b) compye all ORE ey)          and reorder the vocabulary to find G7; => [Adjustment for PVMark:
+Segment- | seeds sd; < PRF(sk, yy, J       Compute the random number g¥* = Hash(sd?, y;        di
+                            g¥* = Hash(sd; , y;) correspondin                          .
+Watermark | for 7 = 0,1,...,2” —1. >        to the current token y;;]                (simi)      P     & | msg[p] — arg   je[0.2"— yy COUNTIpI [i]
+          [Adjustment for PVMark: Com-        Update COUNT: COUNT[p4][J] += 1 (yi € Gi). = [Adjustment ] p94... 1
+pute all possible random seeds        for PVMark: Update COUNT: COUNT[pi][j] += I(g¥ < y-      P    rly...      .
+sd)  Hash(sk, Yyod) for         |FI).]
+j=0,1,...,2—-1.]        end for
+
+applied implicitly through Tournament sampling where every
+two candidates compare their g values to enter the next-tier
+competition until the final winner is selected. It has been proved
+that the Tournament sampling in fact raises the probability of
+the winner and lowers the probability of the other through each
+round of competition.
+
+The watermark detection processes for zero-bit and multi-bit
+schemes exhibit subtle distinctions, shown in Table For
+zero-bit schemes, the random seed derived from the secret key
+sk and context y,, is used to determine the token grouping
+for each round. The number of tokens in the given text y that
+belong to the selected group is counted as |y|g. A watermark
+score Score(y) is computed based on |y|c, and this score is
+
+compared against a threshold 7 to identify the being of the
+watermark. In contrast, multi-bit schemes involve iterating over
+all possible watermark message values in calculating random
+seeds, alongside the secret key and context. By analyzing token
+group Statistics associated with different watermark message
+values, the detection algorithm selects the highest one as the
+decoded message.
+
+IV. PROBLEM STATEMENT AND PVMARK OVERVIEW
+
+In this section, we point out the threats that the common
+LLM watermarking frameworks face in ownership verification
+or generated content provenance tracing. We formally define
+the problem and then give a solution overview.
+
+
+===== PAGE BREAK =====
+
+Threat model. In ownership verification and provenance
+tracing, the watermarking frameworks involve a watermark
+embedding party, usually the model owner, and a watermark
+detection party. The detection party extracts the watermark
+from the watermarked text as evidence of the text origins.
+In previous works [3]-{12], [21], the detection parties are
+mostly the embedding parties, as they own the detection key
+for watermark detection. However, the confidential detection
+process would reduce its credibility to the public. If the
+detection party is acted by a third party, the party has to keep
+the detection key confidential. The leakage of the detection
+key to a malicious party would tempt an adaptive attack to
+remove the watermark from the watermarked content, known
+as removal attacks. This implies that the aforementioned LLM
+watermarking frameworks lack public verifiability.
+
+Motivation. We observe that the lack of public verifiability
+is due to the key sk used in the embedding and the detection
+phases. The sk is crucial to be kept secret as its exposure
+would leak the vocabulary partition for watermark embedding,
+allowing adversaries to identify ‘green tokens, and thus
+intentionally replacing them to remove the watermark.
+
+Our intuition is that, sk cannot be made public while the
+watermark detection should be transparent. To resolve the
+dilemma, we propose a plugin PVMark that enables public
+verification of LLM watermarking without leaking sk: it
+provides a correctness proof of the watermark detection to any
+verifier, which circumvents the direct exposure of the detection
+process. Specifically, by integrating ZKP into watermarking de-
+tection, PVMark can hide sk (zero-knowledge property) while
+providing evidence that the detection is correctly performed
+by the relevant party (completeness property). Meanwhile,
+the probability of cheating to pass verification is negligible
+(soundness property). Even though the proof only serves the
+detection, the embedding procedure requires adaptation to the
+proof.
+
+Problem statement. Formally, four parties are involved in
+PVMark: (1) watermark embedding party E who embeds the
+watermark into M to obtain M; (2) watermark detection party
+D who has access to the watermark detector, sk corresponding
+to M, and a text sequence y. D extracts watermark from y
+while acting as the prover to prove the claim that ‘y indeed
+contains watermark, and the watermark information is msg
+(for multi-bit watermarking);’ (3) verifier V who could be any
+party responsible to verify D’s claim. V is honest in executing
+the proof verification while being curious about sk and other
+credentials that might be contained in the proof provided by D;
+(4) adversary A who maliciously exploits M to generate
+unauthorized text with watermark removed.
+
+Use case. Ownership verification. The model owner € trains
+a language model M and embeds its watermark to get M.
+If any unauthorized party is suspected to illegally possess
+M and generate text y by it, the watermark detection party
+D, typically the owner or an authorized party, could provide
+the evidence by detecting the watermark from y, generating
+the corresponding correctness proof and submitting it to the
+verifier V. It is confirmed that the unauthorized party illegally
+possesses M, should the watermark be detected and the proof
+be verified.
+
+Provenance tracing. The owner € generates content y with
+watermark embedded. Someone raises concern on y and tracks
+the origin of the text. The authorized party D detects watermark
+belonging to € and provides evidence to V that the detection
+is faithfully done. € cannot deny the results supported by
+evidence.
+
+In both use cases, the embedding and detection algorithms
+are publicly known, except for the secret key sk. D uses sk
+in detection and proof generation without revealing it.
+
+Overview. Formally, we define PVMark as follow:
+
+Definition IV.1. PVMark is a plugin that enables public verifi-
+ability on a language model watermarking scheme. It consists
+of a triple of setup, embedding and detection algorithms:
+
+e Setup(sk) — YT: E makes a commitment YT to a secret key
+sk and publishes Y.
+
+e Watermark embedding WE(sk, M) > M: E uses the secret
+key sk to produce a watermarked model M.
+
+e Watermark detection WD(sk, y) > {0,1} or msg, II:
+D takes the secret key sk associated with M and a text
+sequence y as inputs. For zero-bit watermarking schemes,
+it detects whether y contains watermark and returns I if
+present, otherwise 0; for multi-bit watermarking schemes, it
+detects and returns the watermark information msg embed-
+ded in y. Then D generates a correctness proof I for the
+detection.
+
+In previous work [3]-[12], [21], the properties of water-
+marking schemes have predominantly focused on effectiveness
+and fidelity, meaning the watermark should be embedded
+and detected with high accuracy while maintaining decent
+text quality, and robustness, which hinders adversaries from
+removing the watermark from watermarked text or forging the
+watermark into unwatermarked text. We claim that PVMark
+can augment watermarking schemes with an additional property
+of public verifiability without undermining the aforementioned
+attributes — specifically, the property allows any third party
+to check the integrity of the watermark detection result.
+
+It is noteworthy that Pang et al. point out an inherent conflict
+between robustness and public detectability for watermarking
+systems in (22). In contrast, PVMark effectively achieves
+robustness and public verifiability at the same time. PVMark
+is not a publicly detectable scheme, but its watermarking
+detection process can be verified publicly, adding credibility
+to the detection.
+
+From the following section on, we will introduce PVMark
+in detail.
+
+V. ADAPTING WATERMARK SCHEMES FOR PVMARK
+
+Since the original watermark schemes contain procedures
+that are challenging to construct proofs, we adapt them
+to almost equivalent, ZKP-friendly forms. The adaptation
+preserves the original schemes’ foundational properties of
+effectiveness, fidelity, and robustness (see experimental results
+in the supplementary file).
+
+A. Hash-Based Vocabulary Partitioning
+
+A key step in watermark embedding is to assign random
+ranks to candidate tokens in realizing the random partition of
+
+
+===== PAGE BREAK =====
+
+vocabulary into green and red lists (Step 2 in Table [Ip. Green
+tokens are selected with a probability higher than random
+chance.
+
+The original watermarking schemes primarily employ two
+methods for vocabulary partitioning. The first is random
+permutation, utilized in KGW [3] and Segment-Watermark [12}:
+it randomly permutes all the candidate tokens in the vocabulary
+and marks the first ~-|V| indexed tokens as the green list and
+the rest as the red list. Random permutation requires a mapping
+operation from random numbers to the range of the vocabulary
+size, which involves ZK-unfriendly modulo operations.
+
+The second is the tournament method, adopted by SynthID-
+Text (4): it assigns random numbers to each token in the
+candidate token set by using a precomputed lookup table
+and a pseudo random function (PRF) instantiated by a linear
+congruential generator (LCG). Initially, a lookup table of size
+2'© is randomly populated with Os and 1s. Then, the LCG
+generates € random numbers, which are mapped to the range of
+[0, 21° —1] for retrieving values from the table. These values are
+then assigned to gy, ..., gg. Subsequently, all candidate tokens
+undergo multiple rounds of competition, where tokens with
+smaller g values are eliminated iteratively. Tokens that remain
+in the final round are designated as green tokens. This process
+also involves ZK-unfriendly modulo operations in LCG.
+
+To avoid modulo operations, we propose a Hash-based
+method for vocabulary partition. A straightforward and equiv-
+alent substitute for random permutation is random numbers
+sorting where we sort r = {r1,...,7\v|} in numerical order,
+and take the tokens corresponding to the first y|V| indices
+in r to compose the green list. Unfortunately, the proof of
+sorting is still highly inefficient to implement. Hence we
+take an approximated approach by assigning hash-generated
+random numbers to candidate tokens. The vocabulary is divided
+into green/red lists by comparing these numbers with a fixed
+threshold 7 - |F|, shown by the first row of Step 2 in Table
+Similarly, for the tournament method, we compare hash-
+generated random numbers with a fixed threshold Ll and map
+them to 0 or 1 depending on the comparison result (shown by
+the second row of Step 2 in Table II}. However, our hash-based
+approach relies on the assumption that the hash-generated
+random numbers are uniformly distributed within the range,
+so that the fixed threshold could divide the vocabulary in
+proportion. We validate that the assumption mostly holds true
+in practice (see Sec. [VIII-B).
+
+In addition, we instantiate the PRF required for computing
+the random seed using a hash function. Similarly, all PRFs
+involved in the watermark detection are also instantiated via
+hash functions. When checking and counting green tokens,
+we determine whether the current token is a green token
+by comparing its corresponding random number with a fixed
+threshold, as shown in Step 2 of Table
+
+B. Selection of the Hash Function
+
+We select cryptographic hash functions as PRFs since they
+are high-quality pseudorandom number generators following the
+guidelines NIST SP 800-90A (23), instead of non-cryptographic
+pseudorandom number generation algorithms such as Linear-
+feedback shift register [24], Blum Blum Shub [25], Mersenne
+
+Twister [26], Xorshift [27], etc. Although the non-cryptographic
+ones are faster by bit operations, they are not ZKP-friendly for
+incurring high costs in the verification of bitwise operations.
+
+The most commonly used cryptographic hash functions
+include SHA256, Keccak256, BLAKE2, which take inputs
+of arbitrary length and map them to a fixed 256-bit output.
+These hash functions contain many bit operations which involve
+high ZKP-related costs. For instance, in verifying SHA256,
+the significant cost arises from its compression function that
+contains bit decompositions. Other hash functions are more
+ZK-friendly, including MiMC hash [28], Poseidon hash
+and Poseidon2 hash [30]. These hash functions are effective
+in finite fields applicable to ZKP and mostly consist of
+addition and multiplication operations which are relatively
+efficient to verify. For example, Poseidon hash is based on
+the sponge function, with a state composed of finite field
+elements and field operations including addition, multiplication
+and exponentiation, all of which can be easily converted into
+ZKP circuits.
+
+To verify the uniformity and randomness of the cryptographic
+hash functions, we run the chi-square test to examine SHA256,
+Keccak256, BLAKE2, MiMC, Poseidon and Poseidon2. The
+results are presented in Sec. By tests, we found
+SHA256, Keccak256, or BLAKE2 are not applicable for
+PVMark since the 256-bit value range of these hash does
+not match the finite field used by ZKP, and thus the hash
+values are hardly uniformly distributed on F. MiMC, Poseidon
+and Poseidon2, hash functions that passed the test, are our
+final choices for PRFs.
+
+VI. BUILDING BLOCKS OF PVMARK
+
+To prove watermark detection, it is required for PVMark to
+generate proofs for the three steps in Table [IT] We observe that
+in Step 3 for computing the score/message, the only unknowns
+are yq, Sg, and COUNT, while other quantities are public.
+Hence, as long as the verifier obtains the correct yg, Sg, and
+COUNT, it can derive the score or watermark message to
+determine whether the given text contains the watermark or
+extract the embedded watermark. Therefore, PVMark only
+needs to prove the correctness of yg, S,, and COUNT, ice.,
+generate correctness proofs for Step 1 and Step 2, yet without
+exposing sk or the green list G. Next, we will present in
+detail the arithmetization of the two steps by the example of
+PLONKish.
+
+A. Arithmetize Step I in Table {I|
+
+Since we have instantiated the PRF by a hash function, we
+arithmetize the hash to prove Step | of Table
+
+Hash functions. The constraints Cyqsn (Output; Inputs) differ
+per hash function. We take two common ZK-friendly hash
+functions, MiMC hash and Poseidon hash, as examples. The
+MiMC function hashing X is defined as Hmime(X) = (f¢-10°
+fo-20...0° fo)(X) +k where ¢ and k denote the number of
+rounds and the secret key in MiMC hash, respectively. The
+round function f; is defined as f;(Y;) = (Y; + k + C;)Po*
+where C’;; is the round constant for round i and Yo = X. To
+
+
+===== PAGE BREAK =====
+
+construct the constraints of f;(-), we introduce a new power
+operation selector spow to rewrite Eq. as
+
+Pow
+
+(7)
+and set sppy = 1,so = —l,ay, = Yj;,aR = k,c = C; and
+xo = fi(Y;). We construct the MiMC hash by reusing Eq.
+@ times, and use copy constraints to ensure the consistency of
+input and output in function compositions.
+
+Spow (Lp + %R +c)” +50-%0 =0,
+
+The construction of constraints for Poseidon hash is relatively
+simpler. Poseidon hash is composed of three components —
+ARC(-), S-box(-), and Mix(-), for a single round. Specifically,
+ARC(-) adds a constant to all inputs, S-box(-) performs
+exponentiation wherein the last input of partial round R, and
+all inputs of the full round Ry are raised to the power of 5.
+Similar to Eq. (7). We USE Spow Selector to construct the S-box
+function. In Mix(-), a pre-calculated matrix is used to perform
+vector-matrix multiplication operations for all inputs. We also
+use copy constraints to ensure the consistency of input and
+output between each round.
+
+Token-position mapping. In the multibit scheme, Step
+1 requires looking up the position p for y,, from the token-to-
+position table MZ. PVMark provides a proof for the lookup as it
+is a part of the counting. However, such a mapping M/ cannot
+be disclosed otherwise would allow adversary to infer about
+the relation between token and the value in msg|p] based on
+the publicly available COUNT matrix. This would tempt the
+adversary to remove the watermark from y.
+
+To check the correctness of a set of non-exposable token-
+position mappings in the watermark detection, we require the
+prover to precompute the hash values for all possible token-
+position mappings, use them as leaf nodes to construct a merkle
+tree, and publish the root value in advance. Thus the proof of
+a set of mappings reduces to the proof of membership of hash
+values in the merkle tree.
+
+The membership proof requires the prover to recalculate
+the root value by the values of the sibling nodes in the path
+from the given leaf node to the merkle tree root. If the newly
+calculated root value matches the publicly disclosed one, the
+given leaf node must exist in the merkle tree. The specific
+constraints required for membership proof C,,¢m are as follows:
+
+Ho = Cnasn(y, P; $k),
+
+path; - (1 — path;) = 0,
+
+Hy, = path; - Chasn(Hi-1, Sib;)
+
++ (1 — path;) - Chash(Sib;, Hi_-1),
+H,;, — ROOT = 0,
+
+(8)
+for i = {1,...,£} where y,p,ROOT, sk denote the token
+index, position index, a publicly known Merkle tree root value,
+and the secret key, respectively. The path; € {0,1} refers to
+the left/right child of the Merkle tree nodes, which influences
+the order of hash inputs during computation. S2b; denotes the
+value of sibling node along the path from the given leaf node
+to the merkle tree root.
+
+B. Arithmetize Step 2 in Table {|
+
+In Step 2, we need to compute the corresponding random
+number for the current token y, compare this random number
+with a fixed threshold, and perform an accumulation operation if
+the token is a green token. Hence we arithmetize the comparison
+and summation to prove the step.
+
+Comparison. Assume that X, and X»2 are two numbers
+on finite field F = Z mod p where p is a large prime that
+p > 2%. Without loss of generality, X, < X> if and only if
+X,—X_2 € [p—2%~1,p). Letting X3 = X,—X_—(p—2N—1),
+we have X3 € [0,2%~1') and hence bit decomposition Cpj;
+[31  can be used to check whether X3 is in this range. The
+constraints for comparison Ceomp (X1 < X2) can be written as
+follows:
+
+_                    N-1
+Comal <X2) = (oe MO?    );
+Coit(X3, N — 1, bxs),
+where bx, = [bo,b1,...,bn—1] denotes the binary representa-
+tion of X3. Ceomp(X1 < X2) = 0 suggests X, < X»2 holds
+and all constraints included are satisfied.
+
+(9)
+
+To reduce the number of constraints and thus the overhead
+of ZKP, we optimize the proof of C,;+(-) employing the lookup
+table, a technique that trades space for time. Specifically,
+traditional bit decomposition needs to check the correctness
+of the binary form bit by bit, i.e., using b; - (1 — b;) = 0 to
+check whether b; equals 0 or 1, followed by checking whether
+the weighted sum of b;s equals X3. To avoid the exorbitant
+overhead of bit checking, we propose to check X3 by groups
+of 8 bits, i.e., verifying whether each group lies within the
+range of [0,255], and subsequently check if the weighted sum
+of all groups equals X3. For each group, we predefine the
+range of [0,255] using the lookup table to reduce the number
+of constraints.
+
+Summation. We take KGW as an example to illustrate the
+arithmetization method of summation. To count the number
+of green tokens |y|c, we introduce an auxiliary flag variable
+flg; € {0, 1} to indicate whether token y; belongs to the green
+list G;. The following constraint Cj, verifies the assignment
+of flg;:
+flgi- A — flgi) = 0,
+flgi *Coomp(Ti < 7|F|) = 0,
+
+(1 _ flg:) ‘Coomp(7|F| < ri) = "1
+
+Crig( fla; Ti, y\F|) =
+
+where +|F| denotes the pre-selected threshold and r; represents
+the random number assigned to token y;, which is computed by
+the aforementioned hash function and verified by Cyasy. Then
+we introduce a summation selector ssym and rewrite Eq. as
+
+Ssum * (@1 + %2+...+%n) 4            (11)
+
+to construct the summation constraint C..... (Output; Inputs).
+
+80° Xo = 0,
+
+VII. APPLICATIONS OF PVMARK
+
+In this section, we present how PVMark applies to different
+watermarking schemes to gain public verifiability. The opti-
+mized version using recursive ZKP is also demonstrated with
+examples.
+
+
+===== PAGE BREAK =====
+
+Algorithm 1 Proof Construction for KGW / SynthID-Text
+
+Algorithm 2 Proof Construction for Segment-Watermark
+
+Input: Secret key sk, watermarked text y = [yo,..-,Yn—1],
+recent context window width ~w, green list size y¥,
+threshold y - |F| /  A  the count result |ylg / So,
+the number of g-values assigned to each token €.     _
+
+Output: Proof IT.
+
+1: fori =v,~+4+1,...,n—1 do
+
+2: /* Arithmetize Step 1 */
+
+3: Build Chasn(sdi; sk, Yy)-
+
+4: /* Arithmetize Step 2 */
+
+5: Build Cpasn(g%3sdi,yi) 1 Chasnlgp's sdi,yi,k) for
+
+ke {1,...,€}.
+
+6: Set flg' = 1(g% <y-|F\) / flgi =1(gh' < ©) for
+ke {1,...,€}.
+
+7 Build Crig(flg’,g’.7 > Fl) / Crig(floi. gf’, 44) for
+ke {1,...,€}.
+
+8: end for
+
+9: Build Coum((lyla / Sg: Flg) where Flg = {flg'|i €
+{w,...,n—1}}/ {flgp|i € {v,...,n—1},k © [é]}.
+
+10: D invokes ZKP. Prove(u, w,C) to generate proof 7 where
+u={y,v, oF    slycl/S.8} are the public input, w =
+{sk} denotes the private input and C denotes the set of
+all constraints.
+
+11: Return II = {u, zr}.
+
+A. Verifying Zero-& Multi-Bit Watermarks
+
+PVMark is applied right after the watermark detection phase
+by prover D, requiring the detection results |y|g, 5 ,, COUNT
+and other constants as inputs. The output of proof construction
+is a proof 7 provided to verifier Y who either passes or
+rejects the proof. Since the proving and verification follow
+the conventional ZKP protocols, we mainly focus on the
+proof construction. Hence the proof construction for KGW
+and SynthID-Text is introduced in Alg. |1] whereas that for
+Segment-Watermark is described in aco
+
+We show the proof construction of KGW and SynthID-Text
+in Alg. [1] with distinctions underlined. The algorithm mainly
+includes building Crasn, Crig, and Crum. Then D generates
+proof z for all the constraints and releases 7 and the public
+inputs to Y to carry out proving and verification following
+ZKP protocols.
+
+Combining hash functions. In the original KGW scheme,
+w is set to 1, which allows us to make further adaptations by
+combining two hash functions (Line 3 and 5 of Alg.|1) into a
+three-to-one hash, thereby saving ZKP costs. Specifically, in
+round 7, the random number g® corresponding to the current
+token y; is computed using two hash functions with two
+arguments: one calculates a random seed sd; from sk and
+the previous token’s index y;—1, and the other uses sd; and the
+current candidate token’s index y; to compute g” (ie., Step 1
+and 2 in Table (Ii). We propose to replace them with a single
+function with three arguments:
+
+g’  = Hash(sk, Yi-1; Yi),
+
+which maps the tuple of the secret key, previous token index,
+and current candidate token’s index to a single hash value.
+
+Input: Secret key sk, watermarked text y = [yo,.--,Yn—1],
+recent context window width w, green list size 7, threshold
+y-|F|, token-to-position mapping M : [0,|V|—1] > [0,#-
+1], the root value ROOT of the merkle tree corresponding
+to M, the count result matrix COUNT € Z?*2”,
+
+Output: Proof IT.
+
+1: fori =vy,~+4+1,...,n—1do
+2: Build Cine (Y ysis ROOT).
+
+3: for 7 =0,1,...,2-! do
+
+4        Build Chasn (sd ; sk, Yyrd)-
+
+5:       Build Crash (9#'; j di, Yi):
+
+6     Set flgi = 1(gf' < y-|F)).
+
+7      Build a  constraint  using an addition gate for
+COUNTIpi][J] + = fly’.
+
+8: end for
+
+9: end for
+
+10: D invokes ZKP.Prove(u, w,C) to generate proof 7 where
+u = {y,v,7|F|,ROOT,COUNT} are the public input,
+w = {sk, M} denotes the private input and C denotes the
+set of all constraints.
+
+11: Return II = {u, zr}.
+
+Therefore, for KGW, Lines 3 and 5 in Alg.[I]can be merged into
+‘Build Crasn(g’; sk, yi_-1, yi). This optimization effectively
+reduces the circuit size and the ZKP costs in the detection
+process.
+
+Note that in the original SynthID-Text, % is set to be greater
+than 1, e.g., ~ = 4. When using three-to-one hash functions
+to construct the constraint for Line 3 of Alg.|1| we combine
+pairs of hash functions into one. Therefore, Crasn(sdi; sk, Yy)
+is defined as the set
+
+Crash (H0: sk, y\ [0], y\ (1]),
+Chasn (HS: A), y\ [2], y\ [3]),
+
+Chasn(sdis Hy ys [w ~— 2), y"? [w ~— 1)
+
+where H“’) denotes the corresponding hash results.
+
+We also present in Alg. [2] the proof construction of Segment-
+Watermark, which has an additional contraint Cme,, for
+checking the token-to-position mapping, compared with Alg.
+
+B. Optimization with Recursive ZKP
+
+We observe that for a chosen watermarking scheme and a
+selected hash function, the process of detecting the watermark
+for any token in text y = [yo,.--,Yn—1] follows the same
+steps, as shown in Line 2 to 7 of Alg. |I] and Line 2 to 8
+of Alg. |2| This observation naturally leads us to construct
+the detection process by incrementally verifiable computation
+(IVC), as shown in Eq. (2). Take the KGW as an example, we
+reformulate the calculation of the sum of green tokens as
+
+lla? = F(lyle). 4):               (12)
+Within F’, we compute the random number corresponding to
+y; and compare it with the pre-selected threshold y|F|. If the
+
+
+===== PAGE BREAK =====
+
+Algorithm 3 Proof Construction w/ Recursive ZKP for KGW
+
+Input: Same inputs with Alg.[I| number of tokens per instance
+N;, number of foldings Ny and the secret s;7.
+Output: proof IT.
+
+1: Initialize the number of green tokens ly?    = 0 and
+H = Hash(0, sy).
+2: fori = 1,2,...  NG do
+
+3: Build Chasn(lylo? SH, H®) for consistency check.
+
+4: for 7 =1,2,...,N; do
+
+5:      Invoke Lines 2 to 7 in Alg. [I] to build the constraints
+Crash and Crig:
+
+6: end for
+
+7. Accumulate the increment of ly  to llr?  by adding
+
+up flg? for 1 < 7 < N; and establish the addition
+constraints.
+
+8: Build Chasn (lyr? s7, H+) for consistency check
+where H+) — Hash(|y|{)”, 571).
+
+9: Collect all the above constraints, represent them using
+relaxed RICS, and derive a relaxed RICS instance
+
+Ins(j).
+10: iftA1 then
+11:     Fold Ins) with Ins(j_y  by establishing the con-
+
+straints for folding process as in Eq. (4, and (6)
+to obtain a folded instance Ins(,) (Ins) = Ins,)).
+12: end if
+13: end for
+14: Obtain the final instance Ins(y,):
+
+15: Build Crash (ly\n? Ys 847, 17+) and obtain an addi-
+tional instance Insaq, where wl ner? and H(\s+1) are
+public inputs, and sy is private input.
+
+16: D invokes ZKP.Prove to generate proof 7, and 72 for
+I ns\ Ny) and Insaa, respectively.
+
+17: Return II = {7 1, 72}.
+
+random number is less than the threshold, y; is a green token,
+and we set lyr? = ly | +1. After n — 1 iterations, Ly |?
+represents the count of green tokens in text y.
+
+Given the incremental calculation, we can efficiently generate
+zero-knowledge proofs using Nova’s folding scheme, turning
+the detection of each token in y as a relaxed RICS instance.
+These instances are fold into one final instance by Eq. (4).
+ and (6). Finally, it suffices to use Nova to prove the
+correctness of the final instance and each folding process,
+which are represented as relaxed RICS instances. However, a
+challenge arises as Nova requires the incremental value ll to
+be public, which does not meet the watermarking requirement
+that anything about the green token list should be private to
+prevent removal or ambiguity attacks.
+
+To address this issue, we propose to disclose the hash of
+ly | instead of the value. This modifies Eq. to
+
+Hash(|y|S*"), sir) = F(Hash(|y|, szr),ys), (13)
+
+where s;; is a private input introduced to prevent brute-force
+attacks on the hash. Since hashing is added, each instance
+adds two consistency check to verify 1) whether the private
+input Ly of this round agrees with the output from the
+
+previous round, i.e.,  Line 3 of Alg. 3} 3, 2) whether the public
+hash value Hash( iy! CG   +) #) truely hashes the output of this
+round (yr? ), Le.,  Line 8 of Alg.
+
+Obtaining Hash(|y|2? , 577) through n — 1 iterations of
+folding, we construct an additional instance on the hash
+value Hash(|y|{” , $17) and the public input yl, with sy
+being the private input, to prove the consistency between
+Hash y|0 , 84) and the public lay? , Shown in Line 15 of
+ab The value of |y| 2) is used for subsequent watermark
+score calculation.
+
+In practical applications, there is always a tradeoff between
+the size of each instance and the number of instances,
+which leaves design choices to make. Overall, for the same
+computation, the larger the instance size, the higher the cost
+per instance but there would be fewer instances to verify. In
+PVMark, the choice is the number of tokens to be verified per
+instance. Intuitively, the folding scheme can save ZKP cost if
+the cost of proving an instance exceeds the cost of proving
+a folding. But the savings differ on the choices. Hence we
+analyze the tradeoff per case, as shown in Sec.
+
+We sum up our recursive ZKP for the detection of KGW in
+Alg. |3} The recursive ZKP for the detection of SynthID-Text
+is similar and presented in Alg.4 in the supplementary file.
+
+Note that in the multi-bit watermarking scheme, the detection
+processes for different positions are not IVC processes, since
+the final value of the count result at one position is not
+equal to the initial value of the count result of the next
+position. In contrast, the detection process for the same position
+follows the paradigm of IVC. Therefore, we require the prover
+to group all tokens in the given text y according to their
+corresponding positions before generating the proof, and then
+use recursive ZKP to generate correctness proofs for the
+detection processes of each position in parallel. The recursive
+ZKP for the detection of Segment-Watermark is presented in
+Alg.5 in the supplementary file.
+
+C. Security Analysis
+
+We claim that Alg. and Alg.4 and 5 in the
+supplementary file all generate correctness proofs for the
+watermark detection process without exposing the sk, and
+the probability of using a wrong sk* to generate a proof that
+can deceive the verifier is negligible. This is guaranteed by the
+completeness, soundness and zero-knowledge property of zero-
+knowledge arguments, which have been proved in previous
+work {15}, [32], [33]. We provide the security proof for Alg.
+in the supplementary file, and the proofs for the other four
+algorithms are similar. Moreover, the only viable attack, namely
+owners denying harmful text generation by using an inconsistent
+key, can be prevented by the key commitment in the Setup
+algorithm, where the commitment is implemented in practice
+using a cryptographic hash function.
+
+VIII. EVALUATIONS
+
+Our adaption of the original watermarking schemes is based
+on the assumption that the hash function returns sufficiently
+random and uniformly distributed random values. Hence,
+
+
+===== PAGE BREAK =====
+
+TABLE UI: All variants of the implemented watermark
+detection algorithm, where O@@@ denotes Groth16, Plonk,
+halo2 and Nova, respectively.
+
+Scheme                   Hash variants MiMC _ Poseidon Poseidon2
+KGW                       Two-to-one          O@O®        ®®O®            O@®
+Three-to-one          ®@S®            @®@®                  /
+SynthID-Text                Two-to-one           O®®®            @®@®              O@®
+Segment-Watermark         Two-to-one               i)                  >)                     ®
+
+for PVMark to work in practice, we need to validate the
+assumption first. Besides, all properties of watermarking should
+be examined. Therefore, we aim to answer the following
+research questions by experiments on PVMark: 1) Does our
+adaptation using hash functions as PRF satisfy the randomness
+and uniformity assumption? 2) Does PVMark compromise the
+effectiveness, fidelity, and robustness of the original schemes
+(see the supplementary file)? 3) How efficient is PVMark?
+
+A. Implementation Details and Setup
+
+For the uniformity testing of hash functions, we implement
+SHA256, Keccak256, BLAKE2, MiMC, Poseidon, and Posei-
+don2 in Rust.
+
+For the proof construction of watermark detection, we use
+circom (34). a domain-specific language for defining arithmetic
+circuits, to construct constraints based on circomlib (35).
+These constraints can be compiled into RICS and PLONKish
+circuits through compiler module in circom. ZKP protocol
+Groth16 is used to verify RICS whereas PLONK is used to
+verify PLONKish. We also implemented a variant of Plonk
+— halo2 |36], the KZG-based version, which supports custom
+gates and lookup operations thereby having a smaller circuit and
+better efficiency. We implement MiMC and Poseidon hash chips
+for halo2 to build PLONKish circuits. For the implementation
+of recursive ZKP, we use Nova-Scotia [37]. which can
+compile circom circuits to Nova [38]. All variants of the
+implemented watermark detection are shown in Table [1]
+
+For all ZKP protocols, we choose BN254, a pairing-friendly
+elliptic curve defined over a prime field that currently provides
+approximately 100-bit security level [39], widely used in
+blockchain project such as Ethereum ae Algorand (41).
+BN254 offers faster computation due to its smaller field size
+compared to curves like BLS12-381.
+
+Parameter settings. For watermark embedding and detec-
+tion, we follow the settings of the original work (3). [4]. (12).
+For KGW, we set the green list size ~ = 0.25 and the recent
+context window width ~ = 1. For SynthID-Text, we set the
+recent context window width 7 = 4 and the number of g-
+values assigned to each candidate token € = 30. For Segment-
+Watermark, we set the green list size y = 0.5, the recent
+context window width ~ = 1, the total number of positions
+fA = 6 in msg and the bit length 7 = 4 per position.
+
+All experiments are conducted on a Ubuntu 20.04 server
+with Intel(R) Xeon(R) Gold 6240C CPU with 256GB RAM
+and an NVIDIA GeForce RTX 3090 GPU.
+
+B. Randomness and Uniformity of Hashes
+
+We first evaluate the randomness and uniformity of hash
+functions to validate the proposal of using hash functions as
+
+10
+
+pseudorandom number generators and the rationality of using
+a pre-selected threshold to divide the green and red tokens, or
+assign g-values.
+
+We use the avalanche effect coefficient and chi-square test
+to evaluate the randomness and uniformity of hash functions.
+The avalanche effect is a desirable property of cryptographic
+hash functions, suggesting an average of one-half of the output
+bits should change whenever a single input bit is flipped (42).
+A coefficient closer to 0.5 indicates better adherence to the
+avalanche effect property. We compute the avalanche effect
+coefficient by (43). Let N,, N2 denote the number of input
+bits and output bits, respectively. We set Ny = N2 = 256 for
+SHA256, Keccak256, BLAKE2 hash and N; = No = 254 for
+MiMC, Poseidon, Poseidon2 hash, and execute the algorithm
+5, 000, 000 times to take the average. We show the closeness
+between the coefficient c and 0.5 by calculating the percentage
+of the difference, i.e., 0 A smaller percentage indicates
+better randomness.
+
+To verify the uniformity, we conduct a chi-square goodness
+of fit test, a statistical hypothesis test. The null hypothesis is ‘all
+random numbers used for vocabulary partitioning in each round
+are uniformly distributed in the finite field F defined by BN254’
+If the result x7 is less than the threshold, the null hypothesis is
+accepted, meaning that the random numbers used for vocabulary
+division are uniformly distributed within the value range. We
+average the chi-square test statistics y? over 100, 000 iterations.
+In each iteration, we randomly select a secret key sk € F, a
+previous token index y’ € [0,|V| = 50265), and the current
+token index y” = [0,|V|) to generate |V| random numbers.
+The statistic threshold is 26.296 for significance level a = 0.05.
+
+The avalanche effect coefficient of hash functions and the
+percent rate of the coefficient v.s. 0.5 are shown in the top part
+of Table [IV] The average and standard deviation of multiple
+chi-squared tests statistic y?, along with the success rate of
+passing the tests, are shown at the bottom of Table It
+can be observed that the avalanche effect coefficients of the
+six types of hash functions are all close to 0.5, indicating
+sufficient randomness. On F, MiMC, Poseidon, and Poseidon2
+hash exhibit uniformity, thereby qualifying for our scheme.
+
+Since we have validated the randomness and uniformity of
+hash functions used in PVMark, our adaption theoretically does
+not affect the original watermarking scheme, i.e., an almost
+equivalent performance should be achieved with PVMark. Due
+to space constraint, the effectiveness, fidelity and robustness
+results of the overall watermarking scheme are moved to the
+supplementary file. The conclusion is that the effectiveness,
+fidelity and robustness of watermarking is almost the same with
+or without PVMark, which leaves the efficiency of PVMark to
+be questioned.
+
+C. Efficiency
+
+Proof generation for zero-bit watermarking schemes.
+Fig. [2] and Fig. 3] present the ZKP costs for various PVMark
+variants using four different ZKP protocols: Groth16, halo2,
+Plonk and Nova. ZKP costs include the setup time, prove
+time, verification time, and proof size. We do not present the
+verification time, as the slowest (PlonK) verification time does
+
+
+===== PAGE BREAK =====
+
+TABLE IV: The avalanche effect coefficient and the chi-square statistics of hash functions.
+
+11
+
+The latter three are qualified.
+
+SHA256 hash      Keccak256 hash     BLAKE2 hash      MiMC hash     Poseidon hash    Poseidon2 hash
+Avalanche Effect Coeff.        0.498968            0.498948            0.498960           0.499570          0.499604          0.497579
+Percent Rate (%)             0.206                0.210                0.208               0.086              0.079              0.484
+245           370.322 + 40.496 372.057 + 40.068 370.755 + 40.157 = 10.309 + 5.321    10.218 + 5.180 10.209 + 5.175
+Success Rate (%)              0                   0                   0                 99.1              99.2              99.4
+—~ 10°                               >
+Groth16                                                <     Groth16                    Ty
+£                                  &
+r=]                        —m B1 | 3 403
+a   1                      ele 107
+25       50       100      200 (phy 2%        50       100       200  25       50       100      200 (gy %       50       100      200
+(a)          The Number of Tokens         (  )          The Number of Tokens            (c)         The Number of Tokens          (  )          The Number of Tokens
+PC                                                                      oe Al                      a
+Oo?        Groth16                    halo2                -= 81 Groth16          @
+£7                                                                       ea                       =
+3 ;                                                                                                      3 10%
+a,                                                                                                         10?
+25       50       100      200        25       50       100      200
+
+50           100
+The Number of Tokens
+
+200                                  50               100
+
+The Number of Tokens
+
+The Number of Tokens           (h)          The Number of Tokens
+
+Fig. 2: ZKP costs for PVMark v.s. different numbers of tokens: the left two columns are for detection by KGW and the right
+two columns are for detection by SynthID-Text. A, B,C denote MiMC, Poseidon, Poseidon2 variants, respectively and 1 and 2
+
+represent the use of two-to-one hash and three-to-one hash.
+
+TABLE V: Optimal N;, of PVMark with Nova version v.s. different numbers of tokens (in the format of MiMC/Poseidon/Poseidon2
+
+variants)
+Scheme                                     Number of tokens for watermark detection and verification
+200                     400                     600                     800                     1000                    1200                  1400                  1600                  1800                   2000
+KGW                       25/40/20 40/40/25. = 40/50/30 = 40/50/40 = 50/100/50 ~=—- 60/75/48 ~—- 70/70/50 ~—- 50/80/50 ~—- 72/90/60 ~—80/100/80
+SynthID-Text           8/8/5             10/8/5           12/15/8         16/16/10        20/20/10        20/20/12 20/20/14 20/25/16 = 25/25/18        25/25/20
+TABLE VI: Optimal N; of PVMark with Nova ver-      Since the original settings of KGW and SynthID-Text mostly
+
+sion v.s. different numbers of tokens (in the format of
+MiMC/Poseidon/Poseidon2 variants)
+
+Number of tokens
+240         480
+
+2/2/22 4/4/2
+
+Scheme
+
+60
+1/1/1
+
+120
+2/2/2
+
+960
+S/S/1
+
+1920
+5/8/5
+
+Segment-Watermark
+
+not exceed two seconds, which is far less than the setup and
+prove time.
+
+In Fig.|2} it is found that although the setup time of Groth16
+is higher than that of halo2, their prove time shows the opposite.
+But still, the total time of halo2 is 1-5x faster than Groth16,
+mostly due to our careful design of circuit chips and the lookup
+table employed. PlonK, unfortunately, delivers exorbitant setup
+time and prove time, as its constraints are compiled by the
+universal Circom compiler, and restricted by the high-level
+programming language circom, preventing us from tailoring the
+circuit to the application. Among the variants of hash function,
+the three-to-one hash effectively reduces the cost compared to
+the two-to-one hash, and the saving grows with more tokens
+to be verified. Among all hash variants, Poseidon hash has the
+lowest overhead, exhibiting its suitablity for ZKP protocols.
+Compared to KGW, the detection of SynthID-Text is more
+costly. This is attributed to the more complicated process of
+Tournament sampling and thereby larger ZKP circuits. In fact,
+the circuit is so large that the memory demand is too high for
+us to fully measure the overhead of PlonK.
+
+involve a large number of tokens in watermark detection, we
+thus focus on the case of verifying 200 or more tokens. In
+that case, recursive ZKP shows a much lower cost than others
+as in Fig. |3} It is observed that the setup time for the folding
+process is almost constant and negligible compared to other
+parts. The setup time and prove time for the final instance
+increase with a rise in N; as a single instance grows larger.
+Meanwhile, the decrease in Ny leads to a reduction in the
+prove time for the folding process. We find that for the MiMC,
+Poseidon, and Poseidon2 variants of PVMark, setting N; to 20,
+50, and 25 accordingly results in the minimum total overhead,
+which are around 2*, 2°s for KGW, SynthID-Text, respectively.
+The overhead of detecting a larger number of tokens is shown
+in Fig. |4| When detecting 2000 tokens, the least total time cost
+(setup and prove) is approximately 30s and 175s for KGW and
+SynthID-Text, respectively, where the optimal N; is shown in
+Table |V} Hence we consider the running time is reasonable in
+a watermark verification setting.
+
+Table[VIT]shows the proof size required in detection. Groth16
+has the smallest proof size, less than IKB. Actually, the
+proof sizes of Groth16, halo2, and PlonK are constant for
+25/50/100/200 tokens. This is because Groth16’s proof requires
+only 3 pairing checks, involving 3 group elements, regardless
+of the number of constraints. Both halo2 and PlonK use
+KZG commitments, of which the proof contains a limited
+group element, independent of the number of constraints. Nova
+
+
+===== PAGE BREAK =====
+
+—*— Total Time
+Mmm ST-1
+
+Mmm PT-1
+Mmm PT-2
+
+SJ  S  o  oO  S \o  Ne)  &  vw
+S  YS  Vv  ve  s
+we? ww wy 9 a9) BS 2 cS) eS Ss cS)
+
+S QO YD Ho O Oo © & vw
+PPP  rw
+Ph WH gh gh ag WF BONS)
+
+Poseidon2-*— Total Time  Mmm PT-1
+6         Mmm ST-1     Mmm PT-2
+
+Ss)  S ES  )  _)  So  &  Vv Ww
+(c) Pah oh sh oh 9 SSS
+
+Ni/Ny                              Ni/Ny                              Ni/Ny
+ae  —®— Total Time  Mmm ST-2  Mmm PT-2/_      2  —@— Total Time  Mmm ST-2  Mm PT-2         8  —@— Total Time  Mmm ST-2  Mmm PT-2
+mmm ST-1     mmm PT-1                  mmm ST-1     mmm PT-1        |      2° | mm ST=1     im PTI
+96                 MiMC                     |             TR 96              Poseidon                  a an                        Poseidon2
+
+S ODD oO GO OB WO Vk WW YW
+SWF PF WP WP OS
+SPQ WN" a9" ep eY eg iS)
+
+N./Ny
+
+S PPP PHP Ow® © QW
+(e) Sa Wa gh Pr eo gis
+
+Ni/ Ny
+
+S OS wo S QD SG i Vv Ww
+PPP VW  rw
+Ph Wh gh BY BY OY GS
+
+N,/Ny
+
+12
+
+Fig. 3: ZKP costs for Nova version of PVMark v.s. varying N;, N¢ (Ny x Ny = 200 tokens): the upper row is for detection by
+KGW and the lower row is for detection by SynthID-Text. ST-1, ST-2 denote the setup time to prove the final instance and the
+folding process, respectively, and PT-1, PT-2 are their prove time correspondingly. The total time cost is ST-1 + ST-2 + PT-1 +
+
+PT-2.
+2 14) -e mmc KGW                £ 3g1-@ Mic SynthID-Text         2 274 -@ Mime     Segment-
+© 124 —fi-_Poseidon                      o     -f- Poseidon                      o     -fi- Poseidon
+€     —@ Poseidon2                      E 30 +--@ Poseidon2                      € 217 -@ Poseidon2  Watermark
+Fo]                                -                                    F yc]
+o                                                    o 22)                                               5 15
+2g                        2 14)                     B94
+n      JIM «6      ~~ w 318
+400 800 1200 1600 2000         400 800 1200 1600 2000       60 120 240 480 960 1920
+
+(a)        The Number of Tokens          (b)        The Number of Tokens           (c)        The Number of Tokens
+W 327 -=e mim                         q 320                         a     —@ mimc     Segment-
+wv        imc KGW             oo" |-@ mmc SynthID-Text        S974 peceid      9g
+
++i Poseidon                        260  ME Poseidon                      o     =f Poseidon
+w 54]                         w                                          -@ Poseidon2 Watermark
+€     ~@ Poseidon2                     © 200 {--@-. Poseidon2                    €74;4     oseldon
+—                                   i                                    -E
+16]                                140-                              gy 51
+
+S                                    >
+8 8]                                5 80:                               S 28)
+400 800 1200 1600 2000          400 800 1200 1600 2000       60 120 240 480 960 1920
+
+(d)        The Number of Tokens          (e)        The Number of Tokens          (f)        The Number of Tokens
+
+Fig. 4: ZKP costs for Nova version of PVMark v.s. different numbers of tokens: the
+
+time and prove time is minimized.
+
+TABLE VII: Proof sizes (KB) of the detection of KGW for
+200 tokens. The most cost-effective N;, Ny are adopted for
+Nova.
+
+Poseidon2
+
+ZKP              MiMC             Poseidon
+2tol 3tol 2tol  3tol           2tol
+Groth16       0.8         0.8         0.8         0.8             0.8
+halo2            14           14           14           14                  /
+PlonK     2.3     2.3     2.3     2.3       2.3
+Nova         10.2         /                                         10.5
+
+10.5     /
+
+utilizes Spartan at its core, a ZKP where proof size is
+logarithmically related to the number of constraints, but still
+the proof size is adequately small for 200 tokens.
+
+Proof generation for multi-bit watermarking schemes.
+
+setting of NV; is such that the sum of setup
+
+Compared to the zero-bit watermark, it takes more constraints
+to verify the detection of Segment-Watermark. Hence we
+choose the Nova variant of PVMark to generate proofs for
+cost consideration. It is worth noting that the detection for
+different positions of the message in Segment-Watermark can
+be performed in parallel. Thus we display in the rightmost of
+Fig. [4] the ZKP costs required for different numbers of tokens
+in verifying a single position of the watermark.
+
+It can be observed that when the Poseidon hash function
+is used as the pseudorandom generator, the ZKP costs are
+minimized. When the number of tokens to be verified is 1920
+(i.e., for 6 positions, with each position requiring checking
+320 tokens), the optimal setup time and prove time are
+approximately 13 and 62 seconds, which we consider to be a
+fully acceptable cost. The optimal N; is shown in Table
+
+
+===== PAGE BREAK =====
+
+IX. CONCLUSION
+
+To resolve the trust issue in LLM watermark detection, we
+propose PVMark, a plugin that enables zero-bit and multi-
+bit LLM watermarking schemes to gain public verifiability
+without compromising the original schemes’ performance. The
+design is featured by the application of zero-knowledge proof to
+prove the correctness of watermark detection process, without
+revealing any credential. To achieve this, we redesigned the
+watermark embedding and detection schemes to align with ZKP,
+including introducing hash functions as PRFs, customizing the
+circuits, applying recursive ZKP, etc. We hope PVMark not
+only contributes to the watermarking community, but also to a
+wider area of applied ZKP research.
+
+[10
+
+{ll
+
+[12
+
+{13
+
+[14
+
+[15
+
+[16
+
+[17
+
+REFERENCES
+
+Y. Pan, L. Pan, W. Chen, P. Nakov, M.-Y. Kan, and W. Y. Wang, “On
+the risk of misinformation pollution with large language models,” 2023.
+[Online]. Available: hips: //arxiv.org/abs/2305.1366 1)
+
+C. Vasilatos, M. Alam, T. Rahwan, Y. Zaki, and M. Maniatakos,
+“Howkgpt: Investigating the detection of chatgpt-generated university
+student homework through context-aware perplexity analysis,” 2023.
+[Online]. Available: /https://arxiv.org/abs/2305.18226)
+
+J. Kirchenbauer, J. Geiping, Y. Wen, J. Katz, I. Miers, and T. Goldstein,
+“A watermark for large language models,” in International Conference
+on Machine Learning. PMLR, 2023, pp. 17061-17084.
+
+S. Dathathri, A. See, S. Ghaisas, P.-S. Huang, R. McAdam, J. Welbl,
+V. Bachani, A. Kaskasoli, R. Stanforth, T. Matejovicova et al., “Scalable
+watermarking for identifying large language model outputs,” Nature, vol.
+634, no. 8035, pp. 818-823, 2024.
+
+T. Lee, S. Hong, J. Ahn, I. Hong, H. Lee, S. Yun, J. Shin, and
+G. Kim, “Who wrote this code? watermarking for code generation,”
+2024. [Online]. Available: [htps:(/arxiv.org/abs/2305.15060)
+
+L. Wang, W. Yang, D. Chen, H. Zhou, Y. Lin, F Meng,
+J. Zhou, and X. Sun, “Towards codable watermarking for injecting
+multi-bits information to Ilms,” 2024. [Online]. Available:
+/larxiv.org/abs/2307.15992
+
+K. Yoo, W. Ahn, J. Jang, and N. Kwak, “Robust multi-bit natural language
+watermarking through invariant features,’ in ACL, 2023, pp. 2092-2115.
+J. Kirchenbauer, J. Geiping, Y. Wen, M. Shu, K. Saifullah, K. Kong,
+K. Fernando, A. Saha, M. Goldblum, and T. Goldstein, “On the
+reliability of watermarks for large language models,” 2024. [Online].
+Available: [tipsarsivorslabs/2306.04634
+
+X. Zhao, P. Ananth, L. Li, and Y.-X. Wang, “Provable robust
+watermarking for ai-generated text,’ 2023. [Online]. Available:
+
+https://arxiv.org/abs/2306.17439:
+Z. Hu, L. Chen, X. Wu, Y. Wu, H. Zhang, and H. Huang, “Unbiased
+
+watermark for large language models,’ 2023. [Online]. Available:
+
+https://arxiv.org/abs/23 10.10669:
+Y. Wu, Z. Hu, J. Guo, H. Zhang, and H. Huang, “A resilient and
+
+accessible distribution-preserving watermark for large language models,”
+2024. [Online]. Available: https://arxiv.org/abs/2310.07710)
+
+W. Qu, W. Zheng, T. Tao, D. Yin, Y. Jiang, Z. Tian, W. Zou, J. Jia, and
+J. Zhang, “Provably robust multi-bit watermarking for ai-generated text,”
+2025. [Online]. Available: [htps://arxiv.org/abs/2401.16820)
+
+J. Fairoze, S. Garg, S. Jha, S. Mahloujifar, M. Mahmoody, and M. Wang,
+“Publicly-detectable watermarking for language models,” 2024. [Online].
+Available: ips. farxv.orfabs/2310. 18491
+
+A. Liu, L. Pan, X. Hu, S. Li, L. Wen, I. King, and S. Y. Philip, “An
+unforgeable publicly verifiable watermark for large language models,”
+in The Twelfth International Conference on Learning Representations,
+2023.
+
+A. Kothapalli, S. Setty, and I. Tzialla, “Nova: Recursive zero-knowledge
+arguments from folding schemes,” in Annual International Cryptology
+Conference. Springer, 2022, pp. 359-388.
+
+K. Krishna, Y. Song, M. Karpinska, J. Wieting, and M. Iyyer, “Para-
+phrasing evades detectors of ai-generated text, but retrieval is an effective
+defense,” Advances in Neural Information Processing Systems, vol. 36,
+2024.
+
+E. Mitchell, Y. Lee, A. Khazatsky, C. D. Manning, and C. Finn,
+“Detectgpt: Zero-shot machine-generated text detection using probability
+curvature,” in International Conference on Machine Learning. PMLR,
+2023, pp. 24 950-24 962.
+
+18
+
+19
+
+20
+
+21
+
+22
+
+23
+
+24
+
+25
+
+26
+
+27
+
+28
+
+29
+
+31
+
+41
+
+42
+
+43
+
+44
+
+13
+
+V. Verma, E. Fleisig, N. Tomlin, and D. Klein, “Ghostbuster: Detecting
+text ghostwritten by large language models,” in ACL, Jun. 2024, pp.
+1702-1717.
+
+A. Hans, A. Schwarzschild, V. Cherepanova, H. Kazemi, A. Saha,
+M. Goldblum, J. Geiping, and T. Goldstein, “Spotting lms with
+binoculars: Zero-shot detection of machine-generated text,’ 2024.
+[Online]. Available: /https://arxiv.org/abs/2401.12070)
+
+A. M. Elkhatat, K. Elsaid, and S. Almeer, “Evaluating the efficacy of ai
+content detection tools in differentiating between human and ai-generated
+text,” International Journal for Educational Integrity, vol. 19, no. 1, p. 17,
+2023.
+
+X. Zhao, P. V. Ananth, L. Li, and Y.-X. Wang, “Provable robust
+watermarking for Al-generated text,’ in The Twelfth International
+Conference on Learning Representations, 2024.
+
+Q. Pang, S. Hu, W. Zheng, and V. Smith, “No free lunch in
+Ilm watermarking: Trade-offs in watermarking design choices,” 2024.
+[Online]. Available: [htps://arxiv.org/abs/2402.16187,
+
+E. Barker and J. Kelsey, “Recommendation for random number generation
+using deterministic random bit generators,” 2015-06-24 2015.
+
+R. C. Tausworthe, “Random numbers generated by linear recurrence
+modulo two,” Mathematics of Computation, vol. 19, no. 90, pp. 201-209,
+1965.
+
+L. Blum, M. Blum, and M. Shub, “A simple unpredictable pseudo-
+random number generator,’ SIAM Journal on computing, vol. 15, no. 2,
+pp. 364-383, 1986.
+
+M. Matsumoto and T. Nishimura, “Mersenne twister: a 623-dimensionally
+equidistributed uniform pseudo-random number generator,’ ACM Trans-
+actions on Modeling and Computer Simulation, vol. 8, no. 1, pp. 3-30,
+1998.
+
+G. Marsaglia, “Xorshift mgs,” Journal of Statistical software, vol. 8, pp.
+1-6, 2003.
+
+M. Albrecht, L. Grassi, C. Rechberger, A. Roy, and T. Tiessen,
+“Mime: Efficient encryption and cryptographic hashing with minimal
+multiplicative complexity,” in International Conference on the Theory
+and Application of Cryptology and Information Security. Springer, 2016,
+pp. 191-219.
+
+L. Grassi, D. Khovratovich, C. Rechberger, A. Roy, and M. Schofnegger,
+“Poseidon: A new hash function for {Zero-Knowledge} proof systems,”
+in 30th USENIX Security Symposium, 2021, pp. 519-535.
+
+L. Grassi, D. Khovratovich, and M. Schofnegger, “Poseidon2: A faster
+version of the poseidon hash function,” in International Conference on
+Cryptology in Africa. Springer, 2023, pp. 177-203.
+
+S. Setty, V. Vu, N. Panpalia, B. Braun, A. J. Blumberg, and M. Walfish,
+“Taking proof-based verified computation a few steps closer to practicality,”
+in 21st USENIX Security Symposium, 2012, pp. 253-268.
+
+J. Groth, “On the size of pairing-based non-interactive arguments,” in
+Advances in Cryptology-EUROCRYPT. Springer, 2016, pp. 305-326.
+
+A. Gabizon, Z. J. Williamson, and O. Ciobotaru, “PLONK: Permutations
+over lagrange-bases for oecumenical noninteractive arguments of
+knowledge,” Cryptology ePrint Archive, 2019. [Online]. Available:
+
+https://eprint.iacr.org/2019/953
+iden3, “Circom,” |https://github.com/iden3/circom
+
+—., “circomlib,”
+Zcash, “halo2,” |https://github.com/zcash/halo2
+nalinbhardwaj,    “Nova-scotia,”
+
+https://github.com/nalinbhardwaj
+ 2023,
+microsoft, “Nova,” https://github.com/microsoft/Nova| 2022.
+
+T. Kim and R. Barbulescu, “Extended tower number field sieve: A
+new complexity for the medium prime case,” in Annual international
+cryptology conference. Springer, 2016, pp. 543-571.
+
+G. Wood et al., “Ethereum: A secure decentralised generalised transaction
+ledger,” Ethereum project yellow paper, vol. 151, no. 2014, pp. 1-32,
+2014.
+
+J. Chen and S. Micali, “Algorand,’ 2017.
+
+https://arxiv.org/abs/1607.01341
+
+A. F. Webster and S. E. Tavares, “On the design of s-boxes,” in Conference
+
+[Online]. Available:
+
+on the theory and application of cryptographic techniques. Springer,
+1985, pp. 523-534.
+
+A.     Sateesan.     (2020)    Analyze your hash _functions:
+The avalanche metrics    calculation.    [Online].    Available:
+
+https://arishs.medium.com/analyze- your-hash-functions-the-avalanche\
+S. Setty, “Spartan: Efficient and general-purpose zksnarks without trusted
+setup,” in Annual International Cryptology Conference. Springer, 2020,
+pp. 704-737.
+

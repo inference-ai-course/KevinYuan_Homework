@@ -1,0 +1,890 @@
+2510.25069v1 [cs.CL] 29 Oct 2025
+
+arXiv
+
+TOPol: Capturing and Explaining
+Multidimensional Semantic Polarity Fields and Vectors
+
+Gabin Taibi | *, Lucia Gomez *°,
+
+University of Twente
+Bern University of Applied Sciences
+University of Geneva
+gabin.taibi@utwente.nl
+lucia.gomezteijeiro @bfh.ch
+
+Abstract
+
+Semantic polarity in computational linguistics has tradition-
+ally been framed as sentiment along a unidimensional scale.
+We here challenge and advance this framing, as it oversim-
+plifies the inherently multidimensional nature of language.
+We introduce TOPol (Topic-Orientation Polarity), a semi-
+unsupervised framework for reconstructing and interpreting
+multidimensional narrative polarity fields given human-on-
+the-loop (HoTL) defined contextual boundaries (CBs). TOPol
+begins by embedding documents using a general-purpose
+transformer-based large language model (tLLM), followed by
+a neighbor-tuned UMAP projection and topic-based segmen-
+tation via Leiden partitioning. Given a CB between regimes A
+and B, the framework computes directional vectors between
+corresponding topic-boundary centroids, producing a polar-
+ity field that captures fine-grained semantic displacement for
+each discourse regime change. TOPol polarity field reveals
+CB quality as this vectorial representation enables quantifi-
+cation of the magnitude, direction, and semantic meaning of
+polarity shifts, acting as a polarity change detection tool di-
+recting HoTL CB tuning. To interpret TOPol identified po-
+larity shifts, we use the tLLM to compare the extreme points
+of each polarity vector and generate contrastive labels with
+estimated coverage. Robustness tests confirm that only the
+definition of CBs, the primary HoTL-tunable parameter, sig-
+nificantly modulates TOPol outputs, indicating methodolog-
+ical stability. We evaluate TOPol on two corpora: US Cen-
+tral Bank speeches upon a macroeconomic breakpoint as CB,
+where semantic shifts are non-affective, and Amazon product
+reviews upon rating strata as CB, where sentiment dominates
+and therefore TOPol interpretation strongly aligns with NRC
+valence. Results show that TOPol reliably captures both af-
+fective and non-affective polarity transitions, those naturally
+emerging from the data, offering a scalable, generalizable,
+context-sensitive and interpretable approach to HoTL-guided
+multidimensional discourse analysis.
+
+Code and Data — https://osf.io/nr94j/?view_only=
+a787f6e842b64bd4a0bc0344872e leec
+
+Introduction
+
+Sentiment Polarity scoring has long occupied a central po-
+sition in Natural Language Processing (NLP), treated as a
+synonym of Semantic Polarity since its inception, addressed
+within the scope of Sentiment Analysis, conceptualized as a
+
+scalar indicating the extent to which a text encodes a posi-
+tive or negative perspective about an object (Mantyla, Grazi-
+otin, and Kuutila 2018). Recent works dealing with Polarity
+Classification, still framed in the lens of sentiment, however
+seek to move beyond affective components for capturing di-
+mensions such as sarcasm (Prasanna, Shaila, and Vadivel
+2023). While this sentiment-centric framing of polarity has
+proven powerful, it overlooks the multidimensional nature
+of semantic orientation.
+
+In response, recent academic efforts are challenging this
+unidimensional view by developing multi-label and fine-
+grained affective models (Demszky et al. 2020), and pro-
+gressively extending polarity modeling beyond sentiment-
+centric paradigms (Hofmann et al. 2021). These efforts
+demonstrate that semantic analysis cannot be reduced to sin-
+gle evaluative scales, as such reductions introduce bias by
+overlooking the multidimensional context and perspectival
+complexity in which meaning is embedded.
+
+Topic Modeling (TM), the second most used NLP analy-
+sis methodology, can capture topical dimensions in text cor-
+pura, but it is designed to describe topical diversity rather
+than semantic orientation, and usually does so in a static
+manner. Recent advancements in TM explore context-aware
+(Grootendorst 2022) and dynamic topic reconstruction over
+time (Adhya and Sanyal 2025). However, these new ap-
+proaches do not capture the full spectrum of semantic di-
+rectionality, evidencing the need for methods capturing se-
+mantic dynamism in a truly multidimensional manner, a rep-
+resentation solution we conceptualize here as Semantic Po-
+larity Vector Fields.
+
+We introduce TOPol (Topic-Orientation Polarity), the
+first framework for reconstructing and interpreting multidi-
+mensional Semantic Polarity Fields. It retrieves the vectorial
+transformations between topic-aligned discourse subsets by
+combining tLLM embeddings with manifold learning, and
+computes polarity vector fields based on cluster centroid
+displacements. This enables capturing the vectorial struc-
+ture, magnitude, directionality, and underlying polarity di-
+mensions of semantic change.
+
+TOPol advances the NLP representation toolkit by flex-
+ibly modeling the change of meaning across human-on-
+the-loop (HoTL) defined contextual boundaries (CBs). We
+show that when applied to non-sentiment driven cor-
+pora, TOPol reveals novel semantic dimensions such as
+
+
+===== PAGE BREAK =====
+
+TOPol
+a         Hw
+
+embeddings
+
+:                          S           dense
+
+/ |    ‘o           Ss        OQ
+&Q  oO
+VA                           2.
+—yw
+a
+Contextual Boundary (HoTL)
+
+Figure 1: Architecture of TOPol
+
+confidence-doubt or transparency-obfuscation, expanding
+the analytical vocabulary for interpretive NLP. Conversely,
+when applied to sentiment-driven corpora, it reconstructs
+mainly, but not only, sentiment polarity dimensions, such
+as disappointment-enjoyment, confirming that TOPol vastly
+extends sentiment analysis into a broader class of multidi-
+mensional semantic polarity analysis.
+
+In summary, our contributions can be summarized as fol-
+lows:
+
+e We identify a critical gap in current semantic polarity
+modeling: existing NLP tools inadequately represent the
+multidimensional structure of polarity.
+
+* We propose Topic-Orientation Polarity (TOPol), a novel
+semantic representation framework for reconstructing
+multidimensional semantic polarity fields and dimen-
+sions of change, being flexible to HoTL context-
+awareness.
+
+e We introduce a contrastive explainability mechanism
+based on LLMs, which interprets polarity dimensions
+emerging from vector fields, and demonstrate its ef-
+ficiency as compared to traditional lexicon based ap-
+proaches.
+
+¢ We validate TOPol on sentiment-driven and non-
+sentiment-driven corpora, demonstrating its ability to re-
+cover context-sensitive polarity dimensions across do-
+mains and extending the traditional sentiment analysis
+realm.
+
+¢ We perform robustness checks for each TOPol core
+component, showing that polarity field reconstruction is
+structurally stable under perturbations, while the HoTL
+CB definition is the key driver of variation in output.
+
+Preliminary
+
+We begin by formalizing the core elements of the TOPol
+framework, which objective is to model semantic polarity as
+a vector field induced by shifts in discourse across contex-
+tual boundaries.
+
+Definition 1 (Contextual Boundary). A contextual
+boundary (CB), though it can be extended to more subsets,
+is here demonstrated as a partition of the corpus into two
+disjoint subsets D4 and Dz, corresponding to regimes A
+and B, whether derived from the discourse or externally de-
+fined. This boundary induces a directional comparison from
+A-— B.
+
+Definition 2 (Topic Clustering). Given the LLM embed-
+ding space Z, we apply Uniform Manifold Approximation
+and Projection (UMAP) followed by Leiden clustering to
+obtain a set of & latent topics T = {T71,To,..., 7%}, where
+each T; C Z represents a topic cluster.
+
+Definition 3 (Centroid Pair). For each topic T;, we com-
+pute its contextual centroids:
+
+1        1
+way 2 Ope de,”
+
+zeDA                                  zEDP
+
+where Df = T; Da and DP = T; Dz.
+Definition 4 (Polarity Vector). The polarity vector for
+topic T; is defined as:
+
+vi= Me — wi
+which encodes the semantic displacement of topic T; across
+the contextual boundary.
+Definition 5 (Semantic Polarity Field). The narrative po-
+larity field is defined as the set of polarity vectors across all
+topics:
+
+.         B    A
+V = {v1,V2,--.,ve},  with  Vi= by — Hi
+
+Each vector v; is represented in a shared coordinate system
+and rooted at a common origin, forming a vector field in a
+normed vector space. This structure captures both the mag-
+nitude and direction of semantic displacement for each topic
+across the contextual boundary from regime A to regime B.
+
+Methodology
+
+In this section, we describe the proposed TOPol framework,
+as illustrated in Figure 1. The pipeline reconstructs multi-
+dimensional semantic polarity fields and interprets the un-
+derlying polarity vectors that encode topic-specific semantic
+shifts contained in the discourse. TOPol begins by generat-
+ing dense vector representations for each document in the in-
+put corpus using a general-purpose transformer model. Next,
+it applies UMAP (McInnes, Healy, and Melville 2020) on
+these embeddings, yielding a non-linearly reduced seman-
+tic manifold in which document proximity reflects topical
+similarity. TOPol then partitions the manifold using the Lei-
+den (Traag, Waltman, and van Eck 2019) community de-
+tection algorithm, grouping semantically related documents
+in latent topics. Each topic cluster, or community, is further
+subdivided into two (or more) context-specific subsets, de-
+noted A and B, according to the HoTL-defined contextual
+boundary. For each cluster, TOPol then computes a polarity
+vector for each Leiden community by calculating the vector
+displacement between the centroid of documents in regime
+A and the centroid of documents in regime B. These vectors
+are then anchored to a shared origin, forming a vector field in
+a normed vector space, the so-called semantic polarity field
+for the corpus. Finally, to interpret the polarity dimensions
+contained in each polarity vector, potentially several per vec-
+tor, we apply a tLLM-based contrastive explainability pro-
+cedure. Specifically, for each polarity vector, we provide the
+tLLM with the document subsets nearest to centroids A and
+B and prompt it to generate contrastive summaries describ-
+ing the dominant semantic distinctions between regimes A
+
+
+===== PAGE BREAK =====
+
+and B, along with their estimated coverage and exemplar
+text captions.
+
+Defining Contextual Boundaries
+
+The process of identifying and defining meaningful CBs is
+central to TOPol results, as shown afterwards in Experi-
+ments section. Therefore, TOPol does not conceive this as
+an algorithmic tunable parameter but is rather an HoTL de-
+cision. CBs define meaningful narrative regimes under com-
+parison, bound to specific research questions, and determine
+the granularity of the polarity vectors that TOPol detects
+and explains. CBs may originate from external events or in-
+ternal shifts in discourse, or a combination of both. In this
+study, we show the operationalization of CB definition both
+on external and internal regime detections, on Central Bank
+speeches and Amazon customer reviews respectively. Also,
+here we confine CB definition as a 2-set split of a given text
+corpus, but this can be adapted to cover vectors with as many
+intermediate steps as desired, or even defined by combining
+complementary regime splits into multi-category regimes.
+
+Reconstructing Semantic Polarity Fields
+
+The modeling of directional semantic change across the dis-
+course regimes defined by CBs is achieved by reconstructing
+the semantic polarity field of the corpora under study.
+
+Let D = {dj,do,...,d,} be a corpus of text docu-
+ments. We obtain dense semantic embeddings z; € R™
+for each document d; using a general-purpose tLLM pre-
+trained on large corpora. The output is a set of embed-
+dings Z = {z1,...,Zn}, where each 2; = tLLM(d;) cap-
+tures contextual semantic information in a high dimensional
+space. While the tLLM embedding space is semantically
+rich, it can result in prohibitive computational costs and may
+not be well-suited for downstream manifold-based cluster-
+ing. To address this, we apply UMAP to preserve local topo-
+logical structures, narrative latent topics, by mapping each
+z,; to a low-dimensional representation u; € R¢, obtaining
+the projection’ = {uy,..., Un} C R%, where semantically
+similar documents are located near to each other, preserving
+discourse topology.
+
+Next, we construct a k-nearest neighbor graph over the
+projected vectors U/ and apply the Leiden community de-
+tection algorithm, optimizing modularity and ensuring clus-
+ter connectivity. This results in a set of & topic clusters
+T = {T1,72,.--, Tx}, where each 7; C U represents a
+geometrically stable, semantically and topologically coher-
+ent topic. Given a contextual boundary (CB) defined by a
+human-on-the-loop (HoTL) operator, we partition each clus-
+ter 7; into two subsets 7,“ and 7;”, corresponding to doc-
+uments from discourse regimes A and B (see Preliminar-
+ies section), though this can be expanded to more than two
+regimes or to multi-category regimes (see Conclusions).
+
+For each topic 7;, we compute centroids pa and yx for
+subsets A and B, and the polarity vector for topic 7; is then:
+vi = pe pa, These vectors represent the semantic dis-
+placement of each topic from regime A to regime B. All po-
+larity vectors v; are finally rooted at a common origin for
+creating a vector field V = {v,,vo,...,Vv,} in a normed
+
+vector space, the foundation for subsequent TOPol inter-
+pretability. Each vector encodes both magnitude ||v;|| and
+direction of semantic change, allowing the analysis of field
+properties .
+
+Revealing TOPol Dimensions
+
+Once the semantic polarity field has been reconstructed, the
+final step of the TOPol pipeline is to interpret the meaning
+of each polarity vector v;, which captures the semantic dis-
+placement of a topic across a contextual boundary. We pro-
+pose a discovery approach based on contrastive explainabil-
+ity mechanism and which leverages large language models
+(LLMs) capabilities. For each vector v;, we select the top-n
+nearest documents to the centroids 4 and ys? in the re-
+duced semantic space. Let V4 and NV? denote these lo-
+cal document neighborhoods: V4 = Top-n(u), NP =
+Top-n(uP). NA and NP are passed to the LLM, which is
+prompted to identify salient semantic distinctions between
+the two sides of the polarity vector. The output of this ex-
+plainability layer includes: a natural language label set for
+the poles of each dominant semantic difference between V/A
+and NP, a quantitative coverage estimate for each dimen-
+sional pole on each subset, and a list of the most representa-
+tive sentences and keywords for each polar dimension.
+
+Experiments
+
+We conducted extensive experiments for empirical testing
+and robustness assessment of TOPol performance. This sec-
+tion details the experimental setup and results for the ba-
+sic formulation and perturbation variations of TOPol on two
+distinct datasets.
+
+Experimental Setup
+
+Datasets. We evaluate TOPol on two corpora chosen
+for their contrasting semantic properties: one is nearly
+sentiment-absent, the other is sentiment-dense. The first is a
+macroeconomic discourse dataset composed of 2,342 U.S.
+central bank speeches extracted from the BIS repository.
+These long-form documents, characterized by low affect
+and technical language, were filtered from a larger multilin-
+gual corpus. and segmented using a PCA-based macroeco-
+nomic index. We define a contextual boundary using regime
+segmentation derived from a PCA-constructed macroeco-
+nomic index, selecting the May 2007 breakpoint preceding
+the Global Financial Crisis. This yielded a final dataset of
+600 speeches divided into pre- and post-crisis regimes. The
+second corpus is a sentiment-saturated dataset: a balanced
+subset of 10,000 Amazon product reviews, evenly sampled
+from positive and negative ratings. These short, affect-rich
+texts offer a natural benchmark for evaluating polarity inter-
+pretation.
+
+Due to structural differences between the corpora, we an-
+alyze them separately, and chose different contextual bound-
+ary logic: a time-based segmentation for the speeches and a
+sentiment-based split for the reviews.
+
+Transformer Models. While TOPol is model-agnostic
+and compatible with any transformer-based embedding or
+
+
+===== PAGE BREAK =====
+
+generative model, we deliberately selected two complemen-
+tary models that balance characteristics, performance and in-
+terpretability. For document embedding, we used OpenAI’s
+text-embedding-3-small, a general-purpose model offering
+strong cross-domain generalization, high throughput, and
+low computational cost—well suited for large-scale mani-
+fold construction.
+
+For the contrastive explainability layer, we opted for
+Google’s gemini-2.5-flash, a state-of-the-art language model
+distinguished exceptionally high input token limit of
+1,048,576—far exceeding that of comparable models such
+as OpenAI’s gpt-40-mini (128,000 tokens). This extensive
+context window enables the model to ingest dense docu-
+ment neighborhoods in a single pass, a critical requirement
+for coherent polarity dimension labeling and high-coverage
+contrastive interpretation.
+
+Default Hyperparameters In addition to the perturba-
+tion experiments discussed later on, we maintained a fixed
+set of default hyperparameters across all datasets to ensure
+methodological consistency. The selected hyperparameters
+reflect informed defaults grounded in the theoretical behav-
+ior of UMAP and Leiden algorithms, particularly with re-
+spect to preserving local topology and optimizing commu-
+nity granularity. Perturbation scenarios were constructed by
+applying substantial deviations from these defaults to test
+the resilience of polarity field reconstruction under extreme
+yet plausible configurations.
+
+Semi-supervised Reconstruction of Narrative
+Polarity Vector Field and Shifts
+
+We first evaluate the capacity of TOPol to reconstruct po-
+larity vector fields in a semi-supervised setting, relying on
+the CB definition and the intrinsic structure of the discourse.
+This analysis assesses whether the polarity vectors naturally
+reflect coherent and interpretable semantic shifts without re-
+lying on predefined labels or external supervision.
+
+Multidimensional Profiling. Having extracted the se-
+mantic displacement across contextual boundaries in the
+form of centroid drift vectors, we next assess the statisti-
+cal and structural significance of the resulting polarity field.
+The first step involves comparing the polarity field induced
+by the HoTL-defined CB with those obtained under random
+CBs. This procedure provides a baseline to evaluate whether
+the observed semantic displacement is meaningful or could
+arise by chance.
+
+Random CBs are generated by randomly permuting the
+CB assignment column, effectively decoupling the doc-
+uments from their original regime labels while preserv-
+ing topic composition. Figures 2a and 2b illustrate two-
+dimensional projections of polarity vector fields computed
+from the HoTL-defined CB (left) and a randomly generated
+CB (right) for both the U.S. central bank speeches and Ama-
+zon review datasets. In both datasets, the vector fields gen-
+erated under the HoTL CB exhibit greater coherence and
+alignment than those under random CBs (Table | and 2). In
+the Amazon dataset, the vector field aligns strongly with the
+primary semantic axis that separates positive and negative
+sentiment across dense product-specific clusters (Figure 2b).
+
+In contrast, the speech dataset reveals more heterogeneous
+and dispersed polarity shifts, suggesting multiple semantic
+dimensions underlie the observed transitions (Figure 2a).
+
+To generalize this comparison, we perform N = 1000
+simulations of random CBs and compute two key metrics:
+(1) the average magnitude of polarity drifts, a proxy for the
+overall strength of semantic displacement:
+
+1  k
+n= 2 >> IWvil
+t=1
+
+and (2) the average pairwise cosine similarity among
+drifts which reflects the alignment of directional change
+across topics:
+
+5=     >  3
+O44, al
+where TepT is the cosine similarity measure between two
+
+vectors x and y. A high overall drifts cosine similarity sug-
+gests a low-dimensional, coherent polarity shift, whereas a
+low value indicates the presence of diverse and potentially
+orthogonal polarity dimensions.
+
+The significance of the observed polarity shift is assessed
+via a non-parametric test. Specifically, the p-value is com-
+puted as:
+
+_ 1+ an Lin; >Mnon
+7           N+1
+
+where MyoTL is the average drift magnitude under the
+HoTL-defined CB, and ™m, are those obtained from random
+CBs.
+
+For the U.S. central bank speeches, the average cosine
+similarity among polarity vectors is 5 = 0.12, likely indi-
+cating a dispersed, multidimensional semantic change, as
+we hypothesized before. In contrast, the Amazon reviews
+exhibits a higher cosine similarity of s = 0.66, suggest-
+ing a more uniform, sentiment-aligned polarity shift. In both
+cases, the observed average magnitude significantly exceeds
+that of the random CBs, yielding p-values of 0.000999,
+strongly confirming that the detected semantic displace-
+ments are non-random.
+
+These results validate the relevance of the HoTL-defined
+contextual boundaries, revealing semantically coherent po-
+larity transitions. In particular, they indicate that while sen-
+timent dominates the semantic change in Amazon product
+reviews, central bank speeches exhibit richer, multidimen-
+sional polarity shifts. This motivates the need to further in-
+terpret the underlying polarity dimensions, which we ad-
+dress in the following section.
+
+Explaining Polarity Vectors’ Dimensionality To inter-
+pret the latent dimensions captured by each TOPol polar-
+ity vector, we employed gemini-—2.5-flash as a con-
+trastive explainability model. Its extended context window
+allowed us to include a substantial number of document
+neighborhoods around each cluster centroid—tegardless of
+individual text length—which proved particularly valuable
+for the longer central bank speeches. The model was then
+
+
+===== PAGE BREAK =====
+
+@ Contextual Boundary A - Doc. Embeddings     @ Contextual Boundary B - Doc. Embeddings
+
+(a) U.S. central bank speeches
+
+Cluster 1b (@)
+
+© Contextual Boundary A- Doc. Embeddings = @ Contextual Boundary B - Doc. Embeddings
+
+(b) Amazon reviews
+
+Figure 2: TOPol cluster projections under HoTL-defined (left) and randomized (right) contextual boundaries. Blue and red
+points correspond to documents from regimes A and B, respectively. White squares indicate cluster centroids; arrows represent
+
+semantic drift vectors between regime-specific centroids.
+
+prompted to (i) assign a descriptive label to each polarity
+dimension, (ii) extract and count supporting and contradict-
+ing sentences, and (iii) identify distinguishing keywords for
+each direction of the shift. Additional constraints and exam-
+ples were provided to minimize hallucinations and ensure
+that the model would return an empty response when no co-
+herent signal was present. The ratio of supporting to contra-
+dicting sentences served as a proxy for interpretability relia-
+bility.
+
+The approach uncovered polarity dimensions that reflect
+deeper shifts in reasoning and rhetorical strategy. For ex-
+ample, in the cluster 0 of the U.S. central bank speech
+corpus, the transition from Amorphous Debate to Empir-
+ically Grounded Practice captures a move from specula-
+tive, politically entangled discourse toward data-driven in-
+stitutional reasoning—suggesting increased epistemic con-
+fidence and technocratic closure. In cluster 10, the three di-
+mensions (Program-Level Reform to Macroeconomic Fis-
+cal Strategy, Proactive Adjustment to Impending Crisis, and
+Technical Details to Societal Values) span broader cognitive
+and rhetorical shifts: from program-specific reforms to sys-
+temic fiscal narratives, from incrementalism to anticipatory
+crisis framing, and from technical descriptions to moral ap-
+peals grounded in equity and collective responsibility. These
+transitions illustrate how macroeconomic polarity fields re-
+flect shifts in cognitive abstraction, temporal orientation, and
+normative positioning.
+
+In contrast, polarity dimensions in the Amazon review
+dataset were more sentiment-saturated and literal. Exam-
+ples include transitions such as Criticism to Praise, Infor-
+mality to Formality, or Product Dysfunction to Product Ef-
+fectiveness, each supported by dense clusters of emotionally
+charged sentences.
+
+Overall, the polarity fields reconstructed by TOPol re-
+veal domain-specific structures of semantic change: in eco-
+nomic discourse, they span epistemological orientation, an-
+ticipatory reasoning, and normative framing—teflecting the
+multidimensional nature of policy communication and con-
+sistent with the low average pairwise cosine similarity ob-
+
+served across polarity vectors. In contrast, polarity fields
+in Amazon reviews exhibit tighter directional alignment,
+matching the sentiment-defined contextual boundary and
+producing polarity vectors that the LLM consistently ex-
+plains in evaluative terms. These findings support TOPol’s
+interpretability design and demonstrate the method’s robust-
+ness across boundary types and data domains.
+
+Benchmark with Sentiment-Centric Representations
+To assess how the polarity fields reconstructed by TOPol
+compare to a sentiment-aligned baseline, we benchmarked
+our method against traditional sentiment-centric represen-
+tations. This section thus serves to isolate the sentiment
+component of the reconstructed polarity field, by examin-
+ing whether sentiment is present, and to what extent it con-
+tributes to the observed shifts.
+
+We first implemented transformer-based sentiment anal-
+ysis using two models: a general-purpose model (Distil-
+BERT (Sanh et al. 2020)) and a domain-specific model (Fin-
+BERT (Araci 2019)). For each document, sentiment was
+scored on a continuous scale using the normalized class
+probability difference:
+
+:              Ppositive — Pnegative
+sentiment =        P            S
+
+>
+Ppositive + Pneutral + Pnhegative
+
+where p denotes class probabilities. This provides a general
+sentiment signal that is widely used in applied settings.
+
+In parallel, we implemented a lexicon-grounded bench-
+mark using the NRC-VAD Lexicon (Mohammad 2025), ap-
+plying the community integration method introduced earlier.
+Each NRC-VAD term was embedded and projected into the
+discourse manifold using UMAP model, followed by Lei-
+den clustering to form NRC-VAD communities C;. For each
+community, we computed the average Valence, Arousal, and
+Dominance (VAD) scores:
+
+wi EC
+
+We then assigned each polarity vector endpoint pa and pw?
+
+
+===== PAGE BREAK =====
+
+to its closest VAD community centroid, using cosine simi-
+larity:
+A
+Ca =argmin (He
+Cy \ mele all
+
+B
+:    Li; Vi
+Cp = arg min (4)
+Ci \ me? esl)?
+
+where v7; denotes the centroid of community C,;. The result-
+ing displacement in VAD space is:
+
+Avy? = vp — Va = (Av;, Aai, Ad;) ,
+
+and
+
+yielding a lexicon-anchored, three-dimensional polarity
+shift per topic.
+
+The results on the Amazon reviews align with expecta-
+tions outlined in earlier sections. Since sentiment is the con-
+textual boundary, both transformer-based sentiment scoring
+and NRC-VAD projection reliably detected a sharp, inter-
+pretable polarity vector field. Polarity vectors seem to be
+uniformly aligned and sentiment-dominant, confirming the
+narrow semantic structure of the Amazon polarity field and
+validating TOPol’s approach of considering sentiment as
+one dimension among many others.
+
+In contrast, for the U.S. central bank speech dataset,
+both FinBERT and DistilBERT failed to detect a con-
+sistent sentiment shift across the HoTL-defined boundary
+(sentimentginpert(D 2) —sentimentpinpert(D 4) * 0). NRC-
+VAD projections also yielded weak signals. These results
+confirm the absence of sentiment-focus change, consistent
+with the low cosine similarity among polarity vectors and
+the multidimensional, topic-specific interpretability found
+in earlier analyses. However, while the global sentiment
+gap across the boundary is clearly undetectable, the topic-
+oriented analysis revealed localized affective shifts within
+specific clusters, suggesting that emotional framing may
+play a secondary, context-dependent role. The limited pres-
+ence of sentiment, or its absence altogether, is itself infor-
+mative, and indicates that the discourse boundary does not
+(or only partly), reflect affective change.
+
+Evaluation via Methodological Perturbations
+
+To assess the stability and reliability of the semantic polar-
+ity fields reconstructed by TOPol, we conducted a series of
+methodological perturbation experiments. These controlled
+variations target key components of the pipeline while hold-
+ing all other parameters constant. By comparing the re-
+sulting polarity vector fields and their statistical properties
+against the default configuration, we evaluate the robustness
+of the framework under representational and structural shifts
+in the embedding and clustering space.
+
+Perturbation of Polarity Field Space Our first robustness
+check increases the UMAP projection dimensionality from
+d = 50 to d = 75. This allows TOPol to capture more se-
+mantic variance and latent structure, but at the cost of even-
+tually introducing noise and reducing interpretability. The
+trade-off between expressiveness and stability is dataset-
+specific and best tuned through HoTL-guided experiments.
+
+CB     m
+
+wl
+
+min mean = max min mean max
+
+Default setup
+HoTL         0.13. 0.29 0.43 | -0.09 0.12 0.40
+Random 0.11 0.17 0.23) -0.20 -0.01 0.18
+
+Robustness Check 1
+HoTL       0.13 0.30 0.43 |} -0.09 0.13 0.40
+Random 0.11      0.17 0.25      -0.26      -0.01 0.26
+
+Robustness Check 2
+HoTL        0.12 0.32 0.45 | -0.013 0.11      0.41
+Random 0.11      0.17 0.25      -0.28       0.10 0.18
+
+Robustness Check 3
+HoTL        0.13 0.26 0.35      -0.16       0.19 0.46
+Random 0.11      0.14 0.15      -0.15       0.00 0.26
+
+Table 1: Drift magnitude (7m) and pairwise cosine similarity
+(8) under HoTL and random contextual boundaries for the
+U.S. central banker speech corpus.
+
+As shown in Tables | and 2, this perturbation results in
+marginal variations in both drift magnitude and cosine sim-
+ilarity. For U.S. central bank speeches, average drift mag-
+nitude slightly increases, while cosine similarities remain
+stable or even slightly improve, suggesting that higher di-
+mensionality preserves coherence. Similarly, in Amazon re-
+views, drift magnitudes remain consistently high, and pair-
+wise cosine similarities are preserved. These findings sug-
+gest that the semantic polarity field structure reconstructed
+by TOPol is robust to moderate increases in projection di-
+mensionality.
+
+In the second robustness check, we increase the UMAP
+neighborhood size from & = 100 (default) to k = 150, ex-
+panding the local connectivity radius for manifold construc-
+tion. This yields smoother topological structures and denser,
+more aggregated topic clusters. However, larger neighbor-
+hoods may also blur finer semantic boundaries, potentially
+reducing sensitivity to local discourse variation.
+
+We see in Tables 1 and 2 that under this condition,
+drift magnitudes and cosine similarities remain highly sta-
+ble. Notably, the Amazon reviews dataset exhibits consis-
+tent average cosine similarities. These outcomes indicate
+that TOPol’s polarity field representation is not overly sen-
+sitive to changes in local neighborhood radius, retaining in-
+terpretability across topological granularity scales.
+
+Perturbation of Detected Communities The final robust-
+ness check lowers the Leiden resolution parameter from r =
+1.5 to r = 1.0, effectively increasing cluster size and conse-
+quently reducing their number. This produces coarser topic
+segmentations, which can enhance robustness by smoothing
+over noisy boundaries, though it may also dilute finer se-
+mantic distinctions and obscure localized polarity shifts.
+According to Tables | and 2, this perturbation yields
+a slight reduction in average drift magnitudes and more
+pronounced degradation in cosine similarity. This suggests
+that overly coarse topic granularity can obscure the mul-
+
+
+===== PAGE BREAK =====
+
+CB     m
+
+wl
+
+min mean max | min mean max
+
+Default setup
+HoTL         0.21 033 049) 0.21 0.66 0.91
+Random 0.04 0.08 0.12 | -0.15 0.00 0.18
+
+Robustness Check 1
+HoTL         0.21      0.33 0.59 | 0.24      0.65 0.91
+Random 0.04 0.08 0.13 | -0.15 0.01   0.12
+
+Robustness Check 2
+HoTL         0.24 0.33 0.51 | 0.23       0.66 0.92
+Random 0.04 0.08 0.14 |) -0.15 0.01      0.14
+
+Robustness Check 3
+HoTL         0.21      0.32 0.43 | 0.45       0.74 0.93
+Random 0.04 0.07 0.14 / -0.19 -0.01 0.11
+
+Table 2: Drift magnitude (7) and pairwise cosine similarity
+(S) under proposed (HoTL) and random contextual bound-
+aries for the Amazon Reviews corpus.
+
+tidimensional polarity structure and reduce interpretability.
+Nonetheless, the method continues to distinguish proposed
+from random CBs, indicating that even at lower resolution,
+meaningful polarity fields persist.
+
+Conclusions
+
+This paper introduced TOPol, a semi-unsupervised frame-
+work for modeling and interpreting multidimensional polar-
+ity fields across discourse regimes defined by HoTL con-
+textual boundaries. Our empirical results demonstrate that
+TOPol not only reconstructs coherent and interpretable po-
+larity vector fields, but also reveals latent semantic dimen-
+sions of change that go beyond sentiment.
+
+Evaluation across two structurally different corpora
+showed that TOPol adapts to both high-context, jargon-
+heavy language and short, sentiment-rich text. The frame-
+work remains robust under methodological variations. These
+findings suggest that while the HoTL-defined CB remains
+the principal driver of semantic displacement, the topology
+of the polarity field is stable across moderate representa-
+tional variations.
+
+Our experiments further reveal that sentiment-aligned po-
+larity dimensions constitute only a part of the semantic shifts
+captured by TOPol, with the proportion of affective dimen-
+sions varying significantly across datasets. This underscores
+the broader potential of the framework for tracking non-
+affective, epistemic, or rhetorical polarity transitions, such
+as transparency—obfuscation or confidence—uncertainty.
+
+Current limitations include the exclusion of topic clus-
+ters that are unbalanced or entirely absent from one regime,
+which may lead to underutilized polarity vectors or topic-
+level dropout. Additionally, the non-deterministic nature of
+LLMs makes this part of the framework difficult to repro-
+duce, and their outputs may be prone to hallucinations de-
+spite prompting safeguards. Future work will address these
+constraints.
+
+Finally, while the current implementation focuses on bi-
+nary regime comparisons, the general structure of TOPol
+naturally extends to more complex applications. Future
+extensions will explore sequential or parallel contextual
+boundaries, enabling multi-point temporal analysis or mul-
+tidimensional polarity fields over 2D discourse partitions.
+These directions open new possibilities for modeling evolv-
+ing narratives and ideological shifts in various domains.
+
+Submission History
+
+This manuscript current version was submitted to the 40th
+Annual AAAI Conference on Artificial Intelligence. The
+submission and its peer review reports are permanently
+available following this link!.
+
+References
+
+Adhya, S.; and Sanyal, D. K. 2025. DTECT: Dy-
+namic Topic Explorer & Context Tracker. arXiv preprint
+arXiv:2507.07910.
+
+Araci, D. 2019. FinBERT: Financial Sentiment Analysis
+with Pre-trained Language Models. arXiv:1908.10063.
+Demszky, D.; Movshovitz-Attias, D.; Ko, J.; Cowen, A.; Ne-
+made, G.; and Ravi, S. 2020. GoEmotions: A dataset of fine-
+grained emotions. arXiv preprint arXiv:2005.00547.
+
+Grootendorst, M. 2022. BERTopic: Neural topic modeling
+with a class-based TF-IDF procedure. arXiv:2203.05794.
+
+Hofmann, V.; Dong, X.; Pierrehumbert, J. B.; and Schuetze,
+H. 2021. Modeling ideological salience and framing in po-
+larized online groups with graph neural networks and struc-
+tured sparsity. arXiv preprint arXiv:2104.08829.
+
+McInnes, L.; Healy, J.; and Melville, J. 2020. UMAP: Uni-
+form Manifold Approximation and Projection for Dimen-
+sion Reduction. arXiv:1802.03426.
+
+Mohammad, S. M. 2025. NRC VAD Lexicon v2: Norms
+for Valence, Arousal, and Dominance for over 55k English
+Terms. arXiv:2503.23547.
+
+Mantyla, M. V.; Graziotin, D.; and Kuutila, M. 2018. The
+evolution of sentiment analysis—A review of research top-
+ics, venues, and top cited papers. Computer Science Review,
+27: 16-32.
+
+Prasanna, M.; Shaila, S.; and Vadivel, A. 2023. Polarity clas-
+sification on twitter data for classifying sarcasm using clause
+pattern for sentiment analysis. Multimedia Tools and Appli-
+cations, 82(21): 32789-32825.
+
+Sanh, V.; Debut, L.; Chaumond, J.; and Wolf, T. 2020. Dis-
+tilIBERT, a distilled version of BERT: smaller, faster, cheaper
+and lighter. arXiv:1910.01108.
+
+Traag, V. A.; Waltman, L.; and van Eck, N. J. 2019. From
+Louvain to Leiden: guaranteeing well-connected communi-
+ties. Scientific Reports, 9(1).
+
+'https://openreview.net/forum?id=r7DXpvpuQv

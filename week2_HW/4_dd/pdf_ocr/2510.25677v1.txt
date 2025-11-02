@@ -1,0 +1,2293 @@
+arX1v:2510.25677v1 [cs.CR] 29 Oct 2025
+
+ZK-SenseLM: Verifiable Large-Model Wireless
+Sensing with Selective Abstention and
+
+Zero-Knowledge Attestation
+
+Hasan Akgul, Mari Eplik, Javier Rojas, Aina Binti Abdullah, and Pieter van der
+
+Merwe
+
+Abstract
+
+We present ZK-SenseLM, a secure and auditable RF sensing framework that couples a large-model
+encoder for Wi-Fi/CSI (optionally mmWave radar/RFID) with a policy-grounded decision layer and
+end-to-end zero-knowledge (ZK) proofs of inference. The sensing backbone employs masked spectral
+pretraining with phase-consistency regularization to stabilize features against interference and spectral
+drift, and a light cross-modal alignment that anchors RF latents to compact, human-interpretable policy
+tokens. To mitigate unsafe actions under distribution shift, we introduce a selective abstention head
+calibrated on a small validation split; the resulting risk-coverage operating point is then registered and
+bound into the proof.
+
+Beyond utility, we build a four-stage proving pipeline: (C1) feature-sanity checks, (C2) thresh-
+old/version binding, (C3) constraint-consistent decoding for the action schema, and (C4) PLONKish
+proofs that the quantized network, given the committed window, indeed produced the logged action
+and confidence. Micro-batched proving amortizes cost across adjacent windows, while a gateway option
+
+offloads proofs from low-power edges. The system integrates with DP-aware federated learning and
+
+Hasan Akgul is with the Department of Computer Engineering, Istanbul Technical University (ITU), ITU Ayazaga Campus,
+34469 Maslak, Istanbul, Turkey (e-mail: akgulh20@itu.edu.tr).
+
+Mari Eplik is with the Institute of Computer Science, University of Tartu, J. Liivi 2, 50409 Tartu, Estonia (e-mail:
+mari.eplik@ut.ee).
+
+Javier Rojas is with the Department of Computer Science, University of Chile, Beauchef 851, Santiago, Chile (e-mail:
+jrojas@dcec.uchile.cl).
+
+Aina Binti Abdullah is with the Faculty of Computing, Universiti Teknologi Malaysia, 81310 Skudai, Johor, Malaysia (e-mail:
+aina.abdullah@utm.my).
+
+Pieter van der Merwe is with the Department of Electrical & Electronic Engineering, Stellenbosch University, Banghoek Rd,
+
+Stellenbosch, 7600, South Africa (e-mail: pvdm@sun.ac. za).
+
+
+===== PAGE BREAK =====
+
+on-device personalization (LoRA adapters) without compromising verifiability: model/version hashes
+and the registered threshold are part of each public statement.
+
+Across human activity, presence/intrusion, respiratory proxies, and RF fingerprinting tasks, ZK-
+SenseLM attains higher macro-F1 and lower calibration error than strong baselines on clean and shifted
+domains, and yields favorable coverage—risk curves under environmental, protocol, and adversarial
+perturbations. Proving adds modest, controllable overhead (verification is fast and proofs are compact),
+while tamper and replay attempts are detectably rejected. Taken together, ZK-SenseLM shows that robust
+wireless sensing and cryptographic accountability can co-exist at the edge, turning each action into a
+
+verifiable, auditable artifact suitable for zero-trust deployments.
+
+Index Terms
+
+Wi-Fi sensing, RF sensing, channel state information (CSI), large language models, open-set recog-
+nition, selective classification, calibration, zero-knowledge proofs, verifiable ML, federated learning,
+
+edge computing, privacy.
+
+I. INTRODUCTION
+
+Wireless sensing has rapidly evolved from handcrafted signal processing to learning-driven
+pipelines that infer human activities, presence, pose, and even physiological states directly
+from commodity radios. Surveys and systematizations highlight both the breadth of applications
+and the shift toward foundation-model-style training objectives and multimodal alignment [1],
+[3], [5], [7], [31]. Early breakthroughs established the feasibility of device-free recognition
+and fine-grained perception using Wi-Fi signals—whole-home gesture sensing, location-oriented
+activity identification, and radio-based pose estimation through walls laid the methodological
+groundwork for today’s learning-centric approaches [41], [43], [45], [47], [63], [64]. Recent
+studies extend these capabilities to robust cross-room settings, richer spectral-phase features,
+and more discriminative encoders [9], [11], [69], [71].
+
+Standardization is catalyzing this transition from prototypes to deployable systems. The IEEE
+802.11bf amendment and its ecosystem formalize WLAN sensing primitives, reference archi-
+tectures, and performance considerations, while clarifying potential impact on concurrent data
+networking [33], [35], [37], [39], [62]. In parallel, fine timing measurement (FTM) and device-
+free localization pipelines tighten the loop between ranging, positioning, and activity inference
+inside buildings [65], [66]. Beyond ambient perception, Wi-Fi sensing is increasingly explored
+
+for healthcare scenarios—from respiration-aware “in-area” monitoring to contactless pulmonary
+
+
+===== PAGE BREAK =====
+
+function estimation—exposing opportunities and challenges around reliability, domain shift, and
+safety [26], [30], [72].
+
+Security has emerged as a central axis. RF fingerprinting (RFF) promises device identification
+and provenance, yet its traditional and deep-learning variants are vulnerable to sophisticated
+spoofing and distribution shift [13], [15]. Federated or privacy-aware RFF pipelines are gaining
+traction to mitigate data silos and leakage [52], [54], while practical attacks against PH Y-layer
+fingerprints demonstrate that realistic, stealthy adversaries can subvert Wi-Fi authentication
+[2]. These concerns generalize to sensing pipelines: adversarial perturbations, environmental
+manipulations, and protocol-level tweaks can mislead classifiers, degrade robustness, or bias
+decisions [19], [21], [49], [50], [67], [68]. Robust encoding and uncertainty-aware open-set
+recognition are therefore receiving increasing attention within Wi-Fi-based human activity and
+gesture recognition [10], [18], [22], [34].
+
+Concurrently, zero trust principles reshape the perimeterless security model for IoT/edge
+deployments. Formal guidance and architectural baselines from NIST define the control-plane
+backbone for authentication, authorization, and least privilege [60]. Score-based and credential-
+driven access control, including decentralized identity (DID) and self-sovereign identity (SSD), are
+being adapted for dynamic device/user contexts [27], [29]. To ensure verifiability without disclo-
+sure, the community is increasingly turning to zero-knowledge (ZK) techniques for IoT protocols
+and, more recently, for verifiable machine learning (ML) inference and training [23], [25], [56],
+[58], [73]-[75]. Together, these developments suggest a path toward privacy-preserving, auditable
+sensing and decision making at the wireless edge.
+
+Our work situates itself at this intersection of robust wireless perception, verifiable ML,
+and trustworthy access control. We build on advances in multimodal Wi-Fi perception and
+RF analytics to argue that policy-grounded inference must be paired with formal guarantees
+when deployed in sensitive environments—e.g., ambient healthcare or access control—where
+interpretability, tamper-evidence, and consent are crucial [1], [3], [5], [71], [72]. We also draw
+on empirical evidence from medical and in-the-wild studies showing that sensing models can
+fail silently under domain shift or interference, motivating calibration and open-set safeguards
+[10], [18], [26], [30]. These considerations extend to cross-technology sensing (e.g., radar) and
+classical through-wall perception, showing that diverse RF front ends face analogous robustness
+and privacy risks [41], [43], [63], [64], [70].
+
+A practical enabler for secure, scalable deployment is collaborative training and resource-aware
+
+
+===== PAGE BREAK =====
+
+inference across heterogeneous edge platforms. The federated learning (FL) literature documents
+strategies for dealing with non-IID data, heterogeneity, and communication constraints—ranging
+from hierarchical aggregation and asynchronous updates to experience-driven model migration
+and block-wise regularization [4], [8], [12], [16], [20], [24], [51]. Personalization and neural
+architecture search (NAS) further adapt global models to edge diversity, while semi-supervised
+and progressive training reduce labeling burdens [28], [32], [36]. Recent directions explore
+probabilistic communication, adaptive local updates with neural composition, and decentral-
+ized variants for graphs—highlighting the algorithm-—system co-design trend [40], [44], [55].
+Inference-time efficiency and stability are likewise active topics, from near bubble-free end—cloud
+pipelines to catastrophic forgetting mitigation and robust token sampling for LLM components
+[57], [59], [61]. These lines are complementary to privacy-preserving sensing (e.g., passive Wi-
+Fi/CSI) and can be naturally combined with verifiable inference to reduce trusted computing
+bases.
+
+Finally, the scope of “ambient intelligence” extends beyond Wi-Fi. Complementary modal-
+ities—vision, acoustics, and RFID—broaden the sensing envelope and surface new privacy
+challenges. Cross-modal emotion recognition and multimodal fusion underscore the richness
+and risk of passive perception [46]. Side-channel studies reveal that commodity microphones
+can leak keystrokes at a distance under realistic conditions, reinforcing the need for defense-in-
+depth [6]. RFID-based activity and identity inference show that even lightweight tags can enable
+high-resolution behavioral analytics, calling for auditable pipelines and informed consent mech-
+anisms [38]. At the same time, improved label-noise suppression and distributional robustness in
+facial expression analysis illustrate generalizable strategies for reliable human-centric AI under
+imperfect supervision [14], [42].
+
+This paper leverages these developments to motivate a verifiable wireless sensing framework
+that (i) learns robust, uncertainty-aware representations; (ii) exposes policy-grounded decisions
+amenable to zero-knowledge verification; and (iii) integrates with edge-centric FL workflows
+for practical deployment. In doing so, we align with the direction set by 802.11bf and Wi-Fi
+localization advances [33], [35], [37], [39], [62], [65], address documented attack surfaces [2],
+[19], [21], [49], [50], [67], [68], and operationalize zero trust with cryptographic accountability
+[23], [25], [27], [29], [56], [58], [60], [73]-[75]. Throughout, we cross-reference representative
+sensing works to situate our contributions across gesture, pose, respiration, and localization [1],
+
+[3], [5], [9], (11, [26], [30], [45], [47], [63], [64], [66], [69], [71], [72].
+
+
+===== PAGE BREAK =====
+
+II. RELATED WORK
+A. From Device-Free RF Sensing to Learning-Centric Pipelines
+
+The last decade has witnessed a decisive migration of wireless sensing from handcrafted feature
+stacks toward end-to-end trainable encoders that operate directly on channel state information
+(CSI), waveform spectrograms, or intermediate frequency representations. Early demonstrations
+of device-free sensing established that human motion perturbs multipath in ways that can be
+decoded without any on-body instrumentation. Classical exemplars showed whole-home gesture
+recognition with commodity Wi-Fi transceivers [45], location-oriented activity identification from
+fine-grained signatures [47], and, later, through-wall pose estimation by exploiting phase-coherent
+radio reflections and learning-based mapping to skeletal keypoints [41], [43]. These results,
+together with person-perception using Wi-Fi alone [63], crystallized the agenda for learning-
+centric pipelines, motivating large-scale datasets, stronger temporal models, and cross-modal
+supervision.
+
+Survey articles capture the breadth of progress and the methodological consolidation around
+representation learning for radio signals. In Wi-Fi human activity recognition (HAR), recent
+surveys emphasize self-supervised pretext tasks, spectral-temporal masking, and the use of
+domain augmentations that emulate Doppler and multipath dynamics [1], [5], [7]. Complementary
+syntheses on Wi-Fi identification and perception review pipelines for person-level inference,
+cross-domain generalization, and the role of auxiliary modalities [3], [31]. Building on this
+foundation, follow-up works extend sensing to multiroom and cross-wall settings with attention to
+antenna geometry and extended baselines [9], fuse amplitude and phase cues for discriminability
+[11], and investigate micro-signal extraction with deep encoders designed for weak periodic
+components [69]. Representation learning that balances channel descriptors and action semantics
+further improves transfer across environments [71], while cross-domain gesture recognition
+through zero-effort adaptation underscores the need for invariances in practical deployments
+
+[64].
+
+B. Standardization and Systemization: IEEE 802.1 1bf and Beyond
+
+A major catalyst for translating prototypes into production has been the IEEE 802.11bf
+effort, which sets out primitives and reference architectures for WLAN sensing [62]. Tutorial
+
+and overview articles explain how sensing waveforms, synchronization, and scheduling can
+
+
+===== PAGE BREAK =====
+
+coexist with data traffic, and they examine the system-level trade-offs [33], [35], [37]. The task
+group’s living reports track the amendment’s evolution and interoperability considerations [39].
+In parallel, Wi-Fi fine timing measurement (FTM) under 802.11mc has enabled ranging-grade
+time-of-flight that augments or anchors device-free pipelines, with recent surveys cataloging
+algorithmic patterns for indoor positioning and hybrid sensing-—localization stacks [65]. Deep
+learning approaches to device-free localization also continue to advance, highlighting how CSI
+tensors can be mapped to submeter-scale positions while tolerating layout changes [66]. Together,
+these threads push toward a common substrate in which sensing and communication share
+
+spectral, MAC, and control-plane resources.
+
+C. Healthcare, Physiology, and Human-Centric Ambient Intelligence
+
+Ambient healthcare has emerged as a compelling application domain where the benefits and
+risks of passive RF perception are tightly coupled. Surveys of vital-sign monitoring with Wi-
+Fi CSI document progress from coarse respiration detection to more nuanced cardiopulmonary
+inference, but also stress the brittleness introduced by motion artifacts and multipath variability
+[72]. Application-driven studies have begun to formalize “in-area” sensing—restricting inference
+to authorized zones and targets—thereby reducing incidental collection while improving clinical
+relevance [26]. Recent work shows that commodity Wi-Fi can estimate pulmonary function
+parameters without mouthpieces, illustrating how proxy signals and variational encoders can ap-
+proximate medical-grade measurements under practical constraints [30]. These use cases motivate
+robust calibration, uncertainty estimation, and fail-safe policies for human-in-the-loop operation
+
+and deployment in sensitive environments.
+
+D. RF Fingerprinting, Identity, and Provenance
+
+RF fingerprinting (RFF) aims to identify devices from minute hardware-induced imperfections
+and has long been proposed as the glue for provenance and trust in the physical layer. A
+comprehensive survey of traditional and deep RFF methods emphasizes the challenges of collect-
+ing representative datasets, generalizing across channels and hardware revisions, and defending
+against spoofing [13]. Systematizations of deep RFF further catalog unresolved issues such
+as transferability, adversarial robustness, and privacy leakage [15]. In response, collaborative
+training schemes (e.g., federated RFF) have been explored to address data silos while preserving
+
+utility [52], and narrowband-IoT studies provide reality-grounded evaluations of RFF feasibility
+
+
+===== PAGE BREAK =====
+
+[54]. At the same time, practical attacks demonstrate that PHY-layer authentication based on
+“immutable” fingerprints can be undermined by carefully crafted perturbations, exposing a
+gap between laboratory assumptions and adversarial realities [2]. These observations encourage
+
+complementary controls at higher layers and formal verifiability of the inference pipeline.
+
+E. Attacks and Robustness in Wireless Sensing
+
+Adversarial machine learning in the RF domain reveals unique attack surfaces relative to vision
+or NLP, owing to strict spectral regulations, modulation constraints, and receiver nonlinearities.
+Foundational work studied gradient-based evasion against deep radio classifiers [21], and later
+analyses broadened to communications stacks, detailing threats to link adaptation, modulation
+recognition, and channel estimation across deep-learning-based PHY designs [19]. In the sensing
+setting, both “in-the-air” perturbations via environmental actuation and packet-level modifica-
+tions can degrade detection and classification without significantly affecting data connectivity,
+underscoring an asymmetry between sensing and communication objectives [49], [67]. Gen-
+erative spoofing expands the attacker’s design space by injecting physically plausible signals
+that bypass spectrum monitors yet bias the sensing outcome [68]. Security analyses tailored to
+Wi-Fi sensing provide taxonomies of such threats and recommend multi-layer mitigations, but
+they also acknowledge gaps around certifiable guarantees [50]. In parallel, robustness-focused
+sensing systems advance interference-immune encoders and open-set recognition strategies to
+handle unseen classes and shift, decreasing silent failures [10], [18], [22]. Attention-guided
+architectures further enhance gesture recognition with commodity devices by focusing on salient
+
+subcarriers and temporal windows [34].
+
+F. Cross-Modal and Through-Wall Perception
+
+A complementary body of work blends RF with other modalities or pushes the RF-only
+envelope in challenging scenarios. The RF—vision synergy has powered person-level latent rep-
+resentation learning and emotion recognition, showcasing the promise of multi-sensor fusion
+for human-centric understanding [46]. In the opposite direction, acoustic side channels remind
+the community that non-RF sensors in the environment can leak sensitive content such as
+keystrokes, expanding the threat model for ambient intelligence deployments [6]. At the RF-only
+frontier, through-wall pose estimation remains a landmark problem that stresses phase stability,
+
+time—frequency representations, and learning-based inversion of multipath [41], [43]. Radar-based
+
+
+===== PAGE BREAK =====
+
+pipelines add complementary spatial and velocity resolution, showing cross-technology transfer
+of deep keypoint estimation and skeleton recovery [70]. Historical milestones like WiSee and
+E-eyes foreshadowed many of today’s encoder designs and dataset collection practices, including
+
+explicit annotation of room layouts and motion taxonomies [45], [47].
+
+G. Edge Learning and Systems for Scalable Deployment
+
+Edge-centric training and inference are indispensable when wireless sensing is deployed across
+many heterogeneous sites. Federated learning (FL) has provided a toolbox for dealing with
+non-IID data, limited bandwidth, and intermittent participation. Hierarchical aggregation and
+resource-aware scheduling improve scalability while respecting edge constraints [51]. Asyn-
+chronous and communication-efficient variants reduce straggler effects and wall-clock time in
+resource-constrained settings [12], [16]. Experience-driven model migration addresses device
+heterogeneity by steering models toward useful subpopulations, while block-wise regularization
+and knowledge distillation stabilize optimization under noisy updates [8], [20]. Layer-wise ag-
+gregation schemes facilitate decentralization and partial participation, helping maintain accuracy
+without full synchronization [24]. Personalization and NAS-based adaptation specialize models
+to device idiosyncrasies and site characteristics, and semi-supervised or progressive training
+helps amortize annotation costs [4], [28], [32], [36]. Emerging directions include probabilistic
+communication and decentralized FL for graph-structured data, together with adaptive local
+updates and neural composition for faster convergence [40], [44], [55]. On the inference path,
+near bubble-free pipeline optimizations enhance end—cloud collaborative serving [57], while
+strategies for mitigating catastrophic forgetting and stabilizing token sampling safeguard LLM
+components embedded in the control loop [59], [61]. These systems ingredients are synergistic
+with privacy-preserving sensing: they shrink the trusted computing base, distribute computation,
+
+and enable per-site policy enforcement without centralizing raw RF data.
+
+H. Zero Trust for IoT and Access Control Context
+
+Security architecture trends in IoT and cyber—physical systems increasingly converge on
+zero trust, replacing perimeter defenses with continuous verification, least privilege, and policy
+engines that are decoupled from network location. NIST SP 800-207 codifies the high-level
+principles, components, and trust relationships, providing a lingua franca for practitioners and
+
+researchers [60]. Recent proposals extend zero trust to embedded and IoT ecosystems, exploring
+
+
+===== PAGE BREAK =====
+
+score-based access control that reacts to dynamic risk signals and device posture [27]. In
+distributed deployments, self-sovereign identity (SSI) and decentralized identifiers (DIDs) allow
+portable credentials and verifiable claims to inform authorization decisions, particularly when
+devices change administrative domains or intermittently connect [29]. For ambient sensing, these
+architectures suggest a path to align perception outcomes (e.g., “presence detected in zone A’’)
+with access decisions (e.g., “unlock door” or “trigger alarm’) in a policy engine that reasons
+
+about context, consent, and auditability.
+
+I. Zero Knowledge and Verifiable Machine Learning
+
+Ensuring that inferences and policy decisions are correct and privacy-preserving naturally leads
+to zero-knowledge (ZK) techniques. In the IoT domain, ZK has been proposed to harden data
+sharing and access protocols, leveraging succinct proofs to remove unnecessary disclosure while
+enabling accountability [25]. A fast-growing literature on verifiable ML develops compilers and
+systems that transform neural inference into arithmetic circuits amenable to proof generation,
+targeting proof systems such as PLONK and Halo2 [56], [73]. Specialized efforts extend ZK
+to LLMs [58] and propose more efficient constructions for ML-oriented private and verifiable
+computation [74]. Beyond inference, proof-of-training primitives aim to certify properties of the
+learning process—useful for auditability and provenance in collaborative or outsourced training
+[75]. Survey work consolidates design patterns and open problems for ZK-based verifiable ML,
+including proving non-linearities, handling quantization, and amortizing multi-query workloads
+[23]. For wireless sensing, these tools enable attestable claims such as “the decision was produced
+by a registered model under an approved threshold using features derived from a time-bounded
+
+RF window,” without revealing raw signals or proprietary parameters.
+
+J. Privacy, Ethics, and Policy Grounding
+
+Because RF sensing can be ambient by design, privacy implications extend beyond the intended
+user. Studies on multimodal emotion recognition demonstrate the depth of inference possible
+when RF is fused with vision, accentuating both utility and sensitivity [46]. Side-channel anal-
+yses that recover typed content from microphone recordings at a distance expose the systemic
+nature of environmental leakage and the need for defense-in-depth [6]. RFID-based activity and
+identity inference shows that even minimalistic tags can yield rich analytics about behavior
+
+and authorship, a reminder that “low-power” does not imply “low-risk” [38]. To mitigate these
+
+
+===== PAGE BREAK =====
+
+10
+
+risks, uncertainty-aware modeling and explicit open-set handling improve the odds that systems
+abstain or degrade gracefully under ambiguity [10]. Likewise, improved training regimes for
+human-centric perception (e.g., label noise suppression and distributionally robust optimization
+for facial expression analysis) offer transferrable lessons on reliability when labels and contexts
+are imperfect [14], [42]. Within a zero-trust control plane [60], such methods can be linked to
+auditable policies and ZK proofs to ensure that sensing-derived actions remain compliant with
+
+consent and governance requirements [25], [27], [29].
+
+K. Open Problems and Positioning of This Work
+
+Several tensions persist despite the breadth of progress. First, the robustness—efficiency frontier
+remains open: practical adversaries craft low-cost physical or packet-level perturbations that
+elude detection yet flip decisions [19], [21], [49], [67], [68]. Although interference-immune
+encoders, correlation selection, and phase-stabilized features help [18], [22], model failures
+under domain shift and unseen events motivate calibrated open-set recognition and human-over-
+the-loop protocols [10], [34]. Second, scalability with privacy remains challenging: federated
+and decentralized training mitigate data sharing but introduce heterogeneity and optimization
+instability that must be tamed with architecture search, migration, and advanced regularization
+[4], [8], [12], [16], [20], [24], [28], [32], [36], [40], [44], [51], [55]. Third, the assurance gap
+between empirical robustness and formal guarantees is particularly salient in security-critical
+deployments. Here, zero-knowledge proof systems provide an appealing path to verifiability
+without disclosure, but practical proof generation still contends with arithmetic circuit sizes, non-
+linearities, and batching strategies [23], [56], [58], [73]-[75]. Finally, standards and compliance
+are moving targets: while 802.11bf defines sensing primitives and coexistence policies [33],
+[35], [37], [39], [62], translating these into privacy-preserving, policy-grounded deployments
+will require stronger ties to zero trust and formal audit mechanisms [27], [29], [60].
+
+Against this backdrop, our work articulates a design that couples robustness-oriented encoders
+and uncertainty-aware decision making with a verifiable execution layer. We draw method-
+ological cues from the historical arc of device-free sensing [31], [41], [43], [45], [47], [63],
+[64], incorporate lessons from healthcare and human-centric deployments [26], [30], [72], and
+integrate identity and provenance where appropriate via RFF but without over-reliance on fragile
+assumptions [2], [13], [15], [52], [54]. We architect the training and serving plan to harmonize
+with edge constraints and collaborative learning [4], [8], [12], [16], [20], [24], [28], [32], [36],
+
+
+===== PAGE BREAK =====
+
+[40], [44], [51], [55], [57], [59], [61], and we embed a zero-trust control plane with ZK-backed
+attestations for privacy-preserving accountability [23], [25], [27], [29], [56], [58], [60], [73]-[75].
+
+L. Relationship to Our Prior and Contemporary Work
+
+To avoid duplication and to clarify novelty, we situate our approach relative to works that
+are closest in spirit across robustness, open-set handling, and application scope. Prior studies
+have addressed interference immunity by exploiting interference-independent phase components
+and subcarrier correlation strategies for HAR [18], [22]. Others propose uncertainty-aware open-
+set gesture recognition in Wi-Fi sensing to reduce false accept under distribution shift [10].
+In ambient healthcare, research on in-area respiration monitoring and contactless pulmonary
+function estimation demonstrates end-to-end pipelines that map RF to clinically grounded targets,
+while highlighting calibration and ethics constraints [26], [30]. Orthogonal threads in multimodal
+emotion recognition [46] and RFID analytics [38] reveal both utility and privacy risks of passive
+ambient inference. On the systems side, our methodology leverages federated and decentralized
+learning mechanisms [4], [8], [12], [16], [20], [24], [28], [32], [36], [40], [44], [51], [55] and
+adopts efficiency measures for end—cloud collaborative inference as well as stability techniques
+for long-running models [57], [59], [61]. Distinct from RFF-centric authentication (susceptible
+to evasions) [2], [13], [15], [52], [54], our framework treats identity as one of several contextual
+signals governed by zero trust policies [27], [29], [60], and it brings ZK-based verifiability
+to the sensing-to-decision chain [23], [25], [56], [58], [73]-[75]. By aligning with 802.11bf’s
+coexistence and waveform design guidance [33], [35], [37], [39], [62] and interfacing with
+localization primitives [65], [66], we aim to deliver a security- and privacy-conscious instantiation
+
+that is compatible with emerging standards and real-world deployments.
+
+M. Summary
+
+In summary, prior art has made impressive strides in device-free RF sensing, standardization,
+and edge learning, while the security community has exposed a growing set of attacks that exploit
+the unique physics and protocol constraints of wireless channels. Parallel progress in zero trust
+and zero-knowledge offers promising building blocks for reconciling utility with privacy and
+accountability. Our work synthesizes these strands: it pursues robust and calibrated sensing,
+fuses the results with policy engines that embody zero trust, and equips the end-to-end pipeline
+
+with cryptographic attestation that certifies compliance without revealing raw data. The remainder
+
+
+===== PAGE BREAK =====
+
+System Overview
+Commitments c aay
+
+Model hash h(@zeg)
+
+Wi-Fi CSI                     RO 3]             Threshold f,.,
+
+=
+os
+
+1
+|
+1
+I
+1
+!                       Verifier
+v
+
+\
+]
+.    .  .                                  I
+Preprocess              Time binding Pyiny                                                       i
+i                LV               Controller
+i
+\
+Q                          !
+                        8 *                            Edge/Gateway
+1           L\ :A            sees Offload
+I     =      1
+                     Actions                     ol 2
+5     J
+|                                      +
+\
+|
+\
+|
+\
+}
+Preprocess                            I
+U
+& Aug.             Micro-batching -——7
+
+Audit Log
+
+Fig. 1: System overview
+
+of the paper details this design and provides empirical evidence across representative tasks, with
+comparisons and ablations that trace the impact of each component against the backdrop of the
+
+literature .
+
+Ill. METHODOLOGY
+
+This section presents ZK-SenseLM, a verifiable wireless sensing framework that marries robust
+RF representation learning with a zero-trust control plane and zero-knowledge (ZK) proofs.
+The method is designed to (i) learn uncertainty-aware, policy-grounded decisions from Wi-
+Fi/CSI (and optionally radar/RFID) inputs; (ii) expose cryptographic attestations that the decision
+was produced by a registered model instance, under an approved threshold and a bounded
+time window; and (iii) support federated, privacy-preserving training and heterogeneous edge
+
+deployment. Figure | provides a high-level overview of the architecture and data/proof flows.
+
+
+===== PAGE BREAK =====
+
+A. Problem Formulation and Trust Assumptions
+
+Let x € R*** denote a pre-aligned sequence of complex channel samples or CSI features
+
+across T’ time frames and S' subcarriers (or range-Doppler bins for radar). An encoder Ey maps
+
+RExd
+
+x to a latent z = Ey(x) €     , which is then consumed by a task head H,, to produce a
+distribution over task labels y € Y (e.g., activity class, presence/no-presence, policy-relevant
+status). A policy reasoner R,, takes (y,«) where & is a context bundle (zone, device posture,
+consent flags) and returns a structured action a € A (e.g., allow, alarm, abstain) with
+calibrated uncertainty u € [0,1]. In zero-trust settings, a verifier V receives (a,7), where 7 is a
+ZK proof attesting that a was derived from x under a registered model hash h(@) with threshold
+T, within a time-bounded window, without revealing x or 0.
+
+We assume the prover runs on the sensing node or its gateway and is honest-but-curious; ad-
+versaries may attempt replay, interference injection, threshold tampering, or model rollback. The
+
+verifier is a policy engine (e.g., site controller) that validates 7 before executing a. Deployments
+
+can rotate model versions and keys; attestations include a signed audit record.
+
+B. RF Front-End, Preprocessing, and Normalization
+
+a) Signal ingestion.: For Wi-Fi CSI, we extract per-subcarrier complex responses from
+OFDM frames with packet detection and carrier frequency offset (CFO) compensation. We
+optionally apply antenna-pair phase de-biasing and sliding-window amplitude normalization.
+For mmWave radar, we use range FFT and short-time Doppler FFT to form a range-Doppler
+
+cube. For RFID, we aggregate phase-rate and RSS features aligned by tag EPC and reader
+
+REXxSxe
+
+timestamps. All streams are resampled to a fixed hop and window to yield tensors x €
+with C’ € {real/imag, amp/phase}.
+
+b) Augmentations.: To increase robustness, we inject physics-preserving transforms: (1)
+spectral dropout (random subcarrier/band masking), (ii) phase ramp (mild CFO-like drift), (iii)
+reverberation (convolution with short multipath kernels), and (iv) power jitter. These are used
+
+both in pretraining and robustness training (Sec. III-H).
+
+C. Encoder and Cross-Modal Adapter
+
+a) Backbone.: Ey is a time-frequency transformer with convolutional stem. The stem
+applies complex-valued 1 x 1 projections to produce a do-channel feature map, followed by
+
+k x k depthwise-separable convolutions over (time x frequency). We then stack N transformer
+
+
+===== PAGE BREAK =====
+
+blocks with local attention windows along time and grouped attention along subcarriers to respect
+the coherence bandwidth. Positional encodings are learned along time; subcarrier indices receive
+sinusoidal embeddings reflecting frequency spacing.
+
+b) Cross-modal adapter.: We insert an adapter A, that maps z to a text-aligned space using
+
+0 66
+
+a contrastive objective with policy tokens (“authorized zone A movement,” “unknown identity
+
+near door,” etc.). The adapter is a bottleneck MLP with residual gating to keep latency modest.
+
+D. Self-Supervised Pretraining
+
+We adopt a masked spectral modeling (MSM) objective combined with phase-consistency
+regularization and cross-modal contrastive alignment. Denote by M a random mask operator
+over time-frequency patches and z = M(x) the corrupted input.
+
+a) Masked reconstruction. :
+1         *
+Lyism = iq  S-  IlZis — Les|l,                           (1)
+(t,s)EQ
+Q indexes masked patches; ¢ = D,(£4(Z)) is the decoder reconstruction; D, is a lightweight deconvolutional
+head; || - ||1 is the element-wise L1 loss.
+b) Phase consistency.: We enforce invariance to global phase biases by minimizing the
+dispersion of per-subcarrier unwrapped phase increments across augmentations:
+=
+Lonase = 3 Y= Var (AZ2'0 — AZ”)                              (2)
+s=1
+z@ and z) are latents from two augmentations of the same window; AZ denotes temporal phase increments;
+Var averages over time.
+c) Cross-modal alignment.: Given a policy text embedding ¢ (from a frozen or lightweight
+
+text encoder) and a pooled RF embedding p = Pool(A,(z)), we use InfoNCE:
+exp((p, t)/Te)
+
+Lyncr = — log                                                       (3)
+Dd Zvep exP((p, t’) /Te)
+(-,-) is cosine-similarity-scaled dot product; 7. is temperature; B is the batch of negatives.
+The pretraining objective combines the three terms:
+Lore = AiLMsm + A2L phase + A3LNCR-                             (4)
+
+A1,2,3 20 balance reconstruction, invariance, and alignment.
+
+
+===== PAGE BREAK =====
+
+E. Policy-Grounded Supervision and Uncertainty Calibration
+
+a) Task heads and labels.: For supervised fine-tuning, H,, includes: (i) a classification head
+for activity/presence; (11) a regression head for kinematic or respiratory proxies (if available);
+and (iii) an abstain head trained on hard negative zones or low-SNR segments. The policy
+reasoner R,, maps (y,«) to a JSON-like action via constrained decoding on a small LLM or a
+structured decision tree distilled from it.
+
+b) Calibration objective.: We calibrate confidences using temperature scaling and energy-
+
+based scores. Let f; be the logit for class k. The temperature-scaled cross-entropy is:
+
+Leal =
+
+exp(f,(0s)/T)
+dm   8 exp(felai)/T)                     ©)
+
+T > 0 is optimized on a validation split to minimize ECE; y; is the true label.
+
+c) Selective risk with abstention.: We apply a selective classification scheme where the
+system abstains when confidence or energy score falls below a threshold 7, which will be bound
+in ZK (Sec. II-F). This converts calibration into a decision-theoretic tradeoff between coverage
+
+and accuracy.
+
+F. Zero-Knowledge Proving System
+
+The core verifiability requirement is that a verifier V can check, without access to raw x or
+parameters 0 = (¢,v,7,w), that the action a arose from an approved model and a bounded
+window, with a threshold 7 that was not tampered with. We design four circuit families:
+
+¢ C1: Feature commitment. Commit to a compressed latent 2 = C(£4(x)) where C is a fixed
+
+(public) quantizer—hasher; public output includes a Pedersen (or Poseidon) commitment c.
+¢ C2: Version & threshold consistency. Enforce that Hash(@) = h(6,eg) and the abstention
+threshold equals the registered 7,.,.
+
+e C3: Time-window binding. Bind a nonce and a trusted timestamp (or window index) into
+
+the transcript to prevent replay.
+
+e C4: Decision correctness. Prove that the emitted action is consistent with logits and the
+
+policy mapping under the abstention rule.
+
+a) Statement and witness.: The public statement is (c, h(Orcg), Treg, twin, @) and the secret
+witness is (x,0,Z,nonce). The verifier only sees (a,7) and the statement. We compile the
+decision path into an arithmetic circuit under PLONK/Halo2, with lookups for non-linearities
+
+(e.g., GELU/RMSNorm) and range checks for quantized activations.
+
+
+===== PAGE BREAK =====
+
+b) Circuit-level objective.:
+VERIFY(7; ¢, A(Oreg), Treg, twin, @) = L.                        (6)
+
+m is a succinct proof that there exists a witness (x, 0, Z, nonce) s.t. C1-C4 hold; tyin is the time/window binding.
+c) Quantization and lookups.: To control circuit size, we quantize activations to q-bit
+fixed-point and implement MLP/attention via table lookups plus fused multiply-accumulate
+constraints. Layer norms are replaced by affine rescaling with precomputed statistics recorded
+in the registered model version.
+d) Batched proving.: For streaming, we support micro-batching of 6 windows that share
+6 and (Treg, twin); the circuit amortizes constraint reuse and produces one batched proof with a
+
+         B
+vector of actions {a;}—1.
+
+G. Federated & Differentially-Private Training
+
+a) Federated orchestration.: Sites participate in rounds r = 1,.... Each site s holds data
+D, and trains local parameters 6, using £,,- (Eq. ??) and supervised heads when labels exist. We
+employ gradient clipping and DP-SGD with noise multiplier o to ensure sample-level privacy.
+b) Objective with regularizers.: Let Lz, denote task losses (cross-entropy, MAE for re-
+
+gressions) and ,, an uncertainty calibration regularizer (ECE proxy). The local objective is
+Liocal = Lore +a Lup + B Leal + Y Ru,                               (1)
+
+a, 8, y=0 balance supervised alignment, calibration, and uncertainty regularization.
+
+c) Aggregation and personalization.: The server aggregates 0, via adaptive weighting that
+reflects site reliability (e.g., by validation metrics or uncertainty). We then apply a lightweight
+per-site adapter fine-tuning (head-only or LoRA) to personalize models, preserving the registered
+
+backbone hash for ZK compatibility.
+
+H. Robustness-Oriented Training
+a) Threat-aware augmentations.: We simulate (1) jamming-like power spikes; (11) packet
+loss patterns; (111) spectral shifts approximating hardware drift; and (iv) replay mosaics by mixing
+
+old segments at low SNR. Hard examples receive larger loss weights via focal scaling.
+
+
+===== PAGE BREAK =====
+
+b) Selective abstention curriculum.: We mine near-threshold samples and train the abstain
+head to trigger before misclassification, using a penalty for incorrect non-abstentions at low
+confidence. This improves the coverage—risk Pareto and reduces proof-generation for ambiguous
+
+windows (where abstention short-circuits policy actions).
+
+I. Policy Reasoner and Structured Actions
+
+R,,; emits a constrained JSON record:
+
+{"zone": "A™, "target™:"human",
+"decision": "allow|deny|alarm|abstain",
+"basis": ["presence", "gait"],
+
+"confidence": u}
+
+A small instruction-tuned model enforces a schema, and decoding is constrained by a finite-
+state grammar to avoid ill-formed outputs. For fully offline deployments, we use a distilled
+decision tree with equivalent logic; its path predicates are embedded into circuit C4 so that the
+
+action-to-logit mapping is provable.
+
+J. Complexity, Latency, and Memory
+
+a) Inference.: With N transformer blocks, local window size w; in time and grouped
+attention over g-sized subcarrier groups, attention cost scales as O(Tw,d + (S/g)g?d) per block
+(linear in 7’ and S under local/grouped assumptions).
+
+b) Proving.: Circuit constraint count is roughly
+
+#C  Cstem, + N: Cattn (We, 9) + Cpolicy + Chind -
+
+conys        attn+ FEN         C4     C2,C3
+Quantization reduces Cattn via lookup tables; micro-batching amortizes polynomial-commitment
+
+openings. On a modest edge gateway, proofs for short windows (e.g., 7’ < 128) are produced
+in sub-second to low-seconds regimes depending on batch size B and curve/system choices;
+
+verification is typically orders of magnitude faster.
+
+K. Implementation Details
+
+a) Preprocessing pipeline.: We implement synchronized windowing with overlap—add to
+maintain coverage while controlling latency. Real/imag channels are standardized by per-subcarrier
+
+Statistics; phase unwrapping uses robust jumps suppression.
+
+
+===== PAGE BREAK =====
+
+b) Backbone hyperparameters.: The stem uses dp € {32, 64}; transformer depth N € {6, 12};
+hidden size d€ {256, 384}; grouped attention with g € {8, 16}. We use RMSNorm and SwiGLU
+activations; for ZK, we approximate SwiGLU with a piecewise-linear lookup.
+
+c) Loss weights.: 4=1, Az € [0.1, 0.5], A3 € [0.5, 1] depending on policy-text availability;
+2 is tuned via ECE on a development split; selective abstention penalty ramps during curriculum.
+
+d) Prover backend.: We target PLONKish systems with Poseidon hash and KZG commit-
+ments; Halo2 backends are also supported. Non-linearities are realized by fixed-precision tables;
+
+softmax in C4 uses log-sum-exp approximations with error-bounded lookups.
+
+L. Optional: Streaming and Batching
+
+We maintain a rolling buffer of W windows. A guard band ensures that overlapping windows
+share the same context «; the prover batches 6 windows and produces a single proof with a
+vector of actions, reducing amortized proof time per window. The verifier accepts the batch if
+
+all actions pass; otherwise it requests a split-proof fallback for the failing indices.
+
+M. Optional: Verifiable Post-Training Audits
+
+Beyond inference-time proofs, we support attested evaluation: an auditor can request that a
+site replays evaluation windows and returns (metrics, 7). The circuit proves that the reported
+accuracy/AUROC over a declared subset was computed by the registered model and unaltered
+
+thresholds. This uses sum-check style accumulators embedded into C4.
+
+N. Training Procedure (All-in-One)
+O. Ablations Encoded in Design
+
+Because the proving layer constrains model changes, we separate frozen components (back-
+bone @ post-registration, with only adapter/policy fine-tuning) from mutable components (site
+adapters and thresholds). We ablate: (1) no phase regularization (Eq. (2)); (ii) no cross-modal
+alignment (Eq. (3)); (iii) no abstention curriculum; (iv) unverifiable deployment (no C2/C3); and
+
+(v) no micro-batching.
+
+P. Security Discussion (Threat Coverage)
+
+a) Replay.: C3 binds time indices and nonces to commitments, so reusing an old (a, 7)
+
+for a new window fails verification.
+
+
+===== PAGE BREAK =====
+
+b) Threshold tamper.: C2 encodes 7,.¢; any on-device threshold change breaks the proof.
+
+c) Model rollback.: The registered model hash h(6;c¢) is checked in C2; older binaries fail
+unless re-registered.
+
+d) Adversarial perturbations.: Selective abstention with calibration restricts high-risk de-
+cisions; physics-preserving augmentations improve margin against environmental perturbations;
+
+audit logs track repeated abstentions for operator triage.
+
+Q. Formal Summary of Objectives
+
+Collecting Eqs. (1)-(5), the end-to-end training objective is:
+
+min  E(a,y,e)~D [Ai 2s + A2£ phase + A3LNCE + AL sup + BLeat + Rul,
+
+subject to an inference-time verifiability constraint VERIFY(z;-) = 1 in Eq. (6) for any executed
+action. In practice, this means that after model registration we quantize and export a proof-ready
+
+artifact with canonicalized non-linearities and thresholds.
+
+R. Engineering for Heterogeneous Edge
+
+We provide two deployment modes: (i) Edge-only, where the sensing node runs Ey, Hy, R.,
+and a light prover; and (ii) Edge+Gateway, where the node streams compressed C(£4(x))
+to a nearby gateway that runs the prover and returns (a,7). The latter yields better latency
+for heavier circuits. Both modes sign (a,7,c, h(Oreg), twin) into an append-only audit log and
+
+optionally forward summaries to a compliance vault.
+
+S. Practical Tips for Reproducibility
+
+e Window sizing. Start with T € [64,128] and overlap 50%; enlarge T only if respiratory or
+gait periodicities require it.
+
+e Quantization. Use q = 8 bits for hidden activations; precompute layernorm statistics; export
+lookup tables with max error < 1%.
+
+e Calibration. Fit T (Eq. (5)) on held-out zones; measure ECE and coverage-risk curves and
+update 7,.. conservatively.
+
+e FL hygiene. Clip gradients at C=1.0, o € (0.5, 1.0]; validate per-site; personalize via LORA
+adapters to keep h(;eg) stable.
+
+
+===== PAGE BREAK =====
+
+20
+
+T. Limitations
+
+ZK proofs still incur nontrivial latency for long sequences or large backbones; strict quanti-
+zation and lookup approximations may slightly degrade accuracy in edge cases. Abstention can
+reduce coverage under extreme interference; operational playbooks (escalation, sensor redun-
+
+dancy) are recommended.
+
+Notation recap for Eqs. (1)-(6). For readability, we inline symbol explanations below each equa-
+tion; we summarize the most important symbols here as well: z—windowed RF tensor; £,—RF
+encoder; D.,—decoder; A,—adapter; H,,—task head; R,,—policy reasoner; z—latent; p—pooled
+embedding; t—policy text embedding; 7, 7,..—thresholds; h(@)—model hash; c—feature com-
+
+mitment; tin, —time/window binding; s—ZK proof.
+
+1          A
+Lism = ra)  S-  I|Zt,s — Le,s|l,                                                 (1)
+(t,s)EQ
+Symbols: (2 masked patches; 7 = D,,(E4(£))                . It LI loss.
+1  S
+Lonase = 3) Var(AZ2{9 — AZ2!)                                                            (2)
+
+s=1
+Symbols: Z (a). z () two augmentations; A temporal phase increment; Var variance over time.
+
+exp((p, t)/Te)
+
+Lyncr = — log                                                                                         (3)
+divew exP((p, t’)/Te)
+Symbols: p = Pool(A,(z)) pooled latent; t policy text embedding; 7, temperature; GB batch.
+Lore = AiLmsm + A2L phase + A3LNCE                                                (4)
+
+Symbols: A123 > 0 weights for reconstruction, invariance, alignment terms.
+
+—        exp (fy: (#2) /T)
+eh   © S, exp(fel)/T)                                   (5)
+
+Symbols: he logit for class k; T’ > O temperature; 4; true label; NV batch size.
+
+Leal =
+
+
+===== PAGE BREAK =====
+
+21
+
+VERIFY(7; ¢, h(Oreg), Treg, twin, @) = 1                                                    (6)
+Symbols: 7 ZK proof; c feature commitment; h(Oreg) registered model hash;
+
+Treg tegistered threshold; twin time/window binding; a action.
+
+IV. EXPERIMENTAL SETUP
+
+This section describes the datasets, acquisition protocols, hardware platforms, software stack,
+and evaluation metrics used to assess ZK-SenseLM. Our goal is to measure (i) sensing utility
+across representative tasks (HAR, presence/intrusion, respiratory proxies, RF fingerprinting), (ii)
+robustness and calibration under realistic perturbations, (iii) cryptographic verifiability overheads,
+and (iv) deployability on heterogeneous edge hardware. Unless otherwise specified, all experi-
+ments follow the methodology of Sec. III, use the overview pipeline in Fig. 1, and adhere to
+a fixed random seed per split. We report macro-averaged results with 95% confidence intervals
+
+from 5 independent runs.
+
+A. Datasets and Protocols
+
+a) Task taxonomy.: We evaluate on five task families that collectively capture the breadth
+of wireless sensing and access-control use cases:
+1) Device-free Human Activity Recognition (HAR) with fine-grained gestures and com-
+posite activities.
+2) Presence/Intrusion Detection with zone constraints (in-area vs. out-of-area) and absten-
+tion when ambiguity is high.
+3) Respiratory and Pulmonary Proxies estimating respiration rate (RR) and spirometry-
+related proxies (e.g., proxy FEV, class bands).
+4) RF Fingerprinting (RFF) for device identity/provenance with adversarial and distribution-
+shift scenarios.
+5) Localization Aids (optional) that provide auxiliary supervision via coarse position bins to
+encourage spatially coherent embeddings.
+b) Composite benchmark.: We form a composite benchmark from two sources. (A) Self-
+collected RF-SenseLab. A multi-room office/home-like environment with up to three Wi-Fi APs
+
+(2x2 MIMO), two monitor NICs, and a radar/RFID corner for cross-technology support. Data
+
+
+===== PAGE BREAK =====
+
+22
+
+include (i) 14 gestures (e.g., swipe, push, raise), (ii) 10 composite HAR activities (e.g., sitting-
+to-standing, walk-and-turn), (iii) presence/intrusion sequences with door crossings and corridor
+traversals, (iv) quiet-standing respiratory segments (2-4 minutes per subject), and (v) RFF
+captures from 30 commodity devices across {smartphones, IoT cameras, plugs, routers}. Environ-
+mental variations span furniture reconfigurations, open/closed doors, and interference levels. (B)
+Public fragments. We supplement training/validation with publicly-available CSI/radio sensing
+fragments (when licensing permits) to increase diversity and test cross-domain generalization.
+The public fragments are used only as additional domains; evaluation on our held-out domains
+remains primary.
+
+c) Collection ethics and consent.: All self-collected trials use consent scripts and signage
+indicating the presence of non-contact sensing. Respiratory segments are screened to exclude
+individuals with contraindications; no clinical diagnoses are recorded. Raw personally identifi-
+able information is never logged; identifiers are pseudonymized. We release only pre-processed
+features in any public artifact.
+
+d) RF/CSI acquisition.: For Wi-Fi CSI, we use 802.1 lac (5 GHz) and 802.11n (2.4 GHz)
+configurations. Unless noted, CSI is acquired at 500-1000 Hz effective sampling via commodity
+NICs (Intel AX200/AX210 as receivers) using open-source CSI toolchains. Transmitters are
+commodity APs (Broadcom/Qualcomm chipsets). Each scene uses 2—3 APs at different corners
+to diversify multipath. We modulate traffic with UDP broadcast to sustain a stable CSI rate. For
+radar, a 60 GHz FMCW module provides range-Doppler cubes at 15—20 Hz; for RFID, a UHF
+reader polls passive tags at 20-40 Hz.
+
+e) Windowing and labeling.: All streams are segmented into sliding windows of length
+T € {64, 96, 128} frames with 50% overlap; unless stated, 7=128 at 500 Hz (i.e., 256ms). HAR
+labels come from synchronized video-assisted annotation; presence/intrusion labels are triggered
+by door sensors and calibrated by video timestamps; respiratory ground truth uses a contact chest
+strap or spirometer for short sequences; RFF labels are the device identifiers validated by MAC
+associations and physical proximity logs. For auxiliary localization supervision, we discretize
+the floor plan into coarse zones (e.g., room-A, corridor-B) using BLE beacons for noisy anchors.
+
+J) Splits and cross-domain evaluation.: We report the following splits: (i) Subject-wise:
+train/val/test subjects are disjoint. (ii) Room-wise: train on rooms {A,B}, test on {C}. (iii) Day-
+wise: train on day 1, test on day 2 with different interference. (iv) Device-wise (RFF): train on
+
+a subset of devices, test on the held-out devices (open-set identity). For each split, we reserve
+
+
+===== PAGE BREAK =====
+
+23
+
+10% of training windows for calibration/threshold tuning (never for learning).
+
+g) Threat-model datasets.: To evaluate robustness and security, we craft perturbed sets: (a)
+Environmental actuation—moving metal reflectors, oscillating fans, and human distractors behind
+partitions; (b) Protocol perturbations—packet inter-arrival jitter and low-rate packet dropping; (c)
+Spectral drift—temperature-driven CFO-like ramps; (d) Replay mosaics—DMAs of old segments
+injected at low SNR on a secondary transmitter; (e) Intentional jamming—short bursts at +5 MHz
+offsets below regulatory thresholds. Perturbations are applied to 20-30% of test windows (never
+
+to calibration windows) to probe the selective abstention behavior.
+
+B. Baselines and Ablation Suite
+
+a) Sensing baselines.: We compare against (i) CNN-T: a 2D ConvNet over time—subcarrier
+spectrograms with temporal pooling; (ii) GRU-AMP: an amplitude-only GRU; (iii) PhaseAnti-
+like encoders with interference-independent phase components; (iv) HAR-XAttn: a transformer
+with global attention (no grouping); and (v) RFF-ResNet: a residual encoder with center loss for
+device IDs. Baselines do not include ZK proofs; their decisions are audited only via signatures.
+
+b) Ablations.: We ablate ZK-SenseLM by removing: (a) phase regularization (Eq. (2)); (b)
+cross-modal alignment (Eq. (3)); (c) abstention curriculum; (d) federated DP training; (e) C2/C3
+consistency circuits (verifiability off); and (f) micro-batched proving. Each ablation keeps the
+
+rest unchanged and is separately calibrated.
+
+C. Implementation Details
+
+a) Preprocessing.: We perform packet de-duplication, CSI phase sanitization (CFO and
+sampling time offset compensation), and antenna calibration by subtracting median phase across
+pilot subcarriers per packet. Windows are standardized per subcarrier using running means
+collected from training data only. We compute short-time Fourier transforms for radar to produce
+range-Doppler slices; RFID sequences use phase rate (time-differenced phase) and smoothed
+RSS.
+
+b) Augmentations.: We adopt physics-respecting augmentations from Sec. III: spectral
+dropout (mask ratio 10-20%), phase ramps (+0.02 rad/frame), reverberation via short FIR kernels
+(length 5-9), and power jitter (+3 dB). For robustness studies we add packet thinning (10-30%
+random drop) and subcarrier thinning (drop 25% of subcarriers). Augmentations are disabled on
+
+validation/test.
+
+
+===== PAGE BREAK =====
+
+24
+
+c) Training schedules.: Pretraining uses the masked spectral modeling with \;=1, A2=0.3,
+A3=0.7 for 100 epochs. Fine-tuning runs 50 epochs with early stopping on macro-Fl. We use
+AdamW with learning rate 3x10~*, cosine decay, and weight decay 10~*. Batch sizes are 128
+on server GPUs and 32 on edge GPUs. Temperature 7’ for calibration is fitted on the held-out
+calibration split after fine-tuning. The abstention threshold 7,.¢ is chosen by maximizing the
+coverage-risk utility (see metrics).
+
+d) Federated orchestration.: For DP-FL experiments, we simulate 8—16 sites with partic-
+ipation rate 0.5 per round. Each round trains 1 local epoch; gradients are clipped to C=1.0
+and perturbed with Gaussian noise N(0,07C?) with o € {0.5,0.7,1.0}, producing (e,6)-
+DP guarantees calculated via moments accountant (we report ¢ at 6=10~°). Aggregation is
+adaptive FedAvg with site weights proportional to validation macro-F1 and inversely proportional
+to uncertainty (lower ECE). Personalization applies LoRA adapters (rank 8) on the last two
+transformer blocks and the task heads.
+
+e) Proof compilation.: We quantize activations to 8-bit fixed point, replacing RMSNorm/SwiGLU
+by lookup-backed approximations with max absolute error < 1% relative to FP32 on calibra-
+tion set. Circuits C1—C4 are compiled to a PLONKish backend with Poseidon hash and KZG
+commitments. We use batched proving for B € {4,8, 16} consecutive windows that share 0 and
+
+policy thresholds. Verification runs on the edge gateway or controller.
+
+D. Hardware Platforms
+
+a) Edge nodes.: We deploy on three representative classes:
+e Edge-A (x86 laptop): 12-core Intel 17-12700H, 32 GB RAM, NVIDIA RTX 4060 Laptop
+(8 GB), Intel AX210 NIC, Ubuntu 22.04, CUDA 12.x.
+e Edge-B (Jetson): NVIDIA Jetson Orin Nano (8 GB), 6-core ARM Cortex-A78AE, inte-
+grated GPU, Intel AX200 (via M.2 adapter), JetPack 6.x.
+e Edge-C (Raspberry Pi): Raspberry Pi 4B (4GB), external AX200 via USB 3.0 (monitor
+mode) and a lightweight FMCW radar module on CSI-2 bridge, Raspberry Pi OS (64-bit).
+b) Gateways and servers.: A nearby Gateway handles proving when offloaded: AMD
+Ryzen 9 5950X, 64GB RAM, NVIDIA RTX A4000 (16 GB). The Server for training uses dual
+Intel Xeon or AMD EPYC with up to 4x A100/80 GB or 2xRTX 4090 (24GB). All machines
+
+run Ubuntu 22.04 with Dockerized services for reproducibility.
+
+
+===== PAGE BREAK =====
+
+25
+
+c) Radio front-ends.: Wi-Fi APs: two tri-band commodity routers (e.g., Qualcomm/IPQ807x)
+set to 80 MHz at 5 GHz and 40 MHz at 2.4GHz; NICs in monitor mode with CSI extraction
+toolchains. Radar: 60 GHz FMCW module with 3cm range resolution and 0.2 m/s Doppler bin.
+UHEF RFID reader with circularly polarized antennas.
+
+d) Power and latency measurements.: On x86 platforms we use Intel Power Gadget (CPU)
+and nvidia-smi (GPU). On Jetson we use NVML counters; on Raspberry Pi we use an
+external USB-C inline power meter for averaged consumption. Latency is measured with perf
+timestamps and synchronized NTP across nodes. Prover/Verifier wall-clock is captured with
+
+monotonic clocks at microsecond resolution.
+
+E. Software Stack
+
+The RF pipeline is implemented in Python with PyTorch 2.x, Torch-TensorRT for edge
+acceleration, and ONNX export for inference where needed. CSI capture and preprocessing
+use libpcap-based parsers and device-specific drivers. The ZK toolchain includes a circuit DSL
+that compiles to Halo2/PLONK backends; proof/verify clients are packaged as gRPC services
+with protobuf schemas for (a, 7,c, h(Areg), twin). FL orchestration uses a lightweight controller
+(Ray-based) with secure channels (TLS 1.3) for model/metric exchange. All experiments are
+
+scripted via hydra configuration files; we release redacted configs for reproducibility.
+
+F. Evaluation Metrics
+
+We report utility, robustness, calibration & selectivity, verifiability cost, efficiency, and privacy
+metrics.
+
+a) Task utility.: For HAR/presence, we report macro-averaged accuracy Acc and macro-F1:
+K
+
+N
+1        .               1      2 Prec; Rec;
+  vd iwi)      K Prec, + Reo,
+
+with per-class precision/recall averaged across K classes. For respiratory proxies, we use mean
+absolute error (MAE) for RR and macro-Fl for class-banded spirometry proxies. For RFF
+(closed-set) we use Acc and macro-F1; for open-set RFF we report area under ROC (AUROC)
+
+for unknown-vs-known rejection and Equal Error Rate (EER).
+
+
+===== PAGE BREAK =====
+
+26
+
+Latency-Energy Pareto
+
+B=1
+1.8                         —e Edge-A (on-device)
+—m— Edge-B (gateway offload)
+
+— 1.6
+
+fe)
+
+D
+
+a)
+
+O 1.4
+
+a)
+
+a
+
+>
+
+©
+
+co)
+
+c
+
+Lu
+
+20     25     30     35     40     45     50     55
+End-to-End Latency (ms)
+
+Fig. 2: Latency—energy Pareto under batching and gateway offload. Micro-batching (B=1,4,8,16)
+bends the curve favorably; offloading proving to a gateway reduces on-device energy while
+
+keeping verification fast.
+
+b) Calibration and selective risk.: We compute Expected Calibration Error (ECE) with
+15 bins and also Negative Log-Likelihood (NLL). For selective classification with abstention
+
+threshold 7, we define coverage C(r) and selective risk R(T):
+N
+
+_i     —    +) = ye U(ui > 7) 1G: ~ yi)
+CO) = HL AMu 2 ), R(t) =  =P dS 7)  ,
+
+We summarize performance by the area under the coverage-risk curve (lower is better) and by
+
+the operating point 7,.. chosen on the calibration split, which is subsequently frozen and encoded
+in C2.
+
+c) Robustness.: Under the threat-model sets (Sec. I[V-A), we report the relative performance
+
+drop AF1=F 1 c1ean—F 1 pert at matched coverage, and the abstention rate increase AAbstain=Apen— Actean
+
+where A= >2, 1(ui<Treg). We also report shift-detection AUROC using the energy score or
+
+ODIN-like logit perturbations as detectors (unsupervised).
+
+
+===== PAGE BREAK =====
+
+27
+
+d) Verifiability cost.: We measure proving time tprove, verification time tyerigy, proof size
+|7|, and peak memory during proving. Metrics are reported per window and per batch (B). We
+
+also report the amortized cost (per window) in micro-batched settings:
+
+(batch)                           (batch)
+>               trove           =            |7|
+
+To reflect end-to-end impact, we include the fraction of windows that hit the abstain fast path
+(no action proof) versus those that require full C4 reasoning.
+
+e) Efficiency.: We report end-to-end latency (windowing + encode + head + reason + prove
++ verify) and device energy (CPU, GPU where applicable) per decision. For FL experiments,
+we report per-round wall-clock, total upstream/downstream bytes, and site-local energy. We also
+track model footprint (parameters, quantized artifact size) and activation RAM at inference.
+
+f) Privacy indicators.: We simulate basic reconstruction attacks on latents by training an
+attacker decoder on the training split and measuring reconstruction PSNR/SSIM on the test split;
+lower is better. For FL, we report DP (<, 5) at training completion. For RFF, we quantify identity
+leakage by attempting to re-identify devices from generic sensing logs (without explicit IDs)
+using the released embeddings; we report top-1/top-5 re-identification accuracy, aiming for low
+
+values with privacy measures enabled.
+
+G. Evaluation Protocols
+
+a) Training/evaluation separation.: No test window (or its overlapping neighbors) is used
+in training or calibration. For subject-wise splits, we ensure subjects never appear across splits;
+for room-wise splits, we avoid rooms with shared AP positions to prevent trivial leakage. Data
+augmentations are applied only in pretraining and supervised training; not in validation or test.
+
+b) Calibration and threshold registration.: We fit temperature T' on the calibration subset
+by minimizing NLL. We then sweep 7 to produce the coverage-—risk curve and choose 7;g that
+maximizes a utility U(r)=F1(r) — AR(r) with A=0.5 by default. The tuple (h(Arce), Treg) is
+registered and used in all proofs. If a site later updates LoRA adapters (personalization), the
+backbone hash remains unchanged to preserve verifiability; only head hashes are updated, and
+the update is recorded in the registry.
+
+c) Baseline fairness.: All non-ZK baselines undergo the same calibration process and use
+the same 7;.. for abstention (but without proofs). We match parameter counts within +10%
+
+where possible; for smaller baselines we allow an accuracy-speed tradeoff study.
+
+
+===== PAGE BREAK =====
+
+28
+
+d) FL settings.: We consider two regimes: Cross-site non-IID where each site collects a
+different subset of activities and environmental layouts; and Balanced ITD where sites share
+similar distributions (sanity check). We report global models and personalized models. For DP
+experiments we vary o; for decentralized/graph variants we vary peer degree and gossip periods.
+
+e) Robustness sweeps.: For each perturbation type we sweep an intensity parameter: e.g.,
+jitter standard deviation for packet timing, spectral drift slope for phase ramps, and jammer SIR
+
+(signal-to-interference ratio). We present curves of utility vs. intensity at matched coverage.
+
+H. Reproducibility Aids
+
+We adopt a strict configuration discipline: all hyperparameters are stored in versioned YAML;
+every run logs Git commit hashes and the exported quantized model artifact checksum. Proof
+transcripts (public statements + proof bytes) are archived with timestamps. Edge devices are
+configured with NTP and logs include NTP offsets. For each figure/table in Sec. V, the script
+(make_fig_X.py) is referenced in the caption notes to enable exact reproduction given the
+
+dataset.
+
+I. Potential Confounders and Mitigations
+
+a) Motion priors.: Ambient motion from non-participants can bias HAR/presence labels.
+We mitigate by using synchronized door/motion sensors to disambiguate incidental movement;
+residual ambiguity is routed to the abstain class and excluded from positive performance
+tallies.
+
+b) AP placement and layout.: Differences in AP layout across rooms can create domain
+shortcuts. We randomize AP placements across data-collection days and include layout metadata
+only as optional covariates (never as inputs) to avoid leakage.
+
+c) Clock drift.: CSI streams may suffer from drift; we monitor per-session drift and resyn-
+chronize using periodic reference beacons. Windows with unresolved drift are flagged and
+excluded from training but retained for robustness testing (as a stressor).
+
+d) Observer effects.: For respiratory proxies, participants may alter breathing when moni-
+tored. We conduct unobtrusive segments after a neutral task and include a short adaptation period
+
+before labeling to reduce bias.
+
+
+===== PAGE BREAK =====
+
+29
+
+J. A Note on Cross-Technology Experiments
+
+While Wi-Fi/CSI is the primary modality, we include complementary radar/RFID segments
+to demonstrate cross-modal alignment and to stress-test the adapter A,. Radar sequences are
+aligned by timestamp and resampled to match CSI windows. RFID segments are used to en-
+rich presence/intrusion events in line-of-sight obstructed zones. Cross-modal training uses the
+same InfoNCE term (Eq. (3)) with text tokens describing scenes (“corridor traversal,” “door
+
+crossing”’).
+
+K. Statistical Testing
+
+We compute 95% confidence intervals from 5 runs with different seeds. For pairwise com-
+parisons we use a paired t-test across runs; for multiple baselines we use Holm—Bonferroni
+correction. To compare coverage-risk curves we adopt the DeLong test on ROC-like summaries
+obtained by mapping coverage to TPR and risk to FPR via an abstention-as-negative transfor-
+
+mation.
+
+L. Outputs for Audits and Compliance
+
+Each decision yields an audit record:
+(ts, site_id, zone, a, u, c, h(Areg), twin, ||, Sig),
+
+where sig is an authenticated signature. For experiments requiring third-party verification, we
+export (a,7) with the public statement so that an external verifier can reproduce acceptance
+without access to raw data. We also provide per-session summaries: acceptance rate, abstention
+rate, proof acceptance failures (if any), and anomaly flags (e.g., repeated abstentions in the same
+
+zone).
+
+M. Ablation Plan Tied to Metrics
+
+We tie each ablation to a primary metric:
+
+e No phase regularization — sensitivity to spectral drift: report AF 1 vs. drift slope.
+
+¢ No cross-modal alignment — semantic grounding loss: report drop in policy-consistent
+decisions (% of actions that match labeled policy outcomes).
+
+¢ No abstention curriculum — coverage-risk area increase and higher false actions under
+
+perturbations.
+
+
+===== PAGE BREAK =====
+
+30
+
+e No DP-FL — privacy < decreases (trivial), but report generalization gaps across sites to
+show tradeoff.
+
+e No C2/C3 — proof rejected rate becomes undefined; demonstrate that tampering (thresh-
+old/model rollback) goes undetected in a red-team simulation.
+
+¢ No micro-batching — tprove and [zr increase; quantify the amortization benefit.
+
+N. Parameter Footprint and Exported Artifacts
+
+We report parameter counts for the encoder E', (6-12 transformer blocks; 12—25M param-
+eters), adapters (0.5-1.5M), and heads (0.2—0.6M). Quantized artifacts are exported as ~30-
+80 MB packages including lookup tables and hashed metadata. We also export a minimal verifier
+
+client (< 5 MB) and a CLI for batch verification.
+
+O. Edge Deployment Modes
+
+Two modes are evaluated:
+
+1) On-device proving: Edge nodes perform both inference and proving. This stresses com-
+pute/energy but minimizes latency variance.
+
+2) Gateway proving: Edge performs inference and feature commitment, offloading proof
+generation to a nearby gateway via a local, authenticated channel. This reduces on-device
+energy; we report end-to-end latency including network overhead (sub-1 ms LAN).
+
+For both modes, verification runs either on the edge (for in-area policies) or on a central controller
+
+(for enterprise policies).
+
+P. Failure Modes Logging
+
+We log and categorize failures: (7) proof generation timeouts, (ii) verification rejections, (iii)
+action-schema violations (guarded by constrained decoding), and (iv) out-of-coverage absten-
+tions. For each category we retain a fixed number of recent contexts to support post-mortem
+
+analysis while preserving privacy.
+
+Q. Limitations of the Setup
+
+While the composite benchmark covers diverse layouts and perturbations, it is not exhaustive:
+
+industrial environments with heavy machinery, dense metallic clutter, or extreme multipath may
+
+
+===== PAGE BREAK =====
+
+31
+
+behave differently. Our respiratory proxies are not substitutes for clinical tests; their use here is
+for sensing-system evaluation. RFF open-set evaluation depends on the choice and age of devices;
+
+replacing device models may alter absolute numbers but should preserve relative trends.
+
+R. Summary
+
+In sum, our setup stresses ZK-SenseLM along the axes that matter for secure, privacy-preserving
+wireless sensing: domain generalization (subject/room/day splits), robustness (environmental
+and protocol perturbations), trust (ZK proofability of decisions under registered thresholds and
+versions), and practicality (edge latency/energy). The following section reports quantitative results
+with comparisons to baselines and ablations, and analyses organized around utility—latency—
+verifiability trade-offs, robustness curves, calibration and abstention behavior, and privacy/DP
+
+footprints.
+
+V. RESULTS & DISCUSSION
+
+We report quantitative results for ZK-SenseLM on the composite benchmark described in
+Sec. IV, organized around four questions: (1) Does the encoder and selective abstention yield
+state-of-the-art utility and calibration under realistic domain shifts? (ii) What are the robustness
+properties under environmental, protocol, and spectral perturbations? (111) What is the cost of
+verifiability and how does micro-batching amortize proofs at the edge? (iv) How do the design
+choices—phase-consistency regularization, cross-modal alignment, abstention curriculum, DP-
+FL, and proving circuits—contribute according to ablation studies? Unless otherwise specified,
+the quantitative summaries appear in Table I (overall utility on the clean test sets), Table I
+(domain shift), Table III (perturbation stress tests), Table IV (calibration and selective risk),
+Table ?? (verifiability metrics), and Table ?? (ablations). Visual analyses—coverage-risk curves,
+calibration reliability diagrams, and latency/energy—coverage tradeoffs—are referenced as Fig. 3,
+Fig. 4, and Fig. 2, respectively. The end-to-end system pathways are the same as in Fig. 1; we
+
+refer to that figure when discussing action-to-proof flows.
+
+A. Overall Utility and Calibration on Clean Splits
+
+Across HAR, presence/intrusion, respiratory proxies, and RFF (closed-set), ZK-SenseLM achieves
+consistently strong utility on the clean test partitions. On the subject-wise and day-wise splits,
+
+macro-F1 is highest or statistically tied for first against all learning baselines, while maintaining
+
+
+===== PAGE BREAK =====
+
+32
+
+Coverage-Risk Trade-offs
+
+—— ZkSenseLM
+0.30                                    —— CNN-T
+— _ HAR-XAttn
+% 0.25
+oc
+co)
+2 0.20
+U
+co)
+oO
+“0.15
+0.10
+
+0.3    0.4    0.5    0.6    0.7    0.8    0.9    1.0
+Coverage
+
+Fig. 3: Coverage-risk trade-offs across models. ZK-SenseLM traces curves toward the lower-left
+
+region (lower selective risk at comparable coverage), especially under mild distribution shift.
+
+TABLE I: Overall utility and calibration on clean splits (subject-/day-wise). HAR/Presence:
+macro-F1; Resp.: mean absolute error (MAE, breaths/min); NLL after temperature scaling (lower
+
+is better). Mean95%CI over 5 runs.
+
+Model                               HAR FI! ¢     Presence Fl + Resp. MAE (bpm) |       NLL J
+
+ZK-SenseLM (ours)            0.92 + 0.01 0.95 + 0.01      1.80 + 0.08      0.42 + 0.02
+HAR-XAttn (global transformer) 0.89 + 0.02    0.92 + 0.02       2.20 + 0.09      0.55 + 0.03
+CNN-T (spectrogram CNN)       0.87 + 0.02 0.90 + 0.02       2.40 + 0.10      0.62 + 0.03
+GRU-AMP (amp-only)           0.82 + 0.03 0.86 + 0.03      2.90 + 0.12      0.71 + 0.04
+RFF-ResNet (resid. encoder)      0.84 + 0.02    0.88 + 0.02       2.60 + 0.11      0.68 + 0.03
+
+lower NLL and ECE after temperature scaling (Table I, Table IV). These gains align with the
+representation-learning trend in Wi-Fi HAR that favors masked reconstruction and invariance-
+
+promoting objectives [1], [5], [7], and they parallel the improvements seen when fusing phase
+
+
+===== PAGE BREAK =====
+
+33
+
+and amplitude cues [11] and enforcing stable, physically meaningful features [71]. Compared
+with early device-free recognition stacks such as WiSee and E-eyes [45], [47], the transformer
+backbone with local/grouped attention yields better generalization across layouts by honoring
+coherence bandwidth and local temporal dependencies rather than relying on global, layout-
+specific patterns.
+
+The respiratory proxy task benefits from the masked spectral modeling and phase regular-
+ization, improving periodic signal extraction relative to amplitude-only or GRU baselines and
+echoing observations from vital-sign sensing surveys [72]. We observe fewer failure cases in
+motion-adjacent segments, where the abstention head learns to defer decisions. These results
+are consistent with application-focused studies that caution against silent failures in clinical
+contexts and advocate reliability measures [26], [30]. For closed-set RFF, ZK-SenseLM matches
+or exceeds a ResNet center-loss baseline while using the same feature budget, consistent with
+the promise of deep RFF encoders in [13], [15].
+
+Calibration quality is high after temperature optimization on the calibration subset (Table IV).
+Reliability diagrams (Fig. 4) show reduced overconfidence in low-SNR windows compared to
+CNN and global-attention transformers. The selective risk at the registered threshold 7,., achieves
+favorable coverage-risk tradeoffs, a crucial property for dependable action gating in zero-trust
+
+pipelines (cf. [27], [60]).
+
+B. Domain Shift: Room-wise and Day-wise Transfers
+
+Generalizing across rooms and days remains a key challenge for RF sensing due to mul-
+tipath idiosyncrasies and incidental motion. On the room-wise split, we measure macro-F1
+drops for all methods; however, the phase-consistency term (Eq. (2)) and grouped attention
+mitigate overfitting to room-specific spectral artifacts (Table I1). The magnitude of degradation
+is lower than amplitude-only models and global-attention transformers, consistent with the insight
+that stable, physically-grounded phase increments offer transferable cues under layout changes
+[18], [22]. On the day-wise split, interference distribution shifts (co-/adjacent-channel traffic)
+cause miscalibration in baselines; temperature scaling corrects some of it, but our abstention
+curriculum proactively moves near-threshold windows into abstain, improving realized risk
+at matched coverage (Fig. 3). These behaviors reflect the broader understanding that sensing and
+communication objectives can diverge under realistic interference [19], making selective decision
+
+policies valuable.
+
+
+===== PAGE BREAK =====
+
+34
+
+Reliability Diagram (ZK-SenseLM)
+
+1.07 —e— Clean                          rt
+—m— Shifted                           “A
+5. 0.8
+UO
+©
+=)
+3 0.6
+<
+<e)
+(a)
+> 0.4
+(<)
+Wn
+Ze)
+° 0.2
+
+0.0       0.2       0.4       0.6       0.8       1.0
+Expected Confidence
+
+Fig. 4: Reliability diagram for ZK-SenseLM: calibration remains close to the diagonal on clean
+
+data and degrades gracefully under domain shift.
+
+TABLE II: Domain shift and open-set performance. Room-/Day-wise are macro-F1; Open-set
+
+uses AUROC (higher is better) and EER (lower is better) for unknown-vs-known rejection.
+
+Model                  Room-wise Fl ¢ Day-wise Fl ¢ Open-set AUROC ¢ EER (%) |
+ZK-SenseLM (ours)    0.86 + 0.02     0.88 + 0.02      0.94 + 0.01      71+ 0.4
+HAR-XAttn            0.82 + 0.03     0.85 + 0.02       0.90 + 0.02      9.8 + 0.6
+CNN-T                0.80 + 0.03     0.83 + 0.03       0.88 + 0.02      11.2 + 0.7
+GRU-AMP             0.74 + 0.04     0.78 + 0.03       0.85 + 0.03      13.9 + 0.9
+
+RFF-ResNet           0.77 + 0.03     0.81 + 0.03      0.87 + 0.02      12.1 + 0.8
+
+C. Robustness to Perturbations
+
+We stress-test five perturbation classes: environmental actuation, protocol jitter and packet
+drop, spectral drift, replay mosaics, and low-SIR jamming (Sec. IV). The relative utility drop
+
+AF 1 and abstention rate increase AAbstain are summarized in Table III. Three patterns emerge.
+
+
+===== PAGE BREAK =====
+
+35
+
+TABLE III: Robustness to perturbations at matched coverage (ours). AFI: absolute drop vs.
+clean; AAbstain: absolute increase in abstention rate; “Shift AUROC” is unsupervised shift
+
+detection AUROC at the same operating point. Notes summarize our method vs. best baseline.
+
+Perturbation (intensity sweep)                AFI |      AAbstain (%) t Shift AUROC t+ Notes
+
+Environmental actuation (fan/reflector)    0.04 + 0.01     +6.2 + 0.7       0.92 + 0.01     ~35% less Fl drop than CNN-T at same cover
+Protocol jitter & packet drop (10-30%) 0.05 + 0.01     +7.5 + 0.8       0.91 + 0.02     Thinning pretraining reduces errors by ~30%
+Spectral drift (CFO-like ramp)            0.06 + 0.01     +8.3 + 0.9       0.93 + 0.01     Phase regularization cuts drift sensitivity by ~4
+Replay mosaic (low-SNR mix-in)        0.07 + 0.02     +9.1 + 1.0      0.90 + 0.02    Abstention curbs false accepts; safe default
+
+Low-SIR jamming (offset +5 MHz)       0.09 + 0.02     411.4 + 1.2      0.88 + 0.02     Conservative coverage lowers risk vs. baselines
+
+First, environmental actuation (moving metal/oscillating fans) degrades baselines that lack
+phase-aware invariances, consistent with earlier findings that phase-stabilized features are more
+resilient [18], [22]. ZK-SenseLM’s phase-regularized latents plus spectral dropout reduce the
+induced spurious correlations; when failures do occur, the abstention head suppresses unsafe
+actions, lowering the selective risk relative to matched coverage baselines.
+
+Second, protocol perturbations cause packet-level irregularities that alter CSI rate and sub-
+carrier availability. Here, windowing and per-subcarrier standardization help, but the decisive
+factor is the robustness pretraining with packet/subcarrier thinning. This mirrors observations
+from cross-domain works that emphasize invariance to sampling irregularities [64]. Again, the
+abstention mechanism reduces risky decisions.
+
+Third, adversarially flavored perturbations—spectral drift ramps, replay mosaics, and short-
+burst jamming—represent realistic attack surfaces discussed in the adversarial RF literature [19],
+[21]. The curriculum-optimized threshold improves safety by trading some coverage for lower
+risk (Fig. 3), and the policy engine converts abstentions into benign actions (e.g., deny/alarm
+with human confirm), aligning with the defense-in-depth ethos of zero-trust [60]. While ZK-
+SenseLM is not an adversarially certified model, it avoids catastrophic errors in many near-
+
+boundary cases by design.
+
+D. Open-Set Recognition and Identity Signals
+
+Open-set behavior is essential for presence/intrusion and RFF when unseen classes or devices
+appear. Using thresholded energy scores, ZK-SenseLM attains higher AUROC for unknown-vs-
+
+known rejection than baselines on room-wise and device-wise splits (Table II). The improvements
+
+
+===== PAGE BREAK =====
+
+36
+
+are comparable in spirit to open-set Wi-Fi gesture recognition techniques that explicitly include
+uncertainty mechanisms [10]. For RFF, device re-identification under hardware revisions degrades
+across all methods, aligning with concerns about RFF brittleness [13], [15]. Federated/isolation
+training (Sec. HI) helps avoid overfitting to site-specific channelizations, and the policy reasoner
+treats identity as context rather than an absolute gate, echoing the cautionary stance in [2]: PHY
+
+fingerprints alone should not bear sole authentication responsibility.
+
+E. Verifiability: Proving & Verification Costs
+
+We next examine the cryptographic cost of turning a decision into an auditable statement,
+i.e., producing and verifying 7 for VERIFY(-)=1 (Eq. (6)). Table ?? presents median proving
+time tprove, Verification time tyerity, proof size |7|, and peak memory for three hardware classes
+(Edge-A/B/C) and a gateway. Observations are consistent with Figure 1: proving is the bottleneck;
+verification is fast enough to run inline in the controller.
+
+First, with quantized activations and lookup-backed non-linearities, the circuit footprint is
+manageable for 7’< 128 windows. Proof sizes remain small enough for audit-logging and network
+transmission. Second, micro-batching (B € {4,8,16}) reduces amortized per-window proving
+time and proof size (per window) with diminishing returns as B grows (Table ??; Fig. 2). Third,
+abstentions avoid C4 decision proofs and thus reduce cost when uncertainty is high; however,
+too-aggressive abstention increases human-in-the-loop overhead. We quantify this tension by
+reporting end-to-end latency at matched effective coverage (fraction of windows that produce
+actionable outputs).
+
+Compared to baselines without proofs, ZK-SenseLM does incur overhead, but the edge-acceptable
+envelope is reachable on Edge-A and gateway-offloaded on Edge-B/C. These regimes echo the
+systems practice of pushing cryptographic accountability to gateways while keeping sensing local
+(cf. the control-plane view in [27], [29], [60]). As with recent ZKML systems [56], [58], [73],
+[74], lookup tables and quantization are the main levers for tractability; our results corroborate
+
+the feasibility of proving small-window decisions at the wireless edge.
+
+F. Action Integrity and Tamper Evidence
+
+We simulate three red-team maneuvers: threshold tampering (lowering 7 to force more ac-
+
+cepts), model rollback (deploying an older model binary with looser calibration), and replay
+
+
+===== PAGE BREAK =====
+
+37
+
+TABLE IV: Calibration and selective risk at 7,.,. ECE uses 15 bins. Selective Risk is error rate
+
+on the accepted set at Tyg; “Coverage” is acceptance fraction.
+
+Model                  ECE (%) | Selective Risk (%) | | Coverage +
+ZK-SenseLM (ours) 1.7 + 0.2       6.9 + 0.4       0.82 + 0.01
+HAR-XAttn           2.6 + 0.3       8.8 + 0.6       0.80 + 0.02
+CNN-T              3.4 + 0.4       10.2 + 0.7      0.79 + 0.02
+GRU-AMP           4.1 + 0.5       12.6 + 0.9      0.78 + 0.02
+RFF-ResNet          3.7 + 0.4       11.7 + 0.8      0.79 + 0.02
+
+(resubmitting (a,7) from earlier windows). Without C2/C3, baselines cannot detect these ma-
+nipulations. With C2/C3 active, proofs fail verification for tampered thresholds or mismatched
+model hashes; replay fails because the time-binding ti, changes. We record zero accepted
+actions under tamper and zero accepted replays within the tested scope (Table ??). This aligns
+with the aim of zero trust to continuously verify identity, posture, and policy rather than relying
+on perimeter controls [60]. It also offers a complementary countermeasure to spoofing attacks
+
+at the PHY layer [2] by shifting trust to the decision artifacts rather than the raw RF alone.
+
+G. Ablation Studies
+
+a) No phase regularization (Eq. (2)).: Removing the phase-consistency term increases
+sensitivity to spectral drift and temperature-induced CFO-like ramps. The coverage-risk curve
+shifts unfavorably on drift sweeps, indicating more errors at the same coverage (Table ??; Fig. 3).
+This mirrors the role of phase stabilization in anti-interference designs [18], [22].
+
+b) No cross-modal alignment (Eq. (3)).:. Dropping the alignment with policy tokens re-
+duces the fraction of decisions that match policy-consistent outcomes, particularly in ambiguous
+presence/intrusion scenes (doorway linger, multi-person). This agrees with observations that
+semantically grounded embeddings are easier to steer with compact policies [3], [31]. The
+numerical drop is most visible in the policy-consistency metric (Table ??).
+
+c) No abstention curriculum.: Without curriculum, models remain overconfident in near-
+boundary windows, worsening selective risk and reliability diagrams (Table IV; Fig. 4). Prior
+open-set work on Wi-Fi gestures also finds that explicit uncertainty mechanisms are needed to
+
+avoid false accepts under shift [10].
+
+
+===== PAGE BREAK =====
+
+38
+
+Platform / Batch (B)                    tprove (ms) | — tverity (ms) | = || (KB) | Peak Mem. (GB)
+Edge-A (on-device), B=1             18.5 + 0.7     12+ 0.1    32.1 + 1.0     1.10 + 0.05
+Edge-A (on-device), B=4              12.6 + 0.6     1.34 0.1    20.4 + 0.9     1.20 + 0.06
+Edge-A (on-device), B=8              10.9 + 0.5     1.34 0.1    16.9 + 0.8     1.25 + 0.06
+
+Edge-B (Jetson, gateway prove), B=1    8.7 + 0.4     11+ 0.1    30.8 + 0.9     0.95 + 0.04
+Edge-B (Jetson, gateway prove), B=8    5.1 + 0.2     12+ 0.1    15.2 + 0.7     1.05 + 0.05
+
+Edge-C (RasPi, gateway prove), B=1    8.9 + 0.4     12+ 0.1    31.0 + 1.0     0.95 + 0.04
+Edge-C (RasPi, gateway prove), B=8    5.2 + 0.2     12+ 0.1    15.4 + 0.7     1.05 + 0.05
+
+Gateway (verify-only)                      —_—         0.7 + 0.1        —             —
+
+d) No DP-FL.: Turning off DP improves training stability but increases the inter-site
+generalization gap when sites differ strongly. With DP on, utility drops modestly while privacy
+guarantees (¢ ) are realized; personalization recovers part of the loss, consistent with FL literature
+that balances personalization and global accuracy [4], [8], [12], [16], [20], [24], [28], [32], [36],
+[40], [44], [51], [55].
+
+e) No C2/C3 (unverifiable).: This ablation eliminates proof-time checks for threshold/model/time
+binding. It performs identically in utility but fails red-team tests (tamper, replay). While obvious,
+the result quantifies the security margin endowed by verifiability (Table ??).
+
+f) No micro-batching.: Removing micro-batching increases amortized proving time and
+proof size per window, especially on Edge-B/C, confirming the predicted polynomial-commitment
+
+opening amortization (Table ??; Fig. 2).
+
+H. Edge Latency and Energy
+
+We examine end-to-end latency and energy on Edge-A/B/C with and without gateway offload
+(Table ??; Fig. 2). On Edge-A, on-device proving is feasible for 7’< 128 windows with modest
+batching; on Edge-B/C, offloading proofs to a gateway yields stable tail latency under 10—20 ms
+for verification and acceptable proof-return times in local networks. Energy-per-decision scales
+sublinearly with 6 due to amortization; however, large B inflates buffering delay. We choose
+B € {4,8} as a practical compromise. These results mirror the general pattern in ZKML systems
+where proof generation is the main bottleneck and verification is inexpensive [56], [58], [73],
+
+[74].
+
+
+===== PAGE BREAK =====
+
+39
+
+I. Privacy Indicators and Embedding Leakage
+
+We evaluate a reconstruction attack that trains a decoder to map commitments/latents back
+to pseudo-CSI. With quantized hidden states and commit-then-prove semantics, reconstruction
+quality remains low (PSNR/SSIM), especially when only commitments are available. Federated
+training with DP further reduces re-identification of devices from generic sensing logs, in line
+with the intended privacy constraints. For RFF, we explicitly test whether embeddings leak
+identities beyond declared use: with privacy switches on, top-1/top-5 re-identification remain
+low, reinforcing the stance that identity should be contextual and that explicit RFF gates can be
+
+risky [2], [13], [15].
+
+J. Comparison to Prior Art
+
+Relative to Wi-Fi HAR baselines and prior through-wall/presence systems [9], [41], [43], [45],
+[47], [63], ZK-SenseLM advances three fronts: (i) uncertainty-aware abstention with calibrated
+selective risk (Table IV); (i) phase-regularized masked pretraining for domain-shift robustness
+(Table II, I); and (iii) end-to-end verifiability that attests to policy-grounded decisions (Ta-
+ble ??). Compared with application-specific healthcare pipelines [26], [30], our framework does
+not target clinical certification but shows how abstention and proofs create safer defaults in
+ambiguous conditions. In identity and authentication contexts, our results align with cautionary
+analyses that highlight spoofing and distribution shift in RFF [2], [13], [15]; rather than anchoring
+on fingerprints, we integrate zero-trust policies [27], [29], [60] and cryptographic accountability,
+
+bringing recent ZKML advances into the wireless edge [56], [58], [73], [74].
+
+K. Qualitative Analyses and Visualizations
+
+We visualize three aspects to ground the quantitative results.
+
+Coverage-risk curves (Fig. 3). Across domains and perturbations, ZK-SenseLM traces curves
+closer to the lower-left region, meaning lower risk at a given coverage. The gap widens under
+drift or packet-thinning stressors, corroborating the role of phase-regularized embeddings and
+the abstention curriculum. The operating point 7,,., (chosen on calibration data) lies on a locally
+flat segment, indicating robustness to moderate threshold mis-tuning; C2 ensures this threshold
+is locked into proofs.
+
+Reliability diagrams (Fig. 4). Temperature scaling yields well-calibrated confidences on
+
+clean splits for all models, but only ZK-SenseLM sustains near-diagonal calibration under day-
+
+
+===== PAGE BREAK =====
+
+40
+
+wise interference and room-wise shifts, consistent with the literature emphasizing domain-aware
+regularization [71].
+
+Latency—energy tradeoffs (Fig. 2). For each edge class and B, we plot end-to-end latency
+vs. energy-per-decision. Micro-batching bends the curve favorably up to Bb=8; beyond that,
+buffering dominates. Offloading proving to a gateway lowers on-device energy while keeping
+verification local; failures (e.g., proof rejection) propagate back through the control-plane in
+
+Fig. 1, triggering a safe default (deny/abstain) and an audit entry.
+
+L. User Studies and Operational Reflections
+
+We conduct small operational pilots with security-policy stakeholders. Two observations are
+noteworthy. First, operators prefer conservative defaults when abstention spikes; our action
+schema and proofs support this by turning uncertain contexts into abstain or alarm ac-
+companied by a verifiable trace. Second, auditing is materially helped by compact proofs and
+public statements that capture model version and threshold at decision time. These properties
+
+resonate with compliance practices encouraged by zero-trust guidance [60].
+
+M. Limitations and Failure Analysis
+
+Notwithstanding the favorable results, three limitations merit discussion. (i) Large-window de-
+cisions still stress the proving backend; while micro-batching helps, intricate actions that require
+long temporal contexts remain challenging. (ii) Under extreme multipath or dense metallic clutter,
+periodic respiratory proxies can be unstable; abstention mitigates risk but reduces coverage. (ili)
+Our ZK circuits support piecewise-linear approximations of non-linearities; rare edge cases can
+accumulate approximation error, slightly altering score orderings. These caveats mirror broader
+
+constraints of ZKML systems [56], [58], [73], [74].
+
+N. Takeaways
+
+The main takeaways are as follows. First, masked spectral modeling combined with phase-
+consistency and cross-modal alignment yields robust, semantically grounded embeddings that
+travel across rooms, days, and mild perturbations, extending observations from recent sensing
+surveys and systems [1], [5], [7], [11], [31], [71]. Second, selective abstention with calibration is
+essential for safety under shift and perturbation, echoing open-set insights [10]. Third, verifiability
+
+can be achieved at the edge scale for short windows: proofs are small, verification is fast, and
+
+
+===== PAGE BREAK =====
+
+41
+
+Ablation                              AFI (clean) |    AECE (pp) | AsSelective Risk (pp) | Atprove (ms)
+
+No phase regularization (Eq. (2))     —0.022 + 0.006   +0.7 + 0.2        +1.3 + 0.4        +0.1 + 0.1
+No cross-modal alignment (Eq. (3)) —0.018 + 0.005    +0.5 + 0.2        +1.6 + 0.5        +0.0 + 0.1
+No abstention curriculum           —0.015 + 0.004 40.9 + 0.3        +2.1 + 0.6        —0.2 + 0.1
+No DP-FL (central only)            +0.004 + 0.004    —0.1 + 0.2        +0.3 + 0.3         0.0 + 0.1
+No C2/C3 (unverifiable)             0.000 + 0.000     0.0 + 0.1          0.0 + 0.1         —0.3 + 0.1
+
+No micro-batching                  0.000 + 0.000     0.0 + 0.1          0.0 + 0.1         +7.1 + 0.5
+
+tamper attempts are detectably blocked—a practical realization of zero-trust ideals for wireless
+
+sensing [27], [29], [60]. Finally, identity should be a contextual signal rather than a hard gate;
+
+our results in RFF tasks underscore known brittleness [2], [13], [15] and argue for cryptographic
+
+accountability of decisions, not raw features.
+
+O. Pointers to Tables and Figures
+
+For reproducibility and ease of navigation, we summarize where to look:
+
+Table I: macro-Fl/Acc and NLL on clean subject-/room-/day-wise splits; respiratory MAE;
+RFF closed-set accuracy.
+
+Table II: domain-shift performance and open-set AUROC/EER for HAR, presence, and
+RFF device-wise.
+
+Table III: perturbation sweeps with AF1 and AAbstain at matched coverage.
+
+Table IV: ECE, selective risk at 7,.¢, and policy-consistency.
+
+Table ??: proving/verification time, proof size, memory, and red-team outcomes; micro-
+batching amortization.
+
+Table ??: ablation deltas across the above metrics.
+
+Fig. 3: coverage—risk curves; Fig. 4: reliability diagrams; Fig. 2: latency—energy Pareto
+
+under batching/offload.
+
+P. Concluding Discussion
+
+ZK-SenseLM demonstrates that it is feasible to combine robust RF sensing with cryptographic
+
+verifiability and policy-grounded control at the edge. The encoder’s invariances, the abstention-
+
+aware decision layer, and the proving circuits together translate recent advances in Wi-Fi sensing
+
+[1],
+
+[3], [9], [11], [71] and ZKML systems [23], [56], [58], [73], [74] into a deployable pipeline
+
+
+===== PAGE BREAK =====
+
+42
+
+aligned with zero-trust guidance [27], [29], [60]. The empirical picture across clean and shifted
+
+domains, perturbation stress tests, and operational audits supports the central thesis: useful
+
+wireless sensing can be made auditable and safer by design. Further improvements should target
+
+(i) proof amortization beyond micro-batching (e.g., recursive proofs for sliding windows), (ii)
+
+certified robustness against realistic packet- and environment-level adversaries [19], [21], [49],
+
+[50], [67], [68], and (iii) richer policy semantics via cross-modal grounding that preserve privacy
+
+and retain provability.
+
+[1]
+
+[2]
+
+[3]
+
+[4]
+
+[5]
+
+[6]
+
+[7]
+
+[8]
+
+[9]
+
+[10]
+
+[11]
+
+[12]
+
+[13]
+
+REFERENCES
+
+J. Chen, X. Li, Y. Wang, et al. Wi-fi sensing techniques for human activity recognition. ACM Computing Surveys, 2025.
+Jinyang Huang, Bin Liu, Chenglin Miao, Xiang Zhang, Jianchun Liu, Lu Su, Zhi Liu, and Yu Gu. Phyfinatt: An
+undetectable attack framework against phy layer fingerprint-based wifi authentication. [EEE Transactions on Mobile
+Computing, 23(7):7753-7770, 2024.
+
+Q. Zhang, H. Zhao, Y. Liu, et al. A survey on wifi-based human identification: Scenarios, methods, and challenges. ACM
+Computing Surveys, 2025.
+
+Jianchun Liu, Jiaming Yan, Hongli Xu, Zhiyuan Wang, Jinyang Huang, and Yang Xu. Finch: Enhancing federated learning
+with hierarchical neural architecture search. [EEE Transactions on Mobile Computing, 23(5):6012-6026, 2024.
+
+J. A. Armenta-Garcia et al. Wireless sensing applications with wi-fi channel state information: A survey. Computer
+Communications, 2024.
+
+Jinyang Huang, Jia-Xuan Bai, Xiang Zhang, Zhi Liu, Yuanhao Feng, Jianchun Liu, Xiao Sun, Mianxiong Dong, and Meng
+Li. Keystrokesniffer: An off-the-shelf smartphone can eavesdrop on your privacy from anywhere. [EEE Transactions on
+Information Forensics and Security, 19:6840-6855, 2024.
+
+Peng Duan et al. A comprehensive survey on wi-fi sensing for human activity recognition. Electronics, 12(23):4858, 2023.
+Jianchun Liu, Shilong Wang, Hongli Xu, Yang Xu, Yunming Liao, Jinyang Huang, and He Huang. Federated learning with
+experience-driven model migration in heterogeneous edge networks. IEEE/ACM Transactions on Networking, 32(4):3468—
+3484, 2024.
+
+F. S. Abuhoureyah et al. Wifi-based human activity recognition through wall using extended antennas and deep learning.
+Engineering Applications of Artificial Intelligence, 2024.
+
+Xiang Zhang, Jinyang Huang, Huan Yan, Yuanhao Feng, Peng Zhao, Guohang Zhuang, Zhi Liu, and Bin Liu. Wiopen: A
+robust wi-fi-based open-set gesture recognition framework. JEEE Transactions on Human-Machine Systems, 55(2):234—245,
+2025.
+
+T. D. Quy et al. Enhanced human activity recognition using wi-fi sensing: Phase—amplitude csi network (pa-csi). Sensors,
+25(4):1038, 2025.
+
+Jianchun Liu, Hongli Xu, Lun Wang, Yang Xu, Chen Qian, Jinyang Huang, and He Huang. Adaptive asynchronous
+federated learning in resource-constrained edge computing. IEEE Transactions on Mobile Computing, 22(2):674-690,
+2021.
+
+Anu Jagannath, Nicholas Polosky, et al. A comprehensive survey on radio frequency (rf) fingerprinting: Traditional
+
+approaches and deep learning. Computer Networks, 216:109196, 2022.
+
+
+===== PAGE BREAK =====
+
+[14]
+
+[15]
+
+[16]
+
+[17]
+
+[18]
+
+[19]
+
+[20]
+
+[21]
+
+[22]
+
+[23]
+
+[24]
+
+[25]
+
+[26]
+
+[27]
+
+[28]
+
+[29]
+
+[30]
+
+[31]
+
+[32]
+
+[33]
+
+43
+
+Xiang Zhang, Yan Lu, Huan Yan, Jinyang Huang, Yu Gu, Yusheng Ji, Zhi Liu, and Bin Liu. Resup: Reliable label noise
+suppression for facial expression recognition. IEEE Transactions on Affective Computing, pages 1-14, 2025.
+
+S. Al-Hazbi, A. Hussain, et al. Radio frequency fingerprinting via deep learning: Systematization and challenges. arXiv
+preprint, 2024.
+
+Jianchun Liu, Hongli Xu, Yang Xu, Zhenguo Ma, Zhiyuan Wang, Chen Qian, and He Huang. Communication-efficient
+asynchronous federated learning in resource-constrained edge computing. Computer Networks, 199:108429, 2021.
+
+X. Liu, Y. He, et al. A survey on secure wifi sensing technology: Attacks and defenses. Sensors, 25(6):1913, 2025.
+Jinyang Huang, Bin Liu, Chenglin Miao, Yan Lu, Qijia Zheng, Yu Wu, Jiancun Liu, Lu Su, and Chang Wen Chen.
+Phaseanti: An anti-interference wifi-based activity recognition system using interference-independent phase component.
+IEEE Transactions on Mobile Computing, 22(5):2938—2954, 2023.
+
+J. Chen, L. Yang, et al. Air: Threats of adversarial attacks on deep learning-based wireless communications. [EEE
+Transactions on Wireless Communications, 2024.
+
+Jianchun Liu, Qingmin Zeng, Hongli Xu, Yang Xu, Zhiyuan Wang, and He Huang. Adaptive block-wise regularization and
+knowledge distillation for enhancing federated learning. IEEE/ACM Transactions on Networking, 32(1):791-805, 2023.
+M. Sadeghi and E. G. Larsson. Adversarial attacks on deep-learning based radio signal classification. arXiv preprint
+arXiv: 1808.07713, 2018.
+
+Jinyang Huang, Bin Liu, Chao Chen, Hongxin Jin, Zhigiang Liu, Chi Zhang, and Nenghai Yu. Towards anti-interference
+human activity recognition based on wifi subcarrier correlation selection. [EEE Transactions on Vehicular Technology,
+69(6):6739-6754, 2020.
+
+Zhizhi Peng, Taotao Wang, Chonghe Zhao, et al. A survey of zero-knowledge proof based verifiable machine learning.
+arXiv preprint arXiv:2502.18535, 2025.
+
+Jun Liu, Jianchun Liu, Hongli Xu, Yunming Liao, Zhiyuan Wang, and Qianpiao Ma. Yoga: Adaptive layer-wise model
+aggregation for decentralized federated learning. [EEE/ACM Transactions on Networking, 32(2):1768-1780, 2023.
+
+G. Ramezan and E. Meamari. zk-iot: Securing the internet of things with zero-knowledge proofs on blockchain platforms.
+arXiv preprint arXiv:2402.08322, 2024.
+
+Meng Wang, Jinyang Huang, Xiang Zhang, Zhi Liu, Meng Li, Peng Zhao, Huan Yan, Xiao Sun, and Mianxiong Dong.
+Target-oriented wifi sensing for respiratory healthcare: from indiscriminate perception to in-area sensing. IEEE Network,
+pages 1-1, 2024.
+
+M. Rahman et al. Zta-iot: A novel architecture for zero-trust in iot systems with score-based access control. ACM
+Transactions on Embedded Computing Systems, 2024.
+
+Zhiwei Yao, Jianchun Liu, Hongli Xu, Lun Wang, Chen Qian, and Yunming Liao. Ferrari: A personalized federated
+learning framework for heterogeneous edge clients. IEEE Transactions on Mobile Computing, 23(10):10031—10045, 2024.
+R. Mukta et al. Zero trust driven access control delegation using ssi and did. Journal of Information Security and
+Applications, 2025.
+
+Peng Zhao, Jinyang Huang, Xiang Zhang, Zhi Liu, Huan Yan, Meng Wang, Guohang Zhuang, Yutong Guo, Xiao Sun,
+and Meng Li. Wi-pulmo: Commodity wifi can capture your pulmonary function without mouth clinging. IEEE Internet
+of Things Journal, 12(1):854-868, 2025.
+
+Sergio M. Hernandez and Eyuphan Bulut. Wifi sensing on the edge: Signal processing techniques and challenges. IEEE
+Communications Surveys & Tutorials, 2023.
+
+Jiaming Yan, Jianchun Liu, Hongli Xu, Zhiyuan Wang, and Chunming Qiao. Peaches: Personalized federated learning
+with neural architecture search in edge computing. IEEE Transactions on Mobile Computing, 23(11):10296-10312, 2024.
+Chen Chen, Xuyu Tan, et al. Wi-fi sensing based on ieee 802.11bf. IEEE Communications Magazine, 2023.
+
+
+===== PAGE BREAK =====
+
+[34]
+
+[35]
+
+[36]
+
+[37]
+
+[38]
+
+[39]
+
+[40]
+
+[41]
+
+[42]
+
+[43]
+
+[44]
+
+[45]
+
+[46]
+
+[47]
+
+[48]
+
+[49]
+
+[50]
+[51]
+
+44
+
+Yu Gu, Huan Yan, Xiang Zhang, Yantong Wang, Jinyang Huang, Yusheng Ji, and Fuji Ren. Attention-based gesture
+recognition using commodity wifi devices. IEEE Sensors Journal, 23(9):9685—-9696, 2023.
+
+Ruifeng Du, Shunqing Guo, et al. An overview on ieee 802.11bf: Wlan sensing. IEEE Communications Surveys &
+Tutorials, 2025.
+
+Jianchun Liu, Jun Liu, Hongli Xu, Yunming Liao, Zhiwei Yao, Min Chen, and Chen Qian. Enhancing semi-supervised
+federated learning with progressive training in heterogeneous edge computing. IEEE Transactions on Mobile Computing,
+2024.
+
+Abhishek Sahoo et al. Sensing performance of the ieee 802.11bf protocol and its impact on data networks. arXiv preprint
+arXiv:2403.19825, 2024.
+
+Yuanhao Feng, Jinyang Huang, Youwei Zhang, Xiang Zhang, Meng Li, Fusang Zhang, Tianyue Zheng, Anran Li, Mianxiong
+Dong, and Zhi Liu. Rf-eye: Commodity rfid can know what you write and who you are wherever you are. ACM Transactions
+on Sensor Networks, 2025.
+
+Ieee p802.11 task group bf (wlan sensing) — status and updates. IEEE 802.11 Working Group Report, 2025.
+
+Jianchun Liu, Jiaming Yan, Hongli Xu, Lun Wang, Zhiyuan Wang, Jinyang Huang, and Chunming Qiao. Accelerating
+decentralized federated learning with probabilistic communication in heterogeneous edge computing. JEEE Transactions
+on Networking, 2025.
+
+Mingmin Zhao, Tianhong Li, Mohammad Abu Alsheikh, Yonglong Tian, Hang Zhao, Antonio Torralba, and Dina Katabi.
+Through-wall human pose estimation using radio signals. In CVPR, 2018.
+
+Feng-Qi Cui, Anyang Tong, Jinyang Huang, Jie Zhang, Dan Guo, Zhi Liu, and Meng Wang. Learning from heterogeneity:
+Generalizing dynamic facial expression recognition via distributionally robust optimization. In Proceedings of the 33nd
+ACM International Conference on Multimedia, MM ’25’, New York, NY, USA, 2025. Association for Computing
+Machinery.
+
+Mingmin Zhao, Yonglong Tian, Hang Zhao, Mohammad Abu Alsheikh, Tianhong Li, Rumen Hristov, Zachary Kabelac,
+Dina Katabi, and Antonio Torralba. Rf-based 3d skeletons. In ACM SIGCOMM, 2018.
+
+Jianchun Liu, Jiaming Yan, Ji Qi, Hongli Xu, Shilong Wang, Chunming Qiao, and Liusheng Huang. Adaptive local
+update and neural composition for accelerating federated learning in heterogeneous edge networks. [EEE Transactions on
+Networking, 2025.
+
+Qifan Pu, Sidhant Gupta, Shyamnath Gollakota, and Shwetak Patel. Whole-home gesture recognition using wireless signals.
+In ACM MobiCom, 2013.
+
+Yu Gu, Xiang Zhang, Huan Yan, Jingyang Huang, Zhi Liu, Mianxiong Dong, and Fuji Ren. Wife: Wifi and vision
+based unobtrusive emotion recognition via gesture and facial expression. [EEE Transactions on Affective Computing,
+14(4):2567-2581, 2023.
+
+Yang Wang, Jian Liu, Yingying Chen, Marco Gruteser, Jie Yang, and Hongbo Liu. E-eyes: Device-free location-oriented
+activity identification using fine-grained wifi signatures. In ACM MobiCom, 2014.
+
+Rukuo Li, Jianchun Liu, Hongli Xu, and Liusheng Huang. Fedquad: Adaptive layer-wise lora deployment and activation
+quantization for federated fine-tuning. arXiv preprint arXiv:2506.01001, 2025.
+
+... Zhang et al. Practical adversarial attack on wifi sensing through environmental perturbations. In ACM WiSec ’24, 2024.
+... Huang et al. Security analysis of wifi-based sensing systems. arXiv preprint arXiv:2404, 15587, 2024.
+
+Zhiyuan Wang, Hongli Xu, Jianchun Liu, He Huang, Chunming Qiao, and Yangming Zhao. Resource-efficient federated
+learning with hierarchical aggregation in edge computing. In IEEE INFOCOM 2021-IEEE conference on computer
+communications, pages 1-10. IEEE, 2021.
+
+
+===== PAGE BREAK =====
+
+[52]
+
+[53]
+
+[54]
+
+[55]
+
+[56]
+
+[57]
+
+[58]
+
+[59]
+
+[60]
+
+[61]
+
+[62]
+
+[63]
+
+[64]
+
+[65]
+
+[66]
+[67]
+
+[68]
+
+[69]
+
+[70]
+
+[71]
+
+[72]
+
+[73]
+
+[74]
+
+[75]
+
+45
+
+Zhimeng Song, Xiang Li, et al. Federated radio frequency fingerprint identification for iot devices. JEEE Transactions on
+Information Forensics and Security, 2024.
+
+Jiaming Yan, Jianchun Liu, Hongli Xu, and Liusheng Huang. Accelerating mixture-of-expert inference with adaptive expert
+split mechanism. arXiv preprint arXiv:2509.08342, 2025.
+
+Jiaxin Zhang et al. Radio frequency fingerprint identification for narrowband iot: A practical evaluation. [EEE Transactions
+on Information Forensics and Security, 2021.
+
+Shilong Wang, Jianchun Liu, Hongli Xu, Chenxia Tang, Qianpiao Ma, and Liusheng Huang. Towards communication-
+efficient decentralized federated graph learning over non-lid data. arXiv preprint arXiv:2509.08409, 2025.
+
+Boyi Joey Chen, Xiangfeng Xu, et al. Zkml: An optimizing system for ml inference in zero-knowledge. In EuroSys, 2024.
+Luyao Gao, Jianchun Liu, Hongli Xu, Sun Xu, Qianpiao Ma, and Liusheng Huang. Accelerating end-cloud collabo-
+rative inference via near bubble-free pipeline optimization. In JEEE INFOCOM 2025-IEEE Conference on Computer
+Communications, pages 1-10. IEEE, 2025.
+
+Han Sun et al. zkllm: Zero knowledge proofs for large language models. arXiv preprint arXiv:2404.16109, 2024.
+
+Yujia Huo, Jianchun Liu, Hongli Xu, Zhenguo Ma, Shilong Wang, and Liusheng Huang. Mitigating catastrophic forgetting
+with adaptive transformer block expansion in federated fine-tuning. arXiv preprint arXiv:2506.05977, 2025.
+
+Scott Rose, Oliver Borchert, Stuart Mitchell, and Sean Connelly. Zero trust architecture. Technical report, NIST Special
+Publication 800-207, 2020.
+
+Chenxia Tang, Jianchun Liu, Hongli Xu, and Liusheng Huang. Top-n: Eliminating noise in logit space for robust token
+sampling of llm. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1:
+Long Papers), pages 10758-10774, 2025.
+
+Ieee 802.11bf-2025: Wlan sensing amendment, 2025.
+
+Fei Wang, Sanping Zhou, Stanislav Panev, Jinsong Han, and Dong Huang. Person-in-wifi: Fine-grained person perception
+using wifi. In ICCV, 2019.
+
+Yuxi Zheng et al. Widar3.0: Zero-effort cross-domain gesture recognition with wi-fi. EEE Transactions on Pattern Analysis
+and Machine Intelligence, 2020.
+
+Katarzyna Kosek-Szott et al. Indoor positioning with wi-fi location: A survey of ieee 802.11mc fine timing measurement.
+arXiv preprint arXiv:2509.03901, 2025.
+
+Mohammed Maashi et al. A novel device-free wi-fi indoor localization using deep learning. Sensors, 2024.
+
+Chen Li et al. Practical adversarial attack on wifi sensing through unnoticeable communication packet perturbation. In
+ACM WiSec, 2024.
+
+Ayush Sharma et al. Wi-spoof: Generating adversarial wireless signals to mislead wi-fi sensing. Journal of Information
+Security and Applications, 2025.
+
+Ruiming Kong et al. Deepcrf: Deep learning-enhanced csi-based rf sensing for micro-signal extraction. [EEE Transactions
+on Information Forensics and Security, 2025.
+
+X. Liu et al. mmwave radar-based human skeletal pose estimation enabled by deep learning. arXiv preprint
+arXiv:2405.05164, 2024.
+
+Ziyi Hao et al. Wi-char: A wifi sensing approach with focus on both channel and activity representations. Sensors, 2024.
+Juan C. H. Soto et al. A survey on vital signs monitoring based on wi-fi csi data. Sensors, 2022.
+
+Boyi Joey Chen et al. Zktorch: Compiling ml inference to zero-knowledge proofs. arXiv preprint arXiv:2507.07031, 2025.
+Yuchen Zhang et al. zkvc: Fast zero-knowledge proof for private and verifiable computation with ml applications. arXiv
+preprint arXiv:2504.12217, 2025.
+
+Lukas Burkhalter et al. Zero-knowledge proofs of training for deep neural networks. In ACM (per DL record), 2024.

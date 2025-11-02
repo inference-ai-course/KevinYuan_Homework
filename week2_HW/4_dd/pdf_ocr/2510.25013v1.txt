@@ -1,0 +1,752 @@
+arX1v:2510.25013v1 [cs.CL] 28 Oct 2025
+
+Emergence of Minimal Circuits for Indirect Object
+Identification in Attention-Only Transformers
+
+Rabin Adhikari
+Saarland University
+66123 Saarbriicken
+raad00002@stud.uni-saarland.de
+
+Abstract
+
+Mechanistic interpretability aims to reverse-engineer large language models
+(LLMs) into human-understandable computational circuits. However, the com-
+plexity of pretrained models often obscures the minimal mechanisms required
+for specific reasoning tasks. In this work, we train small, attention-only trans-
+formers from scratch on a symbolic version of the Indirect Object Identification
+(IOD task—a benchmark for studying coreference—like reasoning in transformers.
+Surprisingly, a single-layer model with only two attention heads achieves perfect
+IOI accuracy, despite lacking MLPs and normalization layers. Through residual
+stream decomposition, spectral analysis, and embedding interventions, we find
+that the two heads specialize into additive and contrastive subcircuits that jointly
+implement IOI resolution. Furthermore, we show that a two-layer, one-head model
+achieves similar performance by composing information across layers through
+query-value interactions. These results demonstrate that task-specific training
+induces highly interpretable, minimal circuits, offering a controlled testbed for
+probing the computational foundations of transformer reasoning.
+
+1 Introduction
+
+Large Language Models (LLMs) have achieved remarkable success across a vast range of natural
+language processing tasks (3| {12| [17]. Yet, their internal operations remain largely opaque, motivating
+the field of mechanistic interpretability, which seeks to reverse-engineer these “black boxes” into
+understandable circuits and algorithms 9| (1).  The ultimate goal is to achieve a circuit-level
+understanding where individual components like neurons and attention heads are mapped to specific
+algorithmic roles (4\|5). However, the immense scale, residual connections, and non-linearities of
+modern LLMs present significant challenges to this endeavor.
+
+To navigate this complexity, researchers often start with simplified or “toy” models as controlled
+environments for developing and validating interpretability tools (6| 9| {19}.  By training models
+on constrained, synthetic objectives, we can reduce confounding variables from complex linguistic
+structures and discover core computational mechanisms in a cleaner setting.
+
+A common approach to understanding these models involves analyzing pre-trained transformers
+on specific tasks they can perform (1) (2). Wang et al. introduced the Indirect Object Identification
+(IOD task as a benchmark for studying such capabilities. In a typical IOI sentence, an initial dependent
+clause introduces two names (a subject, S, and an indirect object, JO), and the main clause repeats
+the subject. The task is to predict the JO as the final token. Wang et al. showed that GPT-2
+small implements IOI through a multi-hop attention circuit involving distinct classes of heads.
+However, this mechanism arises within a model pretrained for next-token prediction on natural
+text—an inherently complex optimization setting.
+
+Submitted to a seminar on Interpreting and Analyzing Neural Language Models
+
+
+===== PAGE BREAK =====
+
+In contrast, we train minimal, attention-only transformer models [18] from scratch exclusively on a
+symbolic version of the IOI task. We find that a straightforward model—a single-layer transformer
+with just two attention heads—can solve this task perfectly. Since we know that the task of IOI
+can’t be performed using a skip-gram model, our argument is similar in spirit to Shlegeris
+that a one-layer attention-only transformer has a higher representational capacity than a skip-gram.
+Furthermore, a detailed analysis of this model uncovers a highly compact and interpretable circuit
+where the solution is computed via a direct additive combination of the two heads’ outputs, rather
+than a complex, multi-hop pipeline.
+
+Our contributions are threefold:
+
+1. We demonstrate that a one-layer, two-head attention-only model is sufficient to solve the
+IOI task with a fixed template perfectly.
+
+2. We provide a mechanistic analysis that uncovers a minimal circuit based on an additive
+combination of specialized attention head outputs.
+
+3. We argue that the circuits in large, broadly pre-trained models may be overly complex due
+to multi-task pressures, whereas task-constrained training can reveal more parsimonious
+mechanisms.
+
+2 Dataset and Model Configuration
+
+2.1 The IOI Task in a Symbolic Setting
+
+To isolate the core relational reasoning challenge of the IOI task, we construct a symbolic dataset
+that abstracts away all linguistic and tokenization complexities. The task remains to identify the
+correct indirect object (IO) from the dependent clause, given a subject (S) from the main clause, but
+now these are simply names drawn from a small vocabulary. This formulation abstracts the essential
+relational pattern from the natural-language IOI task—‘‘When John and Mary ... John gave ... to
+
+__”’—while removing all linguistic confounds. It enables precise inspection of what the model must
+represent to distinguish between “subject” and “object” roles.
+
+The training data consists of 6-token sequences built from two primary templates. Using “John” (S)
+and “Mary” (IO) as examples:
+
+1. <BOS> John Mary Mary <MID> John
+
+2. <BOS> John Mary John <MID> Mary
+
+Here, <BOS> marks the start of the sequence, and the model’s objective is to predict the IO token at
+the final position, following the <MID> token. The two names are drawn randomly from a vocabulary
+of six names, and the correct final token is chosen uniformly at random.
+
+2.2 Model Configuration
+
+To maximize interpretability, we used simple attention-only transformer models. Feed-forward
+networks and layer normalization were omitted to isolate the function of the attention mechanism.
+The vocabulary consists of 6 name tokens plus the two special tokens <BOS> and <MID>, for a total
+size of 8. The residual stream dimension was set to 8, and the head dimension was dpead = we
+where JV), is the number of heads.
+
+Training: Models were trained from scratch on the symbolic IOI dataset using a cross-entropy
+loss to predict the token at the <MID> position. Each training batch contained all 60 possible unique
+sequences (6 x 5 x 2 = 60). We used the AdamW optimizer with a OneCycle learning rate
+scheduler (15), a maximum learning rate of 0.1, and weight decay of 0.01. Training and analyses
+were performed on a single NVIDIA A40 GPU using the TransformerLens |8] library.
+
+
+===== PAGE BREAK =====
+
+3 Results and Analysis
+
+3.1 Single-Head, One-Layer Model Fails to Learn
+
+A single attention head outputs ~ 50% probability for the names provided in the prompt, indicating
+that the model knows that the final answer is one of the two names provided. But it cannot distinguish
+which one is correct. The model attends roughly equally to both the names in the dependent clause
+(see figure [Iap, indicating that a single attention head cannot jointly encode the information required
+to () identify which token serves as the correct referent and (ii) propagate that information to the
+prediction position. The roles of “reference detection” and “copying” appear to be functionally
+incompatible within a single attention mechanism.
+
+Attention Pattern: Layer 0 Head 0                                      QK Circuit: Layer 0 Head 0                                       OV Circuit: Layer 0 Head 0
+
+1.0                                                                   4                                                                    20
+<BOS>  Hi                                                       <BOS>
+<MID>                                                      3        <MID>                                                      15
+0.8
+john                                                                  John
+      a                                                          “
+
+lo <Bos>
+
+Query
+sl
+Output Vocab
+
+-0
+0.4      Alice ||                                        Alice                                    Lo
+
+g                 Charli             --1  Charli
+x oe  arlie                arlie   | Hl     |:
+A   a            Eve             a)  Eve             i
+=                    A iN < > 2 o v       A A & 2 2 es yg g
+v      ~00  ge epee ga   $2 i28 2G 8
+
+<BOS> 10  s1  s2 <MID>       e 4  .  <6        e  =  < §
+
+Key                                                                                            Key                                                                                  Input Vocab
+(a) Average Attention Heatmap                  (b) QK Circuit                            (c) OV Circuit
+
+Figure 1: Single-Head, One-Layer Model Fails to Learn IOI. (a) The attention heatmap showing
+the <MID> token attends uniformly to the two names. (b) The QK circuit reveals that the <MID> token
+attends uniformly to all tokens. (c) The OV circuit shows that each name token has a large positive
+contribution to its own logit and a small negative contribution to the other name’s logit.
+
+Following Elhage et al. (5). we analyze the QK and OV circuit to understand the failure mode of the
+single-head model. From the QK circuit (see figure|1b), we observe that the <MID> token attends
+almost uniformly to all tokens. And from the OV circuit (see figure[Ic) shows that each name token
+makes a high positive contribution to its own logit but a small negative contribution to the logit of the
+other name. Due to the uniform attention pattern, these contributions average out, resulting in similar
+logits for both names.
+
+3.2 Two-Head, One-Layer Model Learns IOI Perfectly
+
+When the model is extended to two attention heads, it achieves perfect accuracy on the IOI task.
+Figure [2|shows distinct attention patterns of the two heads, averaged across all the possible inputs.
+
+Attention Pattern: Layer 0 Head 0              Lo                 Attention Pattern: Layer 0 Head 1              Lo
+b                                                                  :         b                                                                  :
+fe)                                                                           fe)
+iva]                                                                           iva]
+v                                                                0.8        v                                                                0.8
+iS)                                                                           iS)
+0.6                                                                         0.6
+2                                                                          2
+25                                                                     25
+o                                                                          o
+0.4                                                                         0.4
+°                                   LL                             °
+wn                                                                           wn
+A                                                                     -0.2         A                                                                     —0.2
+Qa                                                                           Qa
+=                                                                           =
+v                                                                     -0.0         v                                                                     -0.0
+<BOS>      fe)         Sl         S2      <MID>                          <BOS>      fe)         Sl         S2      <MID>
+Key                                                                        Key
+
+Figure 2: Average Attention Heatmap for Two-Head, One-Layer Model. Head 0 focuses almost
+equally on the two name tokens from the dependent clause, while Head 1 has half of its attention on
+the subject of the main clause and almost a quarter on each of the names in the dependent clause.
+
+
+===== PAGE BREAK =====
+
+3.2.1 Two Heads with Distinct Roles
+
+We observed that, for both the templates of our symbolic dataset, the first head consistently attends
+to the two names in the initial dependent clause (see figure[2), indicating its role in identifying the
+relevant referents. The second head, however, always attends to the subject of the main clause and
+the other name in the dependent clause — “BA” in the “BAAB” template and similarly, “AB” in
+the “BABA” template (see figure[3). So, this head does the most of the heavy lifting, finding out the
+unique set of tokens to attend to. Furthermore, it suggests that the second head is responsible for
+integrating the referential information with the context provided by the main clause to determine the
+correct output.
+
+BAAB Template                                               BABA Template                           1.0
+
+<BOS>
+<BOS>
+
+10
+10
+
+0.6
+e                                             e
+8H                                             8H
+Oo                                                         Oo
+0.4
+N                                                              N
+Ww                                                              Ww
+A                                               A                                                9.2
+Q                                         Q
+=                                                =
+y                                                -0.0
+<BOS>       10          Si          S2       <MID>            <BOS>       10          Si          S2       <MID>
+Key                                                Key
+
+Figure 3: The attention map for the second head depends on the template. While the first head
+always attends to the two name tokens in the dependent clause, the second head attends to the second
+occurrence of the subject in the main clause and the other name in the dependent clause — “BA” in
+the “BAAB” template and similarly, “AB” in the “BABA” template.
+
+3.2.2 Residual Stream Decomposition
+
+To understand how the model’s components contribute to the final prediction, we decompose the
+residual stream at the final token position (corresponding to <MID> token) into the contributions
+of those components. We then project these components onto directions in the embedding space
+corresponding to the correct and incorrect names, as well as their sum and difference (10). Figure[4]
+shows that the first head’s output is aligned closest with the sum direction—that is, it represents the
+combined contribution of both the correct and incorrect names (correct + incorrect). On the other
+hand, the second head’s output aligns closest with the direction of the token difference—the contrast
+between the two name embeddings (correct — incorrect). Since the final logits are computed by
+adding the contribution of all the components, the logit component for the incorrect token cancels
+out, and the direction corresponding to the correct token is amplified.
+
+This analysis is also not foolproof because we can see that the second head also has some component
+in the direction of the correct token, as well as the sum direction. Nevertheless, we observe a clear
+division of labor between the two heads: one aggregates signals (additive), while the other suppresses
+the incorrect alternative (contrastive). Together, they form an additive-contrastive circuit to produce a
+clean, interpretable mechanism for generating the correct logits.
+
+3.2.3. Spectral Analysis of QK and OV Circuits
+
+We expect an equal number of positive and negative eigenvalues for a random matrix (16). However,
+we observe a significant asymmetry in the eigenvalue distributions of both the QK and OV matrices for
+our two-head model. This asymmetry reinforces our hypothesis that the learned attention mechanisms
+have developed specialized functions. We present the eigenvalue decomposition of the QK and OV
+matrices in figures [5]and|6| respectively. Furthermore, on the top-right of each subfigures, we report
+
+the fraction of positive eigenvalues for each head calculated using the formula or where \, are
+the eigenvalues of the matrix and |,,| are their magnitudes.
+
+
+===== PAGE BREAK =====
+
+25                                                                                 Logit Difference
+
+Logit Sum
+
+20                                                                                 Correct Token Logit
+Incorrect Token Logit
+
+o15
+=)
+3
+2
+a2 10
+w
+°
+a
+
+5
+
+0
+
+LOHO                          LOH1                         embed                      pos_embed
+Residual Stream Component
+
+Figure 4: Residual Stream Decomposition for Two-Head, One-Layer Model. The dot product of
+the output of each of the components of the residual stream. The first head’s output aligns most with
+the sum direction, while the second head’s output aligns most with the difference direction.
+
+Spectral Properties of QK Circuits Observing the eigendecomposition of the QK matrices (see
+figure (5), we note the following:
+
+¢ Head 0 has a moderate suppression mechanism (* —5.2) to forbid attending to some
+dimensions (or some tokens), indicating a less pronounced inhibitory effect. And the
+positive fraction around zero (—0.06) suggests that the amplifying effect of the rotational
+component is almost balanced by the suppressive effect of the negative eigenvalue. Hence,
+the overall attention dynamics of Head 0 are relatively neutral.
+
+¢ Head | has a strong suppression mechanism (~ —17.5), indicating a more pronounced
+inhibitory effect. The positive fraction of —0.65 suggests that the suppressive effect of the
+dominant negative eigenvalue outweighs the amplifying effect of the rotational components,
+leading to an overall inhibitory attention dynamic.
+
+Eigen Values of QK Circuit: Layer 0 Head 0                               Eigen Values of QK Circuit: Layer 0 Head 1
+
+Positive Fraction: -0.06°                                               Positive Fraction: -0.65°
+0.75
+
+BR
+u
+
+r
+fo)
+
+0.50
+
+°
+uw
+
+0.25
+
+0.00     e                                                       e
+
+—0.25
+
+I
+9°
+uw
+
+Imaginary Part of Eigenvalue
+a        °
+°        °o
+e
+e
+Imaginary Part of Eigenvalue
+
+I
+BR
+wu
+
+bd     -1.00                                          s
+
+—5  4  -3  -2  -1   0   1   2         -17.5 -15.0 -12.5 -10.0 -7.5 -5.0 -2.5 0.0  2.5
+Real Part of Eigenvalue                                                     Real Part of Eigenvalue
+
+Figure 5: Eigenvalue Distribution of QK Circuits for Two-Head, One-Layer Model. Head 1 has
+a larger dominant negative eigenvalue (positive fraction of —0.65) compared to Head 0 (positive
+fraction of —0.06), indicating a stronger suppressive effect in Head 1’s attention dynamics.
+
+Spectral Properties of OV Circuits Eigendecomposition of the OV matrices (see figure|6) further
+reveals the asymmetry between the two heads:
+
+* Head 0 is a copying or passthrough head, which identifies important tokens via its QK
+circuit and then amplifies their presence in the residual stream without any rotation or
+inversion.
+
+
+===== PAGE BREAK =====
+
+¢ Head | has half of its eigenvalues as positive and the other half as imaginary with negative
+real parts. This suggests that the chosen token will copy itself in some dimension and rotate
+with inversion in another dimension, which can be interpreted as subtracting from the logits
+of the other token with some added transformations.
+
+This distinction corresponds naturally with the roles inferred from embedding projections: one head
+aggregates signals (additive), while the other suppresses the incorrect alternative (contrastive).
+
+Eigen Values of OV Circuit: Layer 0 Head 0                             Eigen Values of OV Circuit: Layer 0 Head 1
+Positive Fraction: 1.00          4    Pr                              Positive Fraction: 0.55
+
+g 0.04                                                                     g 3
+
+$                                                                            $
+
+5                                                                            5?
+
+a  0.02                                                                     a
+
+iw                                                                            uw 1
+
+oe                                                                            oe
+
+fo}                                                                            fo}
+
+~ 0.00 e             e        e                                 e      vo                e                                            e
+o                                                                            o
+
+a                                                                            a
+
+>                                                                                   at
+
+we —0.02                                                   o
+
+£                                                           £& -2
+
+nD                                                                            nD
+
+o                                                                            o
+
+E -0.04                                                    —£-3
+
+-4    e
+0      10     20     30     40     50     60     70     80           -5      0       5      10     15      20     25     30
+Real Part of Eigenvalue                                                    Real Part of Eigenvalue
+
+Figure 6: Eigenvalue Distribution of OV Circuits for Two-Head, One-Layer Model. The first head
+has all positive eigenvalues (positive fraction of 1), indicating an additive contribution to the residual
+stream. In contrast, the second head has positive as well as imaginary eigenvalues with negative real
+parts (positive fraction of 0.55), suggesting a mix of additive and contrastive contributions.
+
+3.2.4 Positional Focus of Attention Heads
+
+We take the average of all the embeddings of all the names and assign that as their common embedding
+to remove any semantic information from the name tokens, providing the model with only positional
+embeddings for the name tokens. From figure [7] we observe the following attention patterns:
+
+* We can consider the first head as the positional head that focuses on the positions of the
+names in the dependent clause, almost independent of their word embeddings.
+
+e The second head attends predominantly to the position of occurrence of the subject in the
+main clause. However, despite this positional focus, it attends to the name in the dependent
+cause that is other than the subject of the main clause. This indicates that the second head
+is responsible for integrating positional as well as contextual information to determine the
+correct output.
+
+Attention Pattern: Layer 0 Head 0                                 Attention Pattern: Layer 0 Head 1
+A                                                                1.0        A                                                                1.0
+wn                                                                           wn
+fe)                                                                           fe)
+iva]                                                                           iva]
+v                                                                       0.8         v                                                                       0.8
+iS)                                                                           iS)
+0.6                                                                         0.6
+2                                                                          2
+25                                                                     25
+o                                                                          o
+0.4                                                                         0.4
+°                                   LL                             °
+wn                                                                           wn
+A                                                                     -0.2         A                                                                     —0.2
+Qa                                                                           Qa
+=                                                                           =
+v                                                                     -0.0         v                                                                     -0.0
+<BOS>      fe)         Sl         S2      <MID>                          <BOS>      fe)         Sl         S2      <MID>
+
+Key                                                                                                                  Key
+
+Figure 7: Average Attention Heatmap for Two-Head, One-Layer Model with Averaged Name
+Embeddings. Head 0 focuses almost equally on the positional embeddings of the two name tokens
+from the dependent clause, while Head | attends primarily to the positional embedding of the subject
+token of the main clause.
+
+
+===== PAGE BREAK =====
+
+3.2.5 Ablating Positional Embeddings
+
+To study how the model utilizes positional information, we train the same model architecture without
+any positional embeddings. The model achieves an accuracy of ~ 70% on the IOI task, putting + 67%
+probability on the correct token, indicating that positional embeddings are not strictly necessary for
+the model to learn the task, but they do enhance performance. Although both the heads trained in this
+manner exhibit similar attention patterns, they somehow manage to focus on the correct output name
+present in the dependent clause (see figure[8). So, despite the absence of explicit positional cues, the
+model still manages to learn a strategy that allows it to perform the task with reasonable accuracy,
+likely by relying more heavily on the semantic content of the name embeddings and their contextual
+relationships. However, adding positional embedding improves the model’s accuracy to 100% and
+makes the internals more interpretable.
+
+Attention Pattern: BAAB Template                   Attention Pattern: BABA Template
+
+A                                          A                                             1.0
+wn
+g                                             g
+y                                          0.8
+iS)                                              g
+>                                                                                         0.6
+Ga                                          4
+sw                                          Ww
+Co
+0.4
+°                                                        °                      a
+Ww                                                        Ww
+A                                          A                                           70.2
+Q                                              =
+=                                              =
+Vv
+-0.0
+<BOS>      10         S1         S2      <MID>           <BOS>      10         S1         S2      <MID>
+Key                                              Key
+
+Figure 8: Average Attention Heatmap for Two-Head, One-Layer Model trained without Posi-
+tional Embeddings. Both heads focus mostly on the correct output name present in the dependent
+clause, i.e., B in the “BAAB” template and A in the “BABA” template.
+
+3.3 Two-Layer, One-Head Model and Composition
+
+Motivation We also train a one-head, two-layer attention-only transformer to observe how a model
+performs IOI in the availability of compositions [5] using the output of the previous layer. The head
+dimension was 4 for the one-layer two-heads model, and for this model, since we have a single head
+per layer, the hidden dimension is the same as the hidden dimension of the one-head one-layer model,
+i.e., 8. So, this model has more representational capacity than the one-head one-layer model. If this
+model doesn’t perform any composition, then it is the same as the one-layer two-heads model with
+each layer writing to the residual stream in orthogonal subspaces of 4 dimensions each.
+
+Attention Pattern From figure [9 we observe that the attention patterns of both layers change
+depending on the template. The <MID> token in the first layer still attends to both the name tokens
+in the dependent clause, similar to the first head of the one-layer two-heads model. However, the
+S2 token in the first layer changes its attention pattern based on the template. So, the first head is
+not solely positional, but aggregates information to S2 token to be used by the latter head. Although
+the attention pattern of the second layer for the <MID> token seems almost similar to the attention
+pattern of the second head of the one-layer two-heads model, this time it attends to the aggregated
+information from the first layer.
+
+Role of Positional Embeddings Figure |10}shows that both the heads focus on the positional
+embeddings of the tokens. The first head’s attention pattern on the positional embeddings is similar
+to the pattern with the positional embeddings, indicating that it is mostly a positional head. However,
+although the <MID> token in the second layer attends primarily to the token before it, it changes its
+attention pattern based on the context provided by the first layer. So, the second head is not solely
+positional, but integrates positional as well as contextual information to determine the correct output.
+
+Composition Ablation To study the type of composition that the model is performing (Q, K, or V),
+we ablate them one by one by subtracting the output of the first layer from the corresponding input
+
+
+===== PAGE BREAK =====
+
+BAAB Template                                   BABA Template                              Average Attention Pattern
+Layer 0 Head O                                        Layer 0 Head 0                                       Layer 0 Head O
+
+<BOS>
+<BOS>
+<BOS>
+
+10
+10
+10
+
+0.6
+-0.2
+
+Query
+S1
+Query
+si
+Query
+si
+
+S2
+s2
+s2
+
+<MID>
+<MID>
+<MID>
+
+<BOS>     10       si       S2     <MID>          <BOS>     10       si       S2     <MID>          <BOS>     10       Si       s2     <MID>
+Key                                                 Key                                                 Key
+Layer 1 Head 0                                     Layer 1 Head 0                                     Layer 1 Head 0
+
+1.0
+
+Query
+<MID> S2      Si      10 <BOS>
+Query
+<MID> S2      Si      10 <BOS>
+Query
+<MID> S2      Si      10 <BOS>
+i
+°     °     °     °
+N         oS         a         o
+
+Ly                                                   -0.0
+
+<BOS>     10       Si       s2     <MID>          <BOS>      10       si        S2     <MID>           <BOS>     10       S1       s2     <MID>
+Key                                                                     Key                                                                      Key
+
+Figure 9: Attention Heatmap for Two-Layer, One-Head Model. The heatmap of both heads
+changes depending on the template.
+
+Attention Pattern: Layer 0 Head 0                  Attention Pattern: Layer 1 Head 0
+A                                                   A                                                      1.0
+wn                                                  wn
+fe}                                                  fe}
+9                                                  °
+0.8
+g                                                  fe)
+0.6
+a                                                    i
+g wn                                                    g Ww
+oO                                                  oO
+0.4
+nN                                                  N
+Ww                                                  wn
+A                                                   A                                                     -0.2
+Q                                                  Q
+=                                                  =
+Vv                                                   Vv
+-0.0
+<BOS>     10       S1       S2     <MID>         <BOS>     IO       Si       S2     <MID>
+Key                                          Key
+
+Figure 10: Attention Heatmap for Two-Layer, One-Head Model with Averaged Name Embed-
+dings. We see a strong positional focus in both heads.
+
+of the Q, K, and V matrices. We observe a drop in accuracy in the following order: Q composition
+(~ 100% drop), V composition (+ 93.33% drop), and K composition (+ 26.67% drop). This
+indicates that the model is heavily relying on the Q and V compositions to perform the task. So, we
+can conclude that the two-layer one-head model is indeed performing some composition to solve the
+IOI task, different from the one-layer two-heads model.
+
+4 Conclusion
+
+In this study, we showed that even a minimal attention-only transformer—comprising just two
+attention heads—can perfectly solve a symbolic version of the Indirect Object Identification task.
+Our mechanistic analysis revealed an elegant division of labor: one head aggregates referential
+information additively, while the other performs contrastive suppression of incorrect alternatives. In a
+two-layer, single-head model, we further observed compositional behavior across layers, indicating
+the emergence of functional hierarchy. These findings highlight that task-constrained training
+can produce parsimonious and interpretable circuits, offering valuable insight into the primitive
+computational motifs that may underlie reasoning in larger, pretrained language models.
+
+
+===== PAGE BREAK =====
+
+References
+
+[1]
+
+[2]
+
+[3]
+
+[4]
+
+[5]
+
+[6]
+
+[7]
+
+[8]
+
+[9]
+
+[10]
+
+[11]
+
+[12]
+[13]
+
+[14]
+
+[15]
+
+[16]
+
+[17]
+
+[18]
+
+[19]
+
+Leonard Bereska and Stratis Gavves. “Mechanistic Interpretability for AI Safety - A Review”. In: Trans.
+Mach. Learn. Res. 2024 (2024) (see page: [Ip.
+
+Jannik Brinkmann, Abhay Sheshadri, Victor Levoso, Paul Swoboda, and Christian Bartelt. “A Mechanis-
+tic Analysis of a Transformer Trained on a Symbolic Multi-Step Reasoning Task”. In: ACL (Findings).
+Association for Computational Linguistics, 2024, pp. 4082-4102 (see page:[Ip.
+
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhariwal,
+Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal, Ariel Herbert-
+Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu,
+Clemens Winter, Christopher Hesse, Mark Chen, Eric Sigler, Mateusz Litwin, Scott Gray, Benjamin
+Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec Radford, Ilya Sutskever, and Dario
+Amodei. “Language Models are Few-Shot Learners”. In: NeurIPS. 2020 (see page: [Ip.
+
+Arthur Conmy, Augustine N. Mavor-Parker, Aengus Lynch, Stefan Heimersheim, and Adria Garriga-
+Alonso. “Towards Automated Circuit Discovery for Mechanistic Interpretability”. In: NeurIPS. 2023
+
+(see page:[Ip.
+
+Nelson Elhage, Neel Nanda, Catherine Olsson, Tom Henighan, Nicholas Joseph, Ben Mann, Amanda
+Askell, Yuntao Bai, Anna Chen, Tom Conerly, Nova DasSarma, Dawn Drain, Deep Ganguli, Zac Hatfield-
+Dodds, Danny Hernandez, Andy Jones, Jackson Kernion, Liane Lovitt, Kamal Ndousse, Dario Amodei,
+Tom Brown, Jack Clark, Jared Kaplan, Sam McCandlish, and Chris Olah. “A Mathematical Framework
+for Transformer Circuits”. In: Transformer Circuits Thread 1.1 (2021), p. 12 (see pages: [1] 3][7).
+
+Mor Geva, Roei Schuster, Jonathan Berant, and Omer Levy. “Transformer Feed-Forward Layers Are
+Key-Value Memories”. In: EMNLP (1). Association for Computational Linguistics, 2021, pp. 5484-5495
+
+(see page:[Ip.
+Ilya Loshchilov and Frank Hutter. “Decoupled Weight Decay Regularization”. In: ICLR (Poster). Open-
+Review.net, 2019 (see page:[2).
+
+Neel Nanda and Joseph Bloom. TransformerLens. Version v2.16.1. Aug. 26, 2022. URL: https : //)
+github.com/TransformerLensOrg/TransformerLens (see page: [2).
+
+Neel Nanda, Lawrence Chan, Tom Lieberum, Jess Smith, and Jacob Steinhardt. “Progress Measures for
+Grokking via Mechanistic Interpretability”. In: JCLR. OpenReview.net, 2023 (see meee
+
+nostalgebraist. interpreting GPT: the logit lens. LessWrong. Aug. 31, 2020. URL:
+
+wath  com / posts / ACKRB8wDpdaN6v6ru / interpreting - gpt - the - agit   Tens (see
+
+page: |4|
+
+Chris Olah, Nick Cammarata, Ludwig Schubert, Gabriel Goh, Michael Petrov, and Shan Carter. “Zoom
+In: An Introduction to Circuits”. In: Distill 5.3 (2020), e00024—001 (see page:[Ip.
+
+OpenAI. “GPT-4 Technical Report”. In: CoRR abs/2303.08774 (2023) (see page:[Ip.
+
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, and Ilya Sutskever. “Language
+Models are Unsupervised Multitask Learners”. In: OpenAI blog 1.8 (2019), p. 9 (see page:[Ip.
+
+Buck Shlegeris. One-layer transformers aren’t equivalent to a set of skip-trigrams. AI Alignment Forum.
+
+Feb. 18, 2023. URL: https: //www.alignmentforum. org/ posts / bSHNYh9ne5vEkX5ag / one
+layer-transformers-aren-t-equivalent-to-a-set-of-skip (see page:|2).
+
+Leslie N. Smith and Nicholay Topin. “Super-Convergence: Very Fast Training of Residual Networks
+Using Large Learning Rates”. In: CoRR abs/1708.07120 (2017) (see page: [2).
+
+Wojciech Tarnowski. “Real Spectra of Large Real Asymmetric Random Matrices”. In: Physical Review
+E 105.1 (Jan. 2022), p. L012104 (see page: [4p.
+
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timothée
+Lacroix, Baptiste Roziére, Naman Goyal, Eric Hambro, Faisal Azhar, Aurélien Rodriguez, Armand
+Joulin, Edouard Grave, and Guillaume Lample. “LLaMA: Open and Efficient Foundation Language
+Models”. In: CoRR abs/2302.13971 (2023) (see page:[Ip.
+
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz
+Kaiser, and Illia Polosukhin. “Attention is All you Need”. In: N/PS. 2017, pp. 5998-6008 (see pages: [I]
+
+Ph.
+Kevin Ro Wang, Alexandre Variengien, Arthur Conmy, Buck Shlegeris, and Jacob Steinhardt. “In-
+
+terpretability in the Wild: A Circuit for Indirect Object Identification in GPT-2 Small”. In: JCLR.
+OpenReview.net, 2023 (see page: [Ip.

@@ -1,0 +1,2185 @@
+arX1v:2510.25623v2 [cs.CL] 30 Oct 2025
+
+Evaluating the Role of Verifiers in Test-Time Scaling for Legal Reasoning
+Tasks
+
+Davide Romano, Jonathan Richard Schwarz, Daniele Giofre
+Thomson Reuters
+{Davide.Romano2, Jonathan.Schwarz, Daniele.Giofre}@thomsonreuters.com
+
+Abstract
+
+Test-time scaling (TTS) techniques can im-
+prove the performance of large language mod-
+els (LLMs) at the expense of additional compu-
+tation and latency. While TTS has proven effec-
+tive in formal domains such as mathematics and
+programming (Snell et al., 2024; Chen et al.,
+2024), its value in argumentative domains such
+as law remains underexplored. We present an
+empirical study of verifier-based TTS methods
+for legal multiple-choice QA (MCQA) across
+five benchmarks. Using a family of 7 reward
+models, we evaluate both outcome-level (Best-
+of-N) and process-level (tree search) verifica-
+tion under realistic low-NV budgets. Our analy-
+sis systematically investigates how verifier util-
+ity is affected by key properties such as domain
+specialization, model size, and supervision type
+(process-supervised PRMs vs. outcome-only
+ORMs), even when applied across different
+roles.
+
+1 Introduction
+
+Test-Time Scaling (TTS) methods aim to enhance
+Large Language Model (LLM) performance by
+trading additional compute for improved accuracy
+at inference time. The broad spectrum of these
+techniques range from single-path approaches like
+generating longer Chains-of-Thought (CoT) (Wei
+et al., 2022; Guo et al., 2025; Jaech et al., 2024) to
+more complex parallel and verifier-guided methods
+such as Best-of-N (BON) selection and tree search.
+Systematic investigations of these verifier-guided
+methods in formal domains like math and program-
+ming have demonstrated substantial accuracy im-
+provements on multiple choice QA (MCQA) tasks
+(Brown et al., 2024; Wu et al., 2024; Snell et al.,
+2024). However, the legal domain presents distinct
+challenges; its reasoning is often defeasible and ac-
+commodates multiple valid analytical paths. While
+prior work has explored single-path inference for
+legal reasoning (Yu et al., 2025), investigations into
+
+=e= Ours ORM 70B (legal + general) - Best of N
+=e= Ours ORM 8B (legal + general) - Best of N
+==as= VersaPRM 8B (multi domain) - DVTS
+
+46) =ae= Qwen2.5-Math-PRM-7B (math) - DVTS
+
+-+» Single Inference (n=1) Baseline
+
+--—8
+
+|
+
+Tt
+1
+
+-7%
+
+!
+
+i
+ee
+
+1
+
+-6%
+
+!
+
+Accuracy (%)
+
+4
+n (number of samples)
+
+Figure 1: TTS with Llama-3.1-8B-Instruct with four
+different verifiers from N=4 to N=16, average over 5
+legal MCQA benchmarks
+
+parallel and verifier-based TTS are notably absent
+from the literature. This gap is critical because
+the verifiers underpinning these methods are of-
+ten trained on general-purpose or formal-domain
+data. It remains an open question whether such
+models can reliably evaluate legal reasoning, or if
+domain-specific verifiers are required to achieve
+meaningful gains. These verifiers are broadly cate-
+gorized into two types: Outcome Reward Models
+(ORMs), which assign a single score to a com-
+plete output, and Process Reward Models (PRMs),
+which provide fine-grained, step-by-step feedback
+(Uesato et al., 2022; Lightman et al., 2023). This
+paper addresses the aforementioned gap by empir-
+ically investigating whether the performance en-
+hancements observed in formal domains translate
+to legal MCQA. Through an extensive compari-
+son of reward models, we analyze how to optimize
+these verification strategies by evaluating the im-
+pact of verifier domain specialization, model size,
+and supervision type (PRM vs. ORM).
+
+We examine verifier-based TTS for legal reasoning
+to answer the following research questions:
+
+¢ RQI (Value of verification under matched
+compute). Under equal compute budgets, do
+
+
+===== PAGE BREAK =====
+
+outcome-verified Best-of-N (BoN) and Di-
+verse Verifier Tree Search (DVTS) outperform
+simple Majority Vote (MV) on legal MCQA
+benchmarks?
+
+RQ2 (Importance of domain specialization
+and verifier size). With method and compute
+held constant, does a legal-specialized veri-
+fier outperform a general-domain verifier, and
+how large is the additional effect of scaling
+the verifier size?
+
+RQ3 (Role transfer between verifiers): Un-
+der matched size and compute, could these
+reward models be used also out-of-role (for
+PRMs in outcome verification and for ORMs
+in process-verification) in legal MCQA tasks?
+
+Contributions This paper makes three key con-
+tributions to the understanding of verifier-based
+test-time scaling for legal reasoning. First, we
+conduct a comprehensive comparison between
+MV, BoN, and process-verified DVTS using open-
+source models, revealing that verifier-based meth-
+ods rarely outperform simple voting baselines by
+significant margins in legal reasoning. Second,
+through systematic ablation studies, we show that
+both verifier model size and domain specialization
+are crucial for improving performance, with legal-
+domain training providing a distinct advantage that
+becomes most apparent at larger scales. Notably,
+we find that the utility of all methods diminishes
+as generator model capability increases, with even
+sophisticated verification providing minimal gains.
+Finally, our analysis of supervision type shows that
+PRMs deliver superior performance compared to
+ORMs of similar size, even when PRMs are de-
+ployed outside their intended role for outcome ver-
+ification tasks. These findings provide valuable
+guidance for practitioners seeking to optimize com-
+putational resources in legal NLP applications.
+
+2 Experimental Setup
+
+We test three generators: Llama-3.2-3B-Instruct,
+Llama-3.1-8B-Instruct, and Llama-3.1-70B-
+Instruct (Dubey et al., 2024). We ran our tests
+with CoT prompting (Wei et al., 2022) and temper-
+ature T’ = 0.8 and the system prompts in appendix
+B. Our evaluation compares three methods:
+Majority Vote (MV): Sample k CoT responses
+and select the most frequent answer.
+
+Best-of-N (BoN): Sample N CoT responses, score
+each with an Outcome Reward Model (ORM), and
+
+select the one with highest reward.
+
+DVTS (Beeching et al.): A tree search guided by
+a Process Reward Model (PRM) scoring partial
+steps. For optimal hyperparameter choice, such as
+expansion width or aggregation strategy, we ran an
+ablation study on MBE exam that can be found in
+appendix C.
+
+While generating N trajectories of length T
+
+dominates computational cost at O(T?), the
+reward-model scoring methods (Best-of-N and
+DVTS) add only modest linear O(T) overhead,
+making all three approaches comparable in runtime
+(see more details in Appendix A) .
+We use the verifiers detailed in Table 1 and evaluate
+on five legal benchmarks: binary COLIKE Task 4
+(Goebel et al., 2025); four-option MBE BAR Exam
+and LEXam (Fan et al., 2025); eight-option Su-
+perGPQA (Law subset) (Du et al., 2025); and
+thirty-two-option LEXam-32(Fan et al., 2025).
+MBE BAR Exam is the only restricted-access
+benchmark.
+
+Type Verifier Model         Size          Training data
+ORM Our RMs             8B,70B General + Legal’
+Skywork-Reward        8B,27B General
+
+(Liu. et al.,
+2024)
+
+PRM VersaPRM (Zeng 8B            Multi-domain*
+et al., 2025)
+
+Qwen2.5-Math-PRM 7B,72B Math
+(Zhang et al.,
+
+2025)
+
+Table 1: Verifiers used in our study, grouped by su-
+pervision type (ORM/PRM). *Multi-domain includes
+Law, Philosophy, Biology and others. ‘Both our models
+were trained on identical datasets, comprising general
+knowledge sources such as UltraFeedback (Cui et al.,
+2023) and restricted-access legal data from US and UK
+jurisdictions. This training corpus encompasses various
+task types: legal reasoning, legal information retrieval,
+legal summarization, and basic instruction following.
+
+2.1 Study Design
+
+RQI1 (Value of Verification): We compare MV
+against both BoN with Skywork-RM-27B, and
+DVTS (with VersaPRM-8B). For BoN, we use
+Skywork-RM-27B due to its performance on the
+RewardBench (Lambert et al., 2024) benchmark.
+For DVTS, we selected VersaPRM-8B as it is
+the first open-source, multi-domain PRM avail-
+able for research. RQ2 (Impact of Domain
+& Size): We compare legal (Ours RMs) vs.
+general (Skyworks) ORMs using BON, and the
+multi-domain (VersaPRM) vs. out-of-domain
+
+
+===== PAGE BREAK =====
+
+Average (5 datasets)                                      MBE BAR                                           SuperGPQA
+48 =@= Majority Vote                                                          =@* Majority Vote                                                          =@* Majority Vote
+Best of N - Skywork-Reward-Llama-3.1-8B-v0.2                 Gs         Best of N - Skywork-Reward-Llama-3.1-8B-v0.2                 36         Best of N - Skywork-Reward-Llama-3.1-8B-v0.2
+
+=e= (general)                                                                     ae
+
+=@= DVTS - VersaPRM 8B (multi-domain)
+
+(general)
+
+44
+eo
+3                                                                               =                 3
+—_—            = s8
+oe"
+e
+
+Accuracy (%)
+8
+Accuracy (%)
+So,
+
+=@= DVTS - VersaPRM 8B (multi-domain)
+
+e— #5
+“nT
+
+a
+
+=®= (general)
+=@= DVTS - VersaPRM 8B (multi-domain)
+
+Accuracy (%)
+8
+
+-                                                                                                                                                                              eo
+
+eo                                       32
+4                                   fc                                                                  -.
+                                                     Le         :
+
+2               4
+n (number of samples)
+LEXam
+
+2          4
+n (number of samples)
+LEXam 32 Choices
+
+2          4
+n (number of samples)
+
+COLIEE Task 4
+
+50] =@= Majority Vote
+Best of N - Skywork-Reward-Llama-3.1-8B-v0.2
+
+=@= Majority Vote
+
+== (general)                                                                     =~
+
+48) =@= DVTS - VersaPRM 8B (multi-domain)
+
+(general)
+
+Accuracy (%)
+8
+Accuracy (%)
+
+Best of N - Skywork-Reward-Llama-3.1-8B-v0.2
+
+=@= DVTS - VersaPRM 8B (multi-domain)
+
+=@= Majority Vote
+
+ou. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2
+(general)
+
+=@= DVTS - VersaPRM 8B (multi-domain)
+
+Accuracy (%)
+XN
+
+n                                                       ,
+7
+4
+7                                     ¢              _
+?
+a                   o
+68                                   i             —_—
+
+2               4               8
+n (number of samples)
+
+4               8
+n (number of samples)
+
+2              4               8
+n (number of samples)
+
+Figure 2: RQ1 results across all benchmarks with Llama 8B as the generator
+
+(Qwen-Math-PRM) PRMs using DVTS. RQ3 (Su-
+pervision Type): We test our legal ORMs (Ours)
+against the legal PRM (VersaPRM) on both BoN
+and DVTS.
+
+3 Results
+
+3.1 RQI1: Value of verification under matched
+compute
+
+In Figure 2 and figures 5-6 in appendix D we
+can see that MV remains a strong baseline across
+benchmarks and generator scales. The only
+model where BoN and DVTS surpass on aver-
+age across the 5 benchmarks the MV baseline
+is Llama-3.2-3B-Instruct, where they achieve
+around 1.4% average improvement. For larger mod-
+els, however, verifications provides no performance
+benefit or even show a decrease compared to MV.
+These limited benefits of verification prompted us
+to further explore the potential of domain special-
+ization and size as two variables to obtain better
+verification in 3.2.
+
+Performance Variation Across Benchmarks A
+closer analysis of the per-benchmark performance
+reveals that the utility of verification is heavily in-
+fluenced by the task’s complexity, specifically the
+
+Table 2: Relative performance Gains on Llama 70B
+Generator at N=16 against Majority Vote baseline. Best-
+of-N uses Legal ORM 70B and DVTS uses QwenPRM
+72B.
+
+Benchmark      Method    Rel. Gain
+MBE BAR           re rN        we
+SuperGPQA        burs rN        oo
+LEXam               ere        Os
+LEXam 32           ere       tea
+COLIEE Task 4    ere        34
+
+cardinality of the answer space. While this is more
+limited with smaller generators, with 70B gener-
+ator as shown in Table 2 the difference is consid-
+erable. On benchmarks with a small number of
+answer choices, such as COLIEE Task 4, MBE,
+and LEXam, verifier-based methods offer marginal
+or even negative gains over the highly effective MV
+
+
+===== PAGE BREAK =====
+
+Llama 8B - Best of N                                  Llama 8B - DVTS
+
+Llama 70B - Best of N                                 Llama 70B - DVTS
+
+=@= Ours 708 (legal + general)
+
+== Ours 8B (legal + general)
+
+== Skywork-Reward-Gemma-2-27B-v0.2 (general)
+Ye Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+
+‘=@= VersaPRM 88 (multi domain)
+== Qwen2.5-Math-PRM-72B (math)
+a= Qwen2.5-Math-PRM-7B (math)
+
+wu
+i)
+
+S
+&
+
+-
+&
+
+i
+
+— ss
+
+S
+B
+
+Accuracy (%)
+Accuracy (%)
+
+S
+S
+
+S
+6
+
+w
+©
+
+=@= Ours 708 (legal + general)
+
+== Ours 8B (legal + general)
+
+am Skywork-Reward-Gemma-2-27B-v0.2 (general)
+=Ye Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+
+‘=@= VersaPRM 8B (multi domain)
+== Qwen2.5-Math-PRM-72B (math)
+a= Qwen2.5-Math-PRM-7B (math)
+
+wo  2
+©  3
+
+Accuracy (%)
+-
+Ey
+
+rd
+z
+
+Accuracy (%)
+
+i
+
+52                        m
+
+w
+Nv
+
+50
+
+a          2          4          8
+n (number of samples)
+
+16             ‘i           rf          4          8
+n (number of samples)
+
+16
+
+16             ‘J           rf          4          8
+n (number of samples)
+
+16
+n (number of samples)
+
+Figure 3: RQ2 average results with both Llama 8B and Llama 7B
+
+Llama 8B - Best of N                                  Llama 8B - DVTS
+
+Llama 70B - Best of N                                 Llama 70B - DVTS
+
+=e= Ours ORM 70B (legal + general)
+m= Ours ORM 8B (legal + general)
+=@= VersaPRM 8B (multi domain)
+
+=e= Ours ORM 70B (legal + general)
+m= Ours ORM 8B (legal + general)
+=@= VersaPRM 8B (multi domain)
+
+Accuracy (%)
+Accuracy (%)
+
+a2
+
+60
+=e= Ours ORM 70B (legal + general)
+m= Ours ORM 8B (legal + general)
+=@= VersaPRM 8B (multi domain)
+
+=e= Ours ORM 70B (legal + general)
+m= Ours ORM 8B (legal + general)
+=@= VersaPRM 8B (multi domain)
+
+w
+&
+
+w
+a
+
+——
+
+che
+
+fo —
+—
+
+g
+g
+g
+g
+
+Accuracy (%)
+Accuracy (%)
+
+w
+N
+
+w
+is)
+
+w
+3
+w
+3
+
+1 (number of samples)                           n (number of samples)
+
+1                 2                 4                 8
+n (number of samples)
+
+16
+n (number of samples)
+
+Figure 4: RQ3 average results with both Llama 8B and Llama 70B
+
+baseline. However, this trend is starkly reversed
+in the high-complexity LEXam-32 task. With 32
+possible answers, the output space becomes signifi-
+cantly noisier, causing the MV baseline to struggle.
+In this scenario, DVTS achieves a substantial rela-
+tive gain of +12.4%.
+
+3.2 RQ2: Domain specialization vs. verifier
+size
+
+Figure 3 and figures 7-8 in appendix D demonstrate
+that BoN with our reward models (both 8B and 70B
+variants) match or outperform general-domain veri-
+fiers across evaluations. While the 8B model shows
+minimal performance advantages over general ver-
+ifiers, the 70B model consistently delivers superior
+results across numerous benchmarks. Regarding
+the performance of PRMs with DVTS, QwenPRM
+72B produces the most significant enhancement
+when coupled with smaller generator models. Di-
+rect comparison between similarly sized VersaPRM
+8B and QwenPRM 7B reveals that VersaPRM consis-
+tently delivers superior performance.
+
+3.3. RQ3: Supervision type and transfer
+(PRM vs. ORM)
+
+Figure 4 and figures 12-16 in Appendix D show that
+PRMs provide consistent benefits: as BoN scorers
+they yield stronger reranking than size-matched
+ORMs, and within DVTS they offer more effec-
+tive guidance. Improvements are concentrated on
+
+the smaller generators, similar to the other results.
+Ours 7@B can still perform better than VersaPRM
+also in process supervision even though it has re-
+ceived no process training.
+
+3.4 Discussion
+
+Table 3: Relative improvement values across Llama
+models at N=16 over the Majority Vote baseline at
+N=16.
+
+Method + Reward Model | Llama 3B | Llama 8B | Llama 70B
+
+BoN + VersaPRM 8B             +2.94         +0.16          +1.56
+BoN + Legal ORM 70B          +4.46          +2.22          +1.20
+DVTS + QwenPRM 72B         +4.00         +2.00           -0.06
+
+Diminishing Returns of Verification The per-
+formance gains from verifier-based TTS decrease
+as the capability of the generator model improves.
+At same value of NV when using the 70B gener-
+ator, even well-configured verifiers provide only
+small improvements over the MV baseline (Table
+3), which proves to be a very competitive method.
+
+Task Complexity as a Key Differentiator The
+strong performance on the LEXam-32 benchmark
+provides a crucial insight into the practical limits
+of MV method. While MV is a robust baseline
+for tasks with a small set of discrete answers, its
+utility appears to degrade significantly as the so-
+lution space expands. It is in this high-cardinality
+
+
+===== PAGE BREAK =====
+
+environment that verifier-guided methods demon-
+strate their value. This suggests that for problems
+with a constrained output space, the simplicity of
+MV may be sufficient, but as task complexity and
+the number of possible outcomes grow, the compu-
+tational overhead of verification becomes a more
+justifiable investment. This relationship warrants
+further investigation, including in Open QA set-
+tings.
+
+The Dual Impact of Scale and Specialization
+Our findings highlight two key drivers of verifier
+performance: model scale and domain specializa-
+tion. Scaling a verifier from an 8B to a 70B model
+consistently yields substantial performance gains.
+Similarly, models trained on specialized legal data
+regularly outperform their general-domain counter-
+parts. However, these two factors are linked. The
+advantage from specialization is most pronounced
+at the 70B scale, while at the 8B scale, specialized
+models like VersaPRM offer modest, yet clear, im-
+provements. This indicates that while larger mod-
+els are inherently more capable, targeted training
+provides a distinct, scale-dependent advantage.
+
+The Generalization of Process Supervision — Fi-
+nally, we find that PRMs seem to work well also
+in both outcome and process verification for legal
+tasks. This may indicate that the step-by-step feed-
+back used to train PRMs helps them develop a more
+robust measure of reasoning quality.
+
+4 Conclusions
+
+In this work, we presented a systematic evalua-
+tion of verifier-based TTS for legal multiple-choice
+question answering.
+
+A consistent observation is the diminishing re-
+turn of verification as the generator model’s power
+increases; while gains are evident for smaller gen-
+erators, they shrink significantly for more powerful
+ones, where a simple Majority Vote often remains
+competitive. However, the utility of Majority Vote
+is challenged by task complexity, and we find that
+verifier-based methods provide substantial gains
+in high-cardinality benchmarks where the answer
+space is large.
+
+Crucially, we find that effective verification re-
+lies on the dual impact of model scale and domain
+specialization. The advantage of in-domain train-
+ing is most pronounced at larger verifier scales.
+This is complemented by the notable generalization
+of process supervision: VersaPRM proved highly
+
+versatile, outperforming size-matched Outcome Re-
+ward Models even when used out-of-role for out-
+come reranking.
+
+For practitioners, these findings suggest that in-
+vesting in high-quality, in-domain reward models is
+a promising direction for improving inference-time
+legal reasoning.
+
+5 Limitations and Scope
+
+The scope of this study is limited to legal reason-
+ing MCQA, and our findings may not generalize
+to other legal tasks such as summarization or open-
+ended QA where verification is arguably more com-
+plex. Additionally, our experiments primarily fo-
+cused on a single model family (i.e. Llama 3.1 and
+Llama 3.2), and other model architectures might
+exhibit different improvements from verification.
+Future work should explore additional legal do-
+mains and open QA, expand the verifier pool with
+more recent reward models such as Skywork-v2
+Reward Models, and evaluate newer generators
+like Qwen3 models. It should be noted that some
+verifiers used in this study are restricted-access data
+(ours RMs), which limits the full reproducibility of
+certain results.
+
+References
+
+Edward Beeching, Lewis Tunstall, and Sasha Rush.
+Scaling test-time compute with open models.
+
+Bradley Brown, Jordan Juravsky, Ryan Ehrlich, Ronald
+Clark, Quoc V Le, Christopher Ré, and Azalia Mirho-
+seini. 2024. Large language monkeys: Scaling infer-
+ence compute with repeated sampling. arXiv preprint
+arXiv:2407.21787.
+
+Lingjiao Chen, Jared Quincy Davis, Boris Hanin, Peter
+Bailis, Ion Stoica, Matei Zaharia, and James Zou.
+2024. Are more Ilm calls all you need? towards
+scaling laws of compound inference systems. arXiv
+preprint arXiv:2403.02419.
+
+Ganqu Cui, Lifan Yuan, Ning Ding, Guanming Yao,
+Wei Zhu, Yuan Ni, Guotong Xie, Zhiyuan Liu, and
+Maosong Sun. 2023. Ultrafeedback: Boosting lan-
+guage models with high-quality feedback.
+
+Xinrun Du, Yifan Yao, Kaijing Ma, Bingli Wang,
+Tianyu Zheng, King Zhu, Minghao Liu, Yiming
+Liang, Xiaolong Jin, Zhenlin Wei, and | others. 2025.
+Supergpqa: Scaling Ilm evaluation across 285 gradu-
+ate disciplines. arXiv preprint arXiv:2502.14739.
+
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey,
+Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman,
+Akhil Mathur, Alan Schelten, Amy Yang, Angela
+Fan, and 1 others. 2024. The llama 3 herd of models.
+arXiv e-prints, pages arXiv—2407.
+
+
+===== PAGE BREAK =====
+
+Yu Fan, Jingwei Ni, Jakob Merane, Etienne Salim-
+beni, Ya ng Tian, Yoan Hermstriiwer, Yinya Huang,
+Mubashara Akhtar, Florian Geering, Oliver Dreyer,
+and 1 others. 2025. Lexam: Benchmarking le-
+gal reasoning on 340 law exams. arXiv preprint
+arXiv:2505.12864.
+
+Randy Goebel, Yoshinobu Kano, Japan Calum Kawn,
+Mi-Young Kim, and Masaharu Yoshioka. 2025. Inter-
+national competition on legal information extraction
+and entailment (coliee 2025).
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao
+Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shi-
+rong Ma, Peiyi Wang, Xiao Bi, and | others. 2025.
+Deepseek-r1: Incentivizing reasoning capability in
+Ilms via reinforcement learning. arXiv preprint
+arXiv:2501, 12948.
+
+Aaron Jaech, Adam Kalai, Adam Lerer, Adam Richard-
+son, Ahmed El-Kishky, Aiden Low, Alec Helyar,
+Aleksander Madry, Alex Beutel, Alex Carney, and 1
+others. 2024. Openai ol system card. arXiv preprint
+arXiv:2412.16720.
+
+Nathan Lambert, Valentina Pyatkin, Jacob Morrison,
+LJ Miranda, Bill Yuchen Lin, Khyathi Chandu,
+Nouha Dziri, Sachin Kumar, Tom Zick, Yejin Choi,
+and | others. 2024. Rewardbench: Evaluating re-
+ward models for language modeling. arXiv preprint
+arXiv:2403. 13787.
+
+Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harri-
+son Edwards, Bowen Baker, Teddy Lee, Jan Leike,
+John Schulman, Ilya Sutskever, and Karl Cobbe.
+2023. Let’s verify step by step. In The Twelfth Inter-
+national Conference on Learning Representations.
+
+Chris Yuhao Liu, Liang Zeng, Jiacai Liu, Rui Yan, Ju-
+jie He, Chaojie Wang, Shuicheng Yan, Yang Liu,
+and Yahui Zhou. 2024. Skywork-reward: Bag of
+tricks for reward modeling in Ilms. arXiv preprint
+arXiv:2410.18451.
+
+Charlie Snell, Jachoon Lee, Kelvin Xu, and Aviral Ku-
+mar. 2024. Scaling Ilm test-time compute optimally
+can be more effective than scaling model parameters.
+arXiv preprint arXiv:2408.03314.
+
+Jonathan Uesato, Nate Kushman, Ramana Kumar, Fran-
+cis Song, Noah Siegel, Lisa Wang, Antonia Creswell,
+Geoffrey Irving, and Irina Higgins. 2022. Solv-
+ing math word problems with process-and outcome-
+based feedback. arXiv preprint arXiv:2211.14275.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+and | others. 2022. Chain-of-thought prompting elic-
+its reasoning in large language models. Advances
+in neural information processing systems, 35:24824—
+
+24837.
+
+Yangzhen Wu, Zhiging Sun, Shanda Li, Sean Welleck,
+and Yiming Yang. 2024. Inference scaling laws:
+An empirical analysis of compute-optimal inference
+for problem-solving with language models. arXiv
+preprint arXiv:2408.00724.
+
+Yaoyao Yu, Leilei Gan, Yinghao Hu, Bin Wei, Kun
+Kuang, and Fei Wu. 2025. Evaluating test-time scal-
+ing Ilms for legal reasoning: Openai 01, deepseek-r1,
+and beyond. arXiv preprint arXiv:2503. 16040.
+
+Thomas Zeng, Shuibai Zhang, Shutong Wu, Christian
+Classen, Daewon Chae, Ethan Ewer, Minjae Lee,
+Heeju Kim, Wonjun Kang, Jackson Kunde, and 1 oth-
+ers. 2025. Versaprm: Multi-domain process reward
+model via synthetic reasoning data. arXiv preprint
+arXiv:2502.06737.
+
+Zhenru Zhang, Chujie Zheng, Yangzhen Wu, Beichen
+Zhang, Runji Lin, Bowen Yu, Dayiheng Liu, Jin-
+gren Zhou, and Junyang Lin. 2025. The lessons of
+developing process reward models in mathematical
+reasoning. arXiv preprint arXiv:2501.07301.
+
+A TTS methods compute cost
+
+For N trajectories with average length T’, genera-
+tion dominates total cost. Without KV caching,
+the generator cost scales as O(PyNT?). In
+contrast, reward-model scoring is linear in (7):
+Best-of-N adds one verifier forward per trajectory
+(O(PrNT)), and DVTS scores multiple partial
+paths across s reasoning steps, about st times
+the BoN cost, O(PrNT*5*). With typical CoT
+lengths of hundreds of tokens (average is 1000 for
+our CoTs) and s 10, these O(T) verifier terms
+remain much smaller than the O(T”) generation
+term, even when the verifier is larger than the gener-
+ator, so for a fixed sample count NV, MV, BoN, and
+DVTS have comparable runtime, with only modest
+linear overheads for BoN and DVTS.
+
+B_ Generator prompt templates
+
+This section details the prompt templates used for
+the generator models.
+
+B.1 Majority Vote & Best-of-N system prompt
+
+For the Best-of-N (BoN) generation method, we
+use a custom system template for MCQA and the
+classic CoT preprompt.
+
+
+===== PAGE BREAK =====
+
+Generator    Reward Model Dataset    N_ Expansion Independent Accuracy
+Width      Subtrees
+Llama-3.1-    VersaPRM     BAR      16 8          2          55.6%
+8B-Instruct
+BAR      16 4          4          59.5%
+BAR      16 2         8          61.8%
+Llama-3.1-    Ours 70B      LEXam32 16 4          4          19.7%
+70B-Instruct
+LEXam 32 16 2         8          22.6%
+VersaPRM     LEXam32 16 4          4          19.0%
+2         8          21.2%
+Qwen2.5-Math- LEXam32 16 4         4          20.4%
+PRM-72B
+2          8          19.0%
+Table 4: Expansion width tuning tests
+(                               >
+
+Please complete the following user request.
+
+When answering questions, first re-
+flect on the problem step by step. At the end
+ALWAYS conclude with this phrase:
+
+Therefore,     the final answer is:
+\boxed{answer }. I hope it is correct.
+Where answer CAN BE ONLY
+[Lanswer_options].
+
+The {answer_options} are specific for each
+dataset, and it represents the list of accepted final
+answers. For example for BAR:
+
+Where answer CAN BE ONLY ONE OF
+THE FOLLOWING: "A", "B"" "C", "p'”
+
+For parsing we accepted both formats
+"\boxed{answer}" and "Therefore, the final
+answer is: {answer}" as Llama3.1 family didn’t
+output the \boxed{} very often. When we do the
+selection of the final answer we filter for the ones
+that passed successfully the parsing.
+
+B.2. DVTS system prompt
+"a                                                              ~
+Please complete the following user request.
+
+Use this step-by-step format:
+
+## Step 1
+[Reasoning step description]
+
+## Step 2
+[Reasoning step description]
+
+Regardless of the approach, ALWAYS
+conclude with this phrase:
+
+Therefore,     the final answer is:
+\boxed{answer}. [ hope it is correct.
+Where answer CAN BE ONLY
+
+[Lanswer_options].
+XN                                                              wy
+
+CRMs hyperparameter tuning
+
+C.1 Expansion width tuning
+
+Diverse Verifier Tree Search (DVTS) (Beeching
+et al.) requires to set a hyperparameter called "ex-
+pansion width" W which corresponds to the num-
+ber of next steps expansions for each tree. Together
+with it, we have the number of initial subtrees T (or
+
+
+===== PAGE BREAK =====
+
+also called "beams") at the start of the algorithm.
+The number NV used in our paper is the correspond-
+ing of W - T. To study the best parameter for W
+given a fixed budget N we performed the experi-
+ments in Table 4.
+
+The results indicate that with smaller models such
+as Llama-3.1-8B-Instruct having a smaller ex-
+pansion width (and therefore higher number of sub-
+trees J’) leads to better results. This is caused by
+the fact that diversifying more the generations at
+the start will lead to less formatting errors to parse
+the final answer. Therefore, in all our experiments
+we used W = 2 and the number T is N/W.
+
+C.2. Score aggregation method tuning
+
+From (Beeching et al.; Zeng et al., 2025) there are
+four common options to the aggregation strategy
+choice for the PRM scores:
+
+Min-Aggregation
+
+ve
+
+Last-Aggregation
+
+Ageriast(9) = PRM(S)x.
+
+Average-A gegregation
+
+1
+Agetaye(S) = k S- PRM(S)i.
+i€[k]
+
+Prod-Aggregation
+
+Agetproa(S) = [| PRM(S)i.
+i€[k]
+
+To select our selection strategy we ran tests
+for VersaPRM and Qwen2.5-Math-PRM-72B on the
+BAR exam with Llama-3.1-8B-Instruct as gen-
+erator with N = 16. The results are in Table 5
+These results brought us to use for VersaPRM the
+Mean aggregation strategy. While for the Qwen-
+PRMs (both 72B and 7B) to use Last.
+
+D_ Full results
+
+Full results are added, I just commented them for
+faster compilation
+
+PRM                       Aggregation BAR accuracy
+Strategy
+
+VersaPRM    Mean        62.7%
+Min         62.2%
+Last                              59.5%
+
+Qwenz?2.5-     Mean         57.7%
+
+Math-PRM-
+
+72B
+Prod                             59.2%
+Min         57.6%
+Last                         60.5 %
+
+Table 5: Aggregation strategy ablation tests
+
+
+===== PAGE BREAK =====
+
+Average (5 datasets)
+
+MBE BAR                                            SuperGPQA
+=@* Majority Vote                                           =@* Majority Vote                                           =@* Majority Vote
+_. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2                 554 9 Best of N - Skywork-Reward-Llama-3.1-8B-v0.2                         _. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2
+424 "©" (general)                                                                   (general)                                         e              347 =®™ (general)
+=@= DVTS - VersaPRM 8B (multi-domain)                                 =@= DVTS - VersaPRM 88 (multi-domain)             ie                  =@= DVTS - VersaPRM 8B (multi-domain)
+yw                                                                          32
+40
+45
+ry             30
+Ss                                                                       S                                                                          S
+x                                                                          x                                                                          x
+>                                                                          > 40                                                                       B28
+£                                                                          £                                                                          i
+> 36                                                         rm)                                                            2
+3                                                                          re                                                                          3
+3                                                                          g                                                                          3
+<                                                           <3                                                         < 26
+34
+30                                                                          24
+32
+22
+25
+30                                                                                                                                                     20
+20
+ey             2             4             8            16                    1             2             4             8            16                    ri             r             4             8            16
+n (number of samples)                                                      n (number of samples)                                                      n (number of samples)
+LEXam                                              LEXam 32 Choices                                         COLIEE Task 4
+=@= Majority Vote                                           =@= Majority Vote                                       ra} 78" Majority Vote
+_ Best of N - Skywork-Reward-Llama-3.1-8B-v0.2                      _o.. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2                         __. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2
+44) =®= (general)                                                        {7° (General)                                                            =©= (general)
+=@= DVTS - VersaPRM 8B (multi-domain)                                =@= DVTS - VersaPRM 8B (multi-domain)                                =@= DVTS - VersaPRM 8B (multi-domain)
+72
+42
+10
+70
+=                                                                                 Ss                                                                                    aS
+s                                                                          Xs                                                                       x
+>                                                                          >                                                                          >
+fo                                                           fo                                                           S 68
+‘s                                                                          fy                                                                          ig
+5 38                                                         5                                                            5
+3                                                                          fe                                                                          3
+o                                                                          QO 6                                                                       og
+<                                                                          <                                                                          <
+66
+36
+4
+64
+34
+2
+62
+32
+1             2             4             8            16                    1             2             4             8            16                    1             2             4             8            16
+n (number of samples)                                                        n (number of samples)                                                        n (number of samples)
+Figure 5: RQ1 average and individual benchmarks results using Llama-3.2-3B-Instruct
+Average (5 datasets)                                        MBE BAR                                             SuperGPQA
+80
+=@* Majority Vote                                                         =@* Majority Vote                                                    431 =@* Majority Vote
+_. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2                       _¢.. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2                          _. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2
+=©= (general)                                                              ‘= (general)                                                             =©= (general)
+58) me=  DVTS - VersaPRM 8B (multi-domain)                             ue   =@= DVTS - VersaPRM 8B (multi-domain)                                 =@= DVTS - VersaPRM 8B (multi-domain)
+46
+76
+56                                                                                                                                                      faa
+S                                                                                     en                                                                                  S
+x                                                                          x                                                                          x
+is                                                                          iy                                                                          is
+© 4                                                            ic                                                               eo”
+2                                                            5 72                                                          2
+3                                                                           Fy                                                                           3
+3                                                                           g                                                                           3
+¢                                                                          <                                                                          ¢
+70                                                                          40
+52
+68                                                                          38
+50
+66
+36
+1             3             4             8            16                      ey             ri             4             8            16                      7             i             4             8            16
+n (number of samples)                                                        n (number of samples)                                                        n (number of samples)
+LEXam                                              LEXam 32 Choices                                          COLIEE Task 4
+=@= Majority Vote                                              =@= Majority Vote                                              =@= Majority Vote
+60      _. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2                 25.01 _._ Best of N - Skywork-Reward-Llama-3.1-88-v0.2                          _. Best of N - Skywork-Reward-Llama-3.1-8B-v0.2
+== (general)                                                              ‘= (general)                                                             == (general)
+=@= DVTS - VersaPRM 8B (multi-domain)                               =@= DVTS - VersaPRM 8B (multi-domain)                           86) =@= DVTS - VersaPRM 8B (multi-domain)
+22.5
+58
+20.0                                                                          84
+oe                                                                  Sus                                                                   -
+a                                                                                   icy                                                                                       & 82
+8                                                                         8                                                                            8
+5                                                                     5 15.0                                                                    5
+g 54                                                        g                                                             g
+<                                                                         <                                                                            <
+12.5                                                                                     80
+52
+10.0
+78
+75
+50
+5.0                                                                          76
+
+1              2              4              8              16
+n (number of samples)
+
+1              2              4              8              16
+n (number of samples)
+
+1              2              4              8              16
+n (number of samples)
+
+Figure 6: RQ1 average and individual benchmarks results using Llama-3.1-70B-Instruct
+
+
+
+===== PAGE BREAK =====
+
+Accuracy (%)
+Ww      S      ‘      uw      ul      a
+u      oO      u      Oo      u      Oo
+
+w
+fo}
+
+N
+u
+
+67.5
+
+Accuracy (%)
+
+ul      a      a      a
+~ S NOG
+ul      Oo      u      Oo
+
+wu
+a
+fo)
+
+52.5
+
+82
+
+80
+
+78
+
+76
+
+74
+
+Accuracy (%)
+
+72
+
+70
+
+RQ2: Legal-Specialized vs General-Domain Verifiers - MBE BAR
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+=@= VersaPRM 8B (multi domain)
+
+60                                           == Qwen2.5-Math-PRM-72B (math)
+ne                                             =a= Qwen2.5-Math-PRM-7B (math)
+>a                             55
+Ni
+50
+.                 —=“£
+r                 7
+—_——$                                                                                                                                 a
+45                                                                               e
+ZN
+D4                                                                                  40      V\’
+35                                                             °
+oN
+=@®= Ours ORM 70B (legal + general)                                                  30
+== Ours ORM 8B (legal + general)
+mam Skywork-Reward-Gemma-2-27B-v0.2 (general)                               25                                     a
+m=Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)                                                                       x
+if                 2                 4                 8                16                  al                 2                 4                 8                 16
+Llama 8B - Best of N                                                 Llama 8B - DVTS
+=@= Ours ORM 70B (legal + general)                                                                      =@= VersaPRM 8B (multi domain)
+=—= Ours ORM 8B (legal + general)                   67.5                                            =—M@= Qwen2.5-Math-PRM-72B (math)
+=a== Skywork-Reward-Gemma-2-27B-v0.2 (general)      .                                          =a= Qwen2.5-Math-PRM-7B (math)
+==Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+65.0
+oo?
+_—                           62.5
+Lt
+.                                            60.0                                           SS                 —
+rh                                                       —_
+Ls
+-                                                     Z\                         SY /ae)       a
+eo                 A                 a
+jv
+oe                                            oe
+ras
+~~                           52.5                                            _—— —,
+a                                                                         "a
+1                 2                 4                 8                16                  1                 2                 4                 8                 16
+Llama 70B - Best of N                        )                        Llama 70B - DVTS
+=@= Ours ORM 70B (legal + general)                                                                        =@= VersaPRM 8B (multi domain)
+=M®= Ours ORM 8B (legal + general)                                                                     =M@= Qwen2.5-Math-PRM-72B (math)
+=as= Skywork-Reward-Gemma-2-27B-v0.2 (general)     80                                         =4== Qwen2.5-Math-PRM-7B (math)
+==Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+78
+e————__.         76
+a                                                       2:
+a                                                          —__L
+”                 th         74                                                             e,
+Al                  ————
+ee                                                             |
+m.
+M                 v                  —“\T                                      u                                    =                  SO
+i                                                                         aS                                   N
+70
+a
+li                 2                 4                 8                16                  al                 2                 4                 8                 16
+
+n (number of samples)
+
+n (number of samples)
+
+Figure 7: MBE bar exam RQ? results with Best-of-N and DVTS
+
+
+
+===== PAGE BREAK =====
+
+36
+
+34
+
+Accuracy (%)
+N      N      Ww
+fop)      foo)      Oo
+
+N
+BS
+
+22
+
+20
+
+38
+
+36
+
+34
+
+32
+
+30
+
+Accuracy (%)
+
+28
+
+26
+
+24
+
+50
+
+Accuracy (%)
+aN     p    5    aN
+Oo       N       a       a
+
+w
+foe)
+
+RQ2: Legal-Specialized vs General-Domain Verifiers - SuperGPQA
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+=@= Ours ORM 70B (legal + general)                   36                                                  =@= VersaPRM 8B (multi domain)
+Ours ORM 8B (legal + general)                                                                         == Qwen2.5-Math-PRM-72B (math)
+mwas= Skywork-Reward-Gemma-2-27B-v0.2 (general)    34                                               =as= Qwen2.5-Math-PRM-7B (math)
+m=Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+32
+.                 oe
+=_.         30
+°                                                                                           =
+28                                            Z
+_—__
+26                                                               oe
+————
+M                                                                                                              zy
+Lt                                                       "~
+a)       24                                                                -—-
+ry                                                                                                                                 ZN
+yi                 ———                                             22)                                     —_——
+AV                                                                                                              "AS
+20
+1                  2                  4                  8                 16                1                  2                  4                 8                 16
+Llama 8B - Best of N                                                   Llama 8B - DVTS
+=@= Ours ORM 70B (legal + general)                   38                                                  =@= VersaPRM 8B (multi domain)
+=—= Ours ORM 8B (legal + general)                                                                       =H= Qwen2.5-Math-PRM-72B (math)
+=a== Skywork-Reward-Gemma-2-27B-v0.2 (general)                                                =4= Qwen2.5-Math-PRM-7B (math)
+=Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)     36
+34
+—____                                                                                             7
+—— sO       32                                                                _—<
+2"
+a                                                                                                              =
+30                                            im
+a                                    ra                 iv
+oe
+O                 “AS                 ”                 ‘=       28                                                               ee
+=                                    yN                                                       >.                   i
+D/,                                                                                  26       Ww                                    =
+Ve
+———_,                                             |
+1                  2                  4                  8                 16                1                  72                  4                 8                 16
+Llama 70B - Best of N                                                   Llama 70B - DVTS
+=@= Ours ORM 70B (legal + general)                                                                        =™=@= VersaPRM 8B (multi domain)
+== Ours ORM 8B (legal + general)                    50                                                 =—M= Qwen2.5-Math-PRM-72B (math)
+mam Skywork-Reward-Gemma-2-27B-v0.2 (general)                                                mam Qwen2.5-Math-PRM-7B (math)
+=Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)     48
+46
+M
+44
+ee
+o
+a                                      y       42
+x                 oa                 =                                                                                           rh
+ae                          40
+“As                                    a                                                                          -
+e"                                                       N                                                      Ll                 mas                 ]
+38        ~~
+\
+
+1               2               4               8              16
+n (number of samples)
+
+n (number of samples)
+
+Figure 8: Coliee Task 4 RQ2 results with Best-of-N and DVTS
+
+
+
+===== PAGE BREAK =====
+
+50.0
+
+Accuracy (%)
+p    B    B
+    bay    7
+uo       oO       u
+
+iN
+=
+°o
+
+Ww
+oa
+un
+
+35.0
+
+32.5
+
+55.0
+
+52.5
+
+Accuracy (%)
+—      5      u
+Gos
+Oo      uw      ro}
+
+rs
+~
+wu
+
+37.5
+
+35.0
+
+62
+
+uw
+ao
+
+re)
+a
+
+Accuracy (%)
+
+uw
+B
+
+52
+
+50
+
+RQ2: Legal-Specialized vs General-Domain Verifiers - LEXam
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+=@= Ours ORM 70B (legal + general)
+
+=@= VersaPRM 8B (multi domain)
+
+== Ours ORM 8B (legal + general)                   50.0                                             =M= Qwen2.5-Math-PRM-72B (math)
+=was= Skywork-Reward-Gemma-2-27B-v0.2 (general)                                                mas Qwen2.5-Math-PRM-7B (math)
+m=Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+47.5
+—
+45.0                                             a                  J
+it
+42.5
+©                                                                         =——°"
+_—       “00                                                             ©                 “-
+oe
+a *                         37.5
+e°
+ae a                 av                                                                         .
+[|
+"a
+32.5
+if                 2                 4                 8                16                  al                 2                 4                 8                 16
+Llama 8B - Best of N                      ena                        Llama 8B - DVTS
+=@= Ours ORM 70B (legal + general)                     i                                                 =@= VersaPRM 8B (multi domain)
+=—= Ours ORM 8B (legal + general)                                                                    =—M= Qwen2.5-Math-PRM-72B (math)
+=~a== Skywork-Reward-Gemma-2-27B-v0.2 (general)   52.5                                         =a= Qwen2.5-Math-PRM-7B (math)
+==Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+50.0
+—
+_——                  “
+_—                 i"                 i       ”                                           |
+45.0
+Hy,
+ad                                                                                                              ——  een
+as                                   v                                                                         'e'
+42.
+Ve                                                                  2                                           ry                                   aN
+V:                                   =                                                        NL
+a
+™                                   Z                                   4       40.0      w                                                     as
+=                                                              37.5
+«
+                  '                  :                  :        35.0       :                  5                  :
+if                 2                 4                 8                16                  al                 2                 4                 8                 16
+Llama 70B - Best of N                                                 Llama 70B - DVTS
+=@= Ours ORM 70B (legal + general)                     62                                                =@= VersaPRM 8B (multi domain)
+=M®= Ours ORM 8B (legal + general)                                                                     =M@= Qwen2.5-Math-PRM-72B (math)
+=as= Skywork-Reward-Gemma-2-27B-v0.2 (general)                                                == Qwen2.5-Math-PRM-7B (math)
+m=Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)      60
+58
+——
+oz
+56                                                               —~==*
+e:                                   a                                                                                           e'                 =
+yy                  ————
+=         54                                           A                                   +
+Vi
+*                                   7
+vy
+52                                                             “uf
+Ww                                                                                           V\,
+50
+li                 2                 4                 8                16                  al                 2                 4                 8                 16
+
+n (number of samples)
+
+n (number of samples)
+
+Figure 9: LEXam RQ? results with Best-of-N and DVTS
+
+
+
+===== PAGE BREAK =====
+
+Accuracy (%)
+BR      in      RB      BR
+N      os      a      @
+
+BR
+fo}
+
+Accuracy (%)
+R      a      —_      RB
+N      os      oa      foe}
+
+BR
+fo}
+
+N N N N
+ro} N BS ron}
+
+Accuracy (%)
+am
+loo}
+
+14
+
+12
+
+RQ2: Legal-Specialized vs General-Domain Verifiers - LEXam 32 Choices
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+=@= Ours ORM 70B (legal + general)
+Ours ORM 8B (legal + general)
+
+=@= VersaPRM 8B (multi domain)
+=B= Qwen2.5-Math-PRM-72B (math)
+
+mwas Skywork-Reward-Gemma-2-27B-v0.2 (general)   18                                           =as= Qwen2.5-Math-PRM-7B (math)
+m=Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+16
+14                                                               Lt                 =
+12
+As                          10
+1                 e                                                      ran
+n                                    a                                                                          _—_———
+e                                                       r         8                                            a                  ee
+™                 av                 e                                                      V\                                                       ys
+v
+=                                    "a                            6
+ye                                                                                                              'e
+1                  2                  4                  8                 16                1                  2                  4                 8                 16
+Llama 8B - Best of N                                                   Llama 8B - DVTS
+=@= Ours ORM 70B (legal + general)                                                                       =@= VersaPRM 8B (multi domain)
+=—= Ours ORM 8B (legal + general)                    18                                                 =—= Qwen2.5-Math-PRM-72B (math)
+=a== Skywork-Reward-Gemma-2-27B-v0.2 (general)                                                =4== Qwen2.5-Math-PRM-7B (math)
+==Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+16
+“                                                                _——
+i,                                             rp                                                               Ll
+M                 eo
+10                                                               o                 a
+Lt                 rh
+Ne                                                       =                                                                                           e@
+wv)                 im                           8                                                               ras
+cn                                                      i
+0"                                    y\                 v                                                      \
+6
+DA                                                                                           V\,
+1                  2                  4                  8                 16                1                  72                  4                 8                 16
+Llama 70B - Best of N                                                 Llama 70B - DVTS
+=@= Ours ORM 70B (legal + general)                                                                       =@= VersaPRM 8B (multi domain)
+== Ours ORM 8B (legal + general)                    _                                                 =M= Qwen2.5-Math-PRM-72B (math)
+mam Skywork-Reward-Gemma-2-27B-v0.2 (general)                                                =a Qwen2.5-Math-PRM-7B (math)
+=Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+24
+~—__        22                                            5,
+as                 [|                 Mv                 YN
+'e                                                       vi       20
+ZI                                                                                                                                 e.                 |
+“at                 |                          18
+ZN
+Ve                                                       e                                                      c\                 JN                 ‘e
+—                                              16
+y”
+w                                                                                           /\,
+14
+12                                            .
+
+1               2               4               8              16
+n (number of samples)
+
+1               2               4               8              16
+n (number of samples)
+
+Figure 10: LEXam (32 options) RQ2 results with Best-of-N and DVTS
+
+
+
+===== PAGE BREAK =====
+
+80.0
+
+775
+
+Accuracy (%)
+
+a
+>
+uw
+
+65.0
+
+62.5
+
+80
+
+Accuracy (%)
+N     N     ~N     I
+N       ~       oa       foe)
+
+a]
+lo}
+
+66
+
+64
+
+86
+
+84
+
+82
+
+Accuracy (%)
+
+80
+
+78
+
+RQ2: Legal-Specialized vs General-Domain Verifiers - COLIEE Task 4
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+Ours ORM 70B (legal + general)                   80.0                                               =@= VersaPRM 8B (multi domain)
+Ours ORM 8B (legal + general)                                                                          == Qwen2.5-Math-PRM-72B (math)
+Skywork-Reward-Gemma-2-27B-v0.2 (general)    775                                             mwas= Qwen2.5-Math-PRM-7B (math)
+Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+75.0                                                                               a
+e       as                                                               _—
+oo                                                        —
+e                                   zy       70.0                                                                               e
+_—                  i                                                                                             _—
+od                 iN                                   7       67.5                                                             e
+ea                                                                          |
+65.0                                                              —_
+a
+=                 Ve                 V/                                                                         a
+b,                                                                                           ”                                   a
+S                                                              62.5
+if                 2                 4                 8                16                  al                 2                 4                 8                 16
+Llama 8B - Best of N                        en                        Llama 8B - DVTS
+=@= Ours ORM 70B (legal + general)                                                                    ==@= VersaPRM 8B (multi domain)
+== Ours ORM 8B (legal + general)                      78                                                =—@= Qwen2.5-Math-PRM-72B (math)
+=a Skywork-Reward-Gemma-2-27B-v0.2 (general)                                                =a== Qwen2.5-Math-PRM-7B (math)
+==Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+76
+TT a      ”                                                     ay
+-                            72
+es                                                                         —————__,
+J———-A                                                                                                              |
+"AY
+— —<*             ."       70                                                _—
+=                                                                                                               —_——"
+F                                                                        =         68                                    e
+mf         66                                           —
+"~
+;                  ;                  -                  -                  -          64       -                  ;                  ;                  -                  -
+if                 2                 4                 8                16                  al                 2                 4                 8                 16
+Llama 70B - Best of N                                                 Llama 70B - DVTS
+=@= Ours ORM 70B (legal + general)                                                                      =@= VersaPRM 8B (multi domain)
+== Ours ORM 8B (legal + general)                                                                         == Qwen2.5-Math-PRM-72B (math)
+=as= Skywork-Reward-Gemma-2-27B-v0.2 (general)     86                                         == Qwen2.5-Math-PRM-7B (math)
+==Ve= Skywork-Reward-Llama-3.1-8B-v0.2 (general)
+84
+82
+—_
+80      uw                                                                       =
+"AS                 "Ay
+oo
+7             |     =
+”~
+
+il              2              4              8              16
+n (number of samples)
+
+i              2              4              8              16
+n (number of samples)
+
+Figure 11: SuperGPQA RQ? results with Best-of-N and DVTS
+
+
+
+===== PAGE BREAK =====
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+=@= Ours ORM 70B (legal + general)
+
+=@= Ours ORM 70B (legal + general)
+
+60      i= Ours ORM 8B (legal + general)                                                        60                                                   == Ours ORM 8B (legal + general)
+=@ > VersaPRM 8B (multi domain)                                       e                                                     =@ > VersaPRM 8B (multi domain)
+°°                                        _—<ooe smaeiiaiia i         55
+rt                 =
+50                      nr sal _—                          50
+x                            eo               by
+oc                          ra
+> 45                 es                                                              45                                                                       ‘5
+is)                    Ca                                                                                                                                                           ;
+©                 oO
+3 ou     Py                                                                   40
+<
+35                                                                                          35                                                             4
+e
+30                                                                                          30
+25                                                                                          25
+Llama 8B - Best of N                                                    Llama 8B - DVTS
+72.5                                                         = Ours ORM 70B (legal + general) | 72.5                                                      =@= Ours ORM 70B (legal + general)
+Ours ORM 8B (legal + general)                                                                      Ours ORM 8B (legal + general)
+70.0                                                   =@» VersaPRM 8B (multi domain)       70.0                                                   =@> VersaPRM 8B (multi domain)
+67.5                                                                                        67.5                                                                               e
+& 65.0                                                                  65.0
+a                                                                    —)
+§ 62.5                                                                  62.5
+g                                                                                     2
+=_
+* 60.0                  ad    rn      60.0                  2g—- — = — -¢- —- —- = 9
+:                                    a=                                i                            ==
+-é==          =¢"
+--
+57.5          -                                                                           57.5                                                             "
+es
+nd                 a                                                                           _—                  ba
+55.0                          _—                                             55.0                                           "
+=
+Llama 70B - Best of N                                                  Llama 70B - DVTS
+=@= Ours ORM 70B (legal + general)                                                              =@= Ours ORM 70B (legal + general)
+j= Ours ORM 8B (legal + general)                                                             == Ours ORM 8B (legal + general)
+82                                             =@> VersaPRM 8B (multi domain)        82                                             =@> VersaPRM 8B (multi domain)
+80                                                                                          80
+S
+= 78                                                                                 78
+>
+Vv
+£
+a
+3 76                                               ——_.»       76
+<                            Py
+—_——=                                                             ~~
+74                                         =                                    ry         74
+=!      —                __
+=                =.=                                                                                 x
+re                                                                        —"        .
+72             —_.                                                                72                                                                          ~~
++                                                                                                                                                                    bd
+1                 2                 4                 8                16                                                      4                 8                16
+
+n (number of samples)
+
+n (number of samples)
+
+Figure 12: MBE bar exam RQ3 results with Best-of-N and DVTS
+
+
+
+===== PAGE BREAK =====
+
+x  ~  ~  x  ~
+o  N  s a  foo)
+
+Accuracy (%)
+
+a
+foe)
+
+66
+
+64
+
+80
+
+78
+
+76
+
+Accuracy (%)
+a       fo)       ~       ~       ~
+oa       co       lo}       N       —
+
+fea)
+B
+
+86
+
+84
+
+82
+
+Accuracy (%)
+
+80
+
+78
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+=@= Ours ORM 708 (legal + general) | 78                                                          =@= Ours ORM 70B (legal + general)
+== Ours ORM 8B (legal + general)                                                               == Ours ORM 8B (legal + general)
+=@ > VersaPRM 8B (multi domain)                                                     =@> VersaPRM 8B (multi domain)
+76
+74
+_——
+72
+—_—                                                                                           2.
+"0                                                                “™,
+Cd
+a a                                                                                  oa
+eee  ———__        ig                                                        rs a
+=           7
+66                                                      a
+a  Se
+?                                                                                                                           =
+a                                                                                                               ea
+——                          64      == ---
+Llama 8B - Best of N                       fo                         Llama 8B - DVTS
+= Ours ORM 70B (legal + general)                                                                  =@= Ours ORM 70B (legal + general)
+Ours ORM 8B (legal + general)                                                                         Ours ORM 8B (legal + general)
+=@\ VersaPRM 8B (multi domain)      78                                             =@ >» VersaPRM 8B (multi domain)
+76
+e.                                    eo       74
+-                          72
+aot =" +       70
+-
+ae      —
+=       68
+66
+64                                            a
+Llama 70B - Best of N                                                  Llama 70B - DVTS
+=@= Ours ORM 708 (legal + general)                                                                  =@= Ours ORM 70B (legal + general)
+=—M= Ours ORM 8B (legal + general)                                                               == Ours ORM 8B (legal + general)
+=@>) VersaPRM 8B (multi domain)      86                                             =@> VersaPRM 8B (multi domain)
+84
+82
+—<—-
+‘a             =                                                                                              eo:
+80       ;                                                          =e
+——    >
+=o — a Sect                                 ————
+mS                            a
+78                                Ts            -          eee ae
+~~er             ——_°
+=
+1                  2                  4                 8                 16                1                  2                  4                 8                 16
+
+n (number of samples)
+
+n (number of samples)
+
+Figure 13: Coliee Task 4 RQ3 results with Best-of-N and DVTS
+
+
+
+===== PAGE BREAK =====
+
+46
+
+cy  +  +
+o  N  &
+
+Accuracy (%)
+
+w
+loo)
+
+36
+
+34
+
+52
+
+50
+
+Accuracy (%)
+5      +      S      &
+N       s       oa       foe}
+
+b
+ro}
+
+38
+
+62
+
+60
+
+Accuracy (%)
+u          u
+oO          foo}
+
+wu
+B
+
+52
+
+50
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+=@= Ours ORM 70B (legal + general)
+
+=@= Ours ORM 70B (legal + general)
+
+== Ours ORM 8B (legal + general)     46                                                      == Ours ORM 8B (legal + general)
+=@> VersaPRM 8B (multi domain)                                                                =@> VersaPRM 8B (multi domain)
+44
+42
+.                                                                                                          ry
+7 ~~~ yee                                                                                   ——a
+__*<e       40                                                              3 _—
+lJ
+-
+:                                                   Sa —
+=
+36
+34
+Llama 8B - Best of N                                                   Llama 8B - DVTS
+y= Ours ORM 70B (legal + general) | ->                                                            = Ours ORM 70B (legal + general)
+Ours ORM 8B (legal + general)                                                                       Ours ORM 8B (legal + general)
+=@» VersaPRM 8B (multi domain)                                                                =@» VersaPRM 8B (multi domain)
+50
+48
+gg                                                                                  e                   e
+46
+5,
+44                                                                                       =¢
+Se                                                             al ote
+-                na                                                   —__L
+~               -                                                                                                                  =
+~ se a              =                                                                                  _—
+40
+38
+Llama 70B - Best of N                                                  Llama 70B - DVTS
+=@= Ours ORM 70B (legal + general) | 62                                                       =@= Ours ORM 70B (legal + general)
+== Ours ORM 8B (legal + general)                                                              =—M= Ours ORM 8B (legal + general)
+=@> VersaPRM 8B (multi domain)                                                                =@ > VersaPRM 8B (multi domain)
+60
+58
+®
+Fa   we .                56                                                            2- =e =O
+on
+=           3A?                rT                                 54
+<0                   as                                                                      7,
+52                                                                                            i]
+=————
+50
+1                    2                    4                    8                   16                                                                                 8                   16
+
+n (number of samples)
+
+Figure 14: LEXam RQ3 results with Best-of-N and DVTS
+
+n (number of samples)
+
+
+
+===== PAGE BREAK =====
+
+16
+
+14
+
+12
+
+10
+
+Accuracy (%)
+
+18
+
+Accuracy (%)
+im    Hook
+N        sb        oa
+
+Bb
+°
+
+Accuracy (%)
+reo »B NN ON ON OWN
+oa      loo}      fo}      N      ~      Oo      foo}
+
+B
+Bs
+
+N
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+=@= Ours ORM 708 (legal + general)    16                                                         =@= Ours ORM 70B (legal + general)
+=M= Ours ORM 8B (legal + general)                                                               == Ours ORM 8B (legal + general)
+=@> VersaPRM 8B (multi domain)                                                                 =@> VersaPRM 8B (multi domain)
+14
+12
+a,                             10                                                                                            e
+a /.e                   eo
+:                                                                                                                            rt     ==    5
+e.                                                             =          8
+e"                                                             ‘
+NS                                                                                                            =                           e
+6
+XN        Ls                          —-—--*                                                                ee 2
+.                            --                ~ ~                                                                      =~
+s            oo                                     se
+Noe                                                                    4
+-                                                        Se
+Llama 8B - Best of N                                                  Llama 8B - DVTS
+= Ours ORM 70B (legal + general)                                                                  =@= Ours ORM 70B (legal + general)
+Ours ORM 8B (legal + general)                                                                       Ours ORM 8B (legal + general)
+=@> VersaPRM 8B (multi domain)      18                                             =@» VersaPRM 8B (multi domain)
+16
+14
+a,
+12
+e
+10
+a ee         8
+6
+Llama 70B - Best of N                                                  Llama 70B - DVTS
+=@= Ours ORM 70B (legal + general)                                                                =@= Ours ORM 70B (legal + general)
+== Ours ORM 8B (legal + general)     28                                                       =—@= Ours ORM 8B (legal + general)
+=@ > VersaPRM 8B (multi domain)                                                     =@> VersaPRM 8B (multi domain)
+26
+24
+22
+20
+18
+16
+oe
+14   Tse       4
+=.          4
+= a,
+12                                                 ¢
+2                    4                    8                   16                  1                    2                    4                    8                   16
+
+n (number of samples)
+
+n (number of samples)
+
+Figure 15: LEXam (32 options) RQ3 results with Best-of-N and DVTS
+
+
+
+===== PAGE BREAK =====
+
+V/s)
+
+w  w  w
+i  im  a
+fo}  un  °o
+
+Accuracy (%)
+
+N
+Py
+un
+
+25.0
+
+22.5
+
+40
+
+Accuracy (%)
+WwW       Ww       WwW       Ww       WwW
+lo}       N       oO       foo}
+
+N
+foo)
+
+26
+
+24
+
+52
+
+50
+
+Accuracy (%)
+b    iS    iN    b
+N       ‘       oa       foo}
+
+is
+o
+
+w
+fo)
+
+Llama 3B - Best of N
+
+Llama 3B - DVTS
+
+=@= Ours ORM 70B (legal + general)
+== Ours ORM 8B (legal + general)
+
+=@= Ours ORM 70B (legal + general)
+
+== Ours ORM 8B (legal + general)
+=@> VersaPRM 8B (multi domain)      37.5                                           =@ > VersaPRM 8B (multi domain)
+35.0
+Ad
+ee          32.5
+oa
+————          30.0
+e
+4
+o oe                                       27.5
+va
+a
+7                                                    25.0
+a.            a                         —
+_——                     a
+=                                                 22.5
+Llama 8B - Best of N                                                    Llama 8B - DVTS
+y= Ours ORM 70B (legal + general)       40                                                           = Ours ORM 70B (legal + general)
+Ours ORM 8B (legal + general)                                                                       Ours ORM 8B (legal + general)
+=@> VersaPRM 8B (multi domain)          a                                                    =@» VersaPRM 8B (multi domain)
+36
+Prod
+--"                   34
+-@¢
+>» —__—_                                                                               _--¢
+on.
+pA                                                                                                         —__,
+30
+a
+.                                       = | 28         ee
+bd                                                                                            26       *                                                             —_— a
+24                  Li
+Llama 70B - Best of N                                                  Llama 70B - DVTS
+=@= Ours ORM 70B (legal + general)      52                                                     =@= Ours ORM 70B (legal + general)
+== Ours ORM 8B (legal + general)                                                              =—M= Ours ORM 8B (legal + general)
+=@> VersaPRM 8B (multi domain)        or                                             =@ > VersaPRM 8B (multi domain)
+48
+>
+7
+0                46
+xa
+ort                                    44
+--                        ~ 297
+a                                   -¢
+4                                         e
+_—_  —         ,            ee
+y                   ——__¢
+Z                                                                                                                                              4
+Z                                                                                   40
+im
+”                        38      —=——---¢
+1                   2                   4                   8                   16                    1                   2                   4                   8                   16
+
+n (number of samples)
+
+n (number of samples)
+
+Figure 16: SuperGPQA RQ3 results with Best-of-N and DVTS
+

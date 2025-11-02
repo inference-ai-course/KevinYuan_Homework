@@ -1,0 +1,736 @@
+arX1v:2510.25087v1 [cs.CL] 29 Oct 2025
+
+BIOCOREF: BENCHMARKING BIOMEDICAL COREFER-
+ENCE RESOLUTION WITH LLMS
+
+Nourah M. Salem                                         Elizabeth White & Michael Bada & Lawrence Hunter
+Computational Bioscience Program                        Department of Pediatrics
+
+University of Colorado Anschutz Medical Campus University of Chicago
+
+Department of Pediatrics                                        lehunter@uchicago.edu
+
+University of Chicago
+nourah.salem@cuanschutz.edu
+
+ABSTRACT
+
+Coreference resolution in biomedical texts presents unique challenges due to com-
+plex domain-specific terminology, high ambiguity in mention forms, and long-
+distance dependencies between coreferring expressions. In this work, we present a
+comprehensive evaluation of generative large language models (LLMs) for coref-
+erence resolution in the biomedical domain. Using the CRAFT corpus as our
+benchmark, we assess the LLMs’ performance with four prompting experiments
+that vary in their use of local, contextual enrichment, and domain-specific cues
+such as abbreviations and entity dictionaries. We benchmark these approaches
+against a discriminative span-based encoder, SpanBERT, to compare the efficacy
+of generative versus discriminative methods. Our results demonstrate that while
+LLMs exhibit strong surface-level coreference capabilities, especially when sup-
+plemented with domain-grounding prompts, their performance remains sensitive
+to long-range context and mentions ambiguity. Notably, the LLaMA 8B and 17B
+models show superior precision and F1 scores under entity-augmented prompting,
+highlighting the potential of lightweight prompt engineering for enhancing LLM
+utility in biomedical NLP tasks.
+
+1 INTRODUCTION
+
+Coreference resolution is the process of identifying entities mentioned in text and grouping all men-
+tions that refer to the same underlying entity ?. In the biomedical domain, coreference resolution is
+a particularly difficult task as the literature often contain dense, technical language, frequent use of
+abbreviations, and complex referential expressions that rely on domain-specific background knowl-
+edge ?. For instance, resolving a phrase like “the same strain” in a methods section may require
+linking it back to the “C57BL/6J mice” mentioned several paragraphs earlier, with no intervening
+repetition or synonyms. Similarly, phrases such as “the compound” may ambiguously refer to any
+of several chemical entities introduced earlier in experimental descriptions, particularly when mul-
+tiple drugs or treatments are discussed in parallel. In such cases, surface string similarity offers little
+guidance; instead, linguistic disambiguation must be informed by contextual and semantic cues.
+
+Adding to the challenge, many biomedical entities share identical surface forms e.g., a gene and
+its corresponding protein often have the same name or abbreviation which can confuse automated
+systems. When clustered by identical surface strings, approximately 65% of the coreference clus-
+ters in CRAFT corpus ? consist of repeated mentions ?, emphasizing the need for models that can
+handle referential ambiguity. Moreover, many coreference links span large textual distances, ex-
+ceeding the effective context window of conventional models ??. These long-range dependencies
+and requirements for specialized knowledge contribute to the poor generalization of general-domain
+coreference systems in biomedical contexts.
+
+Given the emergence of increasingly capable large language models (LLMs), a natural question
+arises: how well can these general purpose models perform coreference resolution in specialized
+domains like biomedicine, without any task-specific fine-tuning ?? LLMs have demonstrated re-
+markable abilities in complex reasoning and language understanding via prompt-based zero-shot or
+
+
+===== PAGE BREAK =====
+
+few-shot learning, often surpassing traditional models in general-domain tasks. This raises the pos-
+sibility that their extensive pretraining enables them to handle intricate referential structures, even in
+domain-specific contexts. While biomedical coreference remains a demanding task, recent advances
+suggest that with well-designed prompts and minimal scaffolding, LLMs may be more capable than
+previously assumed.
+
+In this work, we evaluate coreference resolution in biomedical PubMed articles using two contrast-
+ing approaches: a span-based model (SpanBERT-Large) ? trained on general-domain data, and
+several generative LLMs (LLaMA series) ? prompted to resolve coreference without fine-tuning.
+Our experiments use the CRAFT corpus, a richly annotated biomedical dataset.
+
+The contributions and objectives of this paper are summarized as follows:
+
+* Benchmarking LLMs We compare multiple LLaMA models under different prompting
+strategies: local-only, contextual, abbreviation-aware, and entity-aware against a span-
+based BERT baseline, reporting performance on the CRAFT corpus.
+
+* Domain Analysis: We identify coreference challenges unique to biomedical text, such as
+identical mention strings and abbreviation ambiguity, and analyze how each model type
+handles them through qualitative examples and error patterns.
+
+2 RELATED WORK
+
+Coreference resolution in biomedical text is a particularly challenging task due to complex domain-
+specific terminology, high referential ambiguity, and long-range dependencies. Traditional span-
+based models such as the end-to-end neural coreference models such as SpanBERT ? have demon-
+strated strong performance in general domains. However, their reliance on limited context windows
+and the need for supervised fine-tuning limits their applicability in biomedical settings, where coref-
+erence often requires broader semantic grounding.
+
+Traditional approaches also include rule-based and statistical systems ???, followed by neural archi-
+
+BERT ? further improved coreference resolution by introducing span-centric pretraining objectives,
+achieving state-of-the-art results on the OntoNotes ? benchmark. Despite these advances, such mod-
+els rely heavily on supervised training and domain-specific tuning, limiting their generalizability to
+out-of-domain settings like biomedical text.
+
+Large language models (LLMs) like OpenAI GPT ? and LLaMA have demonstrated strong zero-
+shot capabilities in various NLP tasks ??, including aspects of coreference. Recent studies evaluated
+LLMs’ abilities on pronoun resolution and Winograd schemas ?? for other downstream tasks such as
+question-answering and query-based span prediction problems. However, few studies have directly
+assessed LLMs on span-based or noun phrase coreference, particularly in long or technical docu-
+ments. Most relevant to our work are recent prompting frameworks that use generative models for
+structured information extraction ?, though coreference-specific prompting remains underexplored,
+especially in specialized domains like biomedical literature.
+
+3. TASK OVERVIEW
+
+We evaluate four prompt-based strategies for coreference resolution using large language models
+over CRAFT-formatted biomedical texts. Each document D is split into paragraphs p1,...,pyN,
+each containing approximately 200 words. Using Stanza parser, we segment the text into sentences
+and iteratively append them to each paragraph chunk until the 200-word threshold is reached. If the
+last sentence causes the word count to exceed 200, it is deferred to the next paragraph. The goal
+is to output the set of detected mentions M;, their corresponding resolutions A;, and a ”resolved”
+version of each paragraph R;, where each p; is independently rewritten. Formally:
+
+* Let LLM,(-) denote the output of the LLM with prompt ¢.
+¢ Let M; be the set of coreferent mentions detected in paragraph p;.
+
+¢ Let A; be the set of antecedent resolutions for M;.
+
+
+===== PAGE BREAK =====
+
+* Let R; be the rewritten paragraph p; with all mentions in MM; resolved using Aj.
+* The reconstructed document is D = [R1,..., Ry].
+The coreference resolution task involves resolving 4 categories: pronouns, definite and indefinite
+
+noun phrases, and abbreviations, as illustrated in Table[I] Each is prompted separately for extraction
+and resolving.
+
+Coreference Type                Example Expressions
+Pronouns                       it, they, this, these, those, its, their
+Definite noun phrases        the gene, these proteins, such results
+
+Indefinite noun phrases      a protein, some genes, one of the enzymes
+Abbreviation coreference [OP — intraocular pressure
+
+Table 1: Coreference categories and example expressions used in our experiments.
+
+To evaluate how different categories of auxiliary information affect coreference resolution, we
+design four prompting configurations: (1) a local-only setup with no external context, (2) a
+reference-based setup that incorporates the first paragraph as a fixed disambiguation source, (3)
+an abbreviation-aware setup using a dictionary of extracted abbreviation-definition pairs, and (4)
+an entity-aware setup using a list of biomedical entities extracted from the document. Algorithm |
+summarizes these 4 styles of the prompting experiments.
+
+Input Doc
+[=
+__—aA-———_. oP ;
+S&S a | owner
+prompting                 J
+Exp. 1                               Exp. 2                              Exp. 3                              Exp. 4               ‘
+    Abbreviation Dict   i    Entity Dict    it
+Chunk 1 | Chunk 2 [BRR Chunk V         +     +     +    +     +     +    +     +   '
+
+| Chunk 1 |) Chunk 2 | +++ | Chunk N.      Chunk 1 |) Chunk 2 | +++ | Chunk NV     {chunk  Chunk 2 | tee [chunk |    [chunk   Chunk 2 ase [cnunkw |
+4              Coreferencing Resolved                            Coreferencing Resolved                            Coreferencing Resolved                            Coreferencing Resolved
+
+Figure 1: Overview of the coreference resolution pipeline under four prompting strategies. Each
+chunk is processed by an LLM independently (Exp. 1), with prior context (Exp. 2), or with auxiliary
+inputs such as abbreviation (Exp. 3) or entity dictionaries (Exp. 4).
+
+3.1 EXPERIMENT 1: LOCAL-ONLY RESOLUTION (BASELINE)
+R; = LLM ocat (pi)
+
+In this initial experiment, we investigate the effectiveness of local coreference resolution by prompt-
+ing LLMs to resolve coreference chains within short, isolated 200-word segments of a biomedical
+article. Each chunk is independently passed to the LLM. The goal is to assess how well the model
+performs coreference resolution without any cross-paragraph or global context.
+
+This design reflects a naive but computationally inexpensive strategy: it minimizes prompt complex-
+ity and token limits, while simulating how local context alone may or may not suffice for resolving
+biomedical coreference phenomena. We made a separate inference run for the 4 coreferencing cate-
+gories.
+
+
+===== PAGE BREAK =====
+
+Algorithm 1 Prompt-Based Coreference Resolution
+
+Require: Document D, ExperimentType € {LOCAL, REF_CTX, ABBR, ENTITY}, Model LLM
+Ensure: ResolvedDocument D, MentionSets M, ResolutionSets A
+1: Split D into paragraphs: [p1,po,..., PN]
+
+2: Initialize auxiliary content C «+ @
+
+3: if ExperimentType = ABBR or ExperimentType = ENTITY then
+4: C < EXTRACTCONTEXTINFO(D, type=ExperimentType)
+
+5: end if
+6
+7
+8
+
+: Initialize D-—[],M<[],A<T]
+: for? =1to Ndo
+
+> pp pi
+9: if ExperimentType = REF_CTX then
+10:       reference «+ p; {Use Paragraph | as fixed reference}
+11: else
+12:       reference + Q)
+13: end if
+
+14: prompt + BUILDPROMPT(reference, p, C’, ExperimentType)
+15: response <~- QUERYLLM(LLM, prompt)
+
+16: result ~~ PARSEJSON(response)
+
+17:     D.append(result[”Rewritten_Paragraph”])
+
+18: M.append(result[”Extracted_Expressions”’])
+
+19: | A.append(result[’’Resolutions”])
+
+20: end for —
+
+21: return D, M, A
+
+This framework allows us to isolate and quantify the limitations of local-only resolution in biomed-
+ical texts It also establishes a baseline against which we can measure subsequent experiments incor-
+porating other resources, such as abbreviation expansion (Experiment 3).
+
+3.2 EXPERIMENT 2: COREFERENCE RESOLUTION WITH LOCAL AND REFERENCE CONTEXT
+
+R;  =  LLMeer(p1 ’ Di)
+
+¢ Prompt: Provide p, and p,, instructing the LLM to use the former to disambiguate refer-
+ences in the latter.
+
+¢ Purpose: Test the incremental benefit of a reference paragraph for resolving inter-
+sentential and cross-paragraph coreferring mentions, without overloading the prompt size.
+
+Building upon the limitations identified in Experiment 1, where coreference resolution was per-
+formed in isolation within 200-word chunks, we introduce an additional layer of local context to
+guide the LLM. In this experiment, each prompt to the model includes not only the target paragraph,
+but also the first 200-word paragraph in the paper, which carries most of the referential information
+introduced in the paper and can therefore act as an answer key for the unresolved references in the
+target paragraph.
+
+Each prompt is structured with two segments: a reference block (Paragraph 1) and a focus block
+(Paragraph 7), with explicit instructions for the LLM to resolve all ambiguous mentions in the focus
+block using context from the reference. This experiment assesses the impact of lightweight contex-
+tual bridging on coreference resolution quality. Compared to the purely local setting in Experiment
+1, this approach tests whether even a single paragraph of surrounding context can significantly im-
+prove the coherence and referential clarity of LLM-generated outputs, without exceeding typical
+token limits or requiring full-document inputs.
+
+
+===== PAGE BREAK =====
+
+3.3. EXPERIMENT 3: ABBREVIATION-AWARE COREFERENCE RESOLUTION USING
+LLM-EXTRACTED DICTIONARIES
+
+Let A = {(a;,a;)} be abbreviation-definition pairs extracted from the first 750 words using the
+GPT-4o.
+
+R;  =  LLMapbr (A; Di)
+
+¢ Prompt: “Here is a list of abbreviations A. the model is requested to extract all the coref-
+erencing categories in separate runs, then, rewrite paragraph p; by expanding ambiguous
+abbreviations and resolving references.”
+
+¢ Purpose: Leverage explicit abbreviation knowledge to aid disambiguation of biological
+mentions.
+
+Biomedical texts frequently employ abbreviations for complex names, which can cause substantial
+ambiguity in coreference resolution. In this experiment, we assess whether providing LLMs with
+a structured abbreviation dictionary improves coreference resolution compared to unstructured con-
+text, such as the reference paragraphs used in Experiment 2. To build this dictionary, we parse the
+first 750 wordsof each document using Stanza and extract abbreviation-definition pairs (e.g., APP =
+“amyloid precursor protein”) using the GPT-4o0 interface. These pairs are then validated against the
+CRAFT corpus to ensure correctness. The resulting Abbreviation List is passed as auxiliary input
+during prompting.
+
+3.4 EXPERIMENT 4: ENTITY-AWARE COREFERENCE RESOLUTION USING
+LLM-EXTRACTED DICTIONARIES
+
+Let E = {e,} be key biomedical entities extracted from the first 750 words using GPT4o0.
+
+R= LLMentity (E; Di)
+
+¢ Prompt: “Here is a list of detected biomedical entities /. Extract all the coreferencing
+mentions, then, rewrite paragraph pi by expanding ambiguous abbreviations and resolving
+references”
+
+¢ Purpose: Provide broader semantic grounding than abbreviations alone, to evaluate
+whether entity awareness supports coherent coreference resolution.
+
+In this experiment, we examine whether incorporating explicit biomedical entity information into the
+prompting process can enhance the performance of large language models on coreference resolution.
+Instead of only relying on implicit context or abbreviation mappings, we provide the LLM with a
+curated Entity List; a list of biomedical terms extracted using GPT-40 interface from the first 750
+words of each document and validated against the CRAFT corpus to ensure correctness.
+
+This entity list serves as a form of semantic grounding. For each paragraph in the input article, the
+LLM is prompted with both the paragraph and the corresponding entity list. The model is then asked
+to resolve any ambiguous mentions by aligning them with the most probable entry in the entity list
+and rewriting the paragraph accordingly.
+
+4 DATASET
+
+The Colorado Richly Annotated Full-Text (CRAFT) corpus is an annotated biomedical dataset con-
+sisting of 67 full-text, open-access journal articles from PubMed Central. The dataset includes
+extensive manual annotations for biomedical concepts, syntactic structure, and coreference iden-
+tity chains. In Version 2.0, CRAFT introduced comprehensive coreference annotations, comprising
+nearly 30,000 coreference relations that span both identity and appositive links across base noun
+
+
+===== PAGE BREAK =====
+
+Coreference Word Distance Distribution (Split into 4 Ranges)
+
+Range 0-500                          Range 500-4000                        Range 4000-8000                      Range 8000-12000
+(76.14% of total)                          (20.50% of total)                           (3.25% of total)                            (0.12% of total)
+
+8000                                                1200
+
+8
+
+7000
+
+3
+
+s
+8
+8
+
+6000
+
+2
+8
+s
+
+g
+
+8
+
+5000
+
+°
+
+4000
+
+is
+
+3000
+
+Frequency
+
+Frequency
+B 2
+& 8
+8s
+Frequency
+2
+g
+
+Frequency
+
+FS
+&
+
+2000
+2
+fed                                           200                                            20
+
+0
+
+4000     5000     6000     7000     8000       °s000     9000    10000 11000
+
+Word Distance                               Word Distance                               Word Distance                               Word Distance
+
+0   100-200-300. 400500      "500 1000 1500 2000 2500 3000 3500 4000
+
+Figure 2: Distribution of word distances between coreferent mentions in biomedical texts, grouped
+into four ranges.
+
+phrase] We tested the language models on 50 articles selected at random, which are available on
+the paper’s GitHut?|
+
+Figure 2 shows the distribution of word-level distances between entities and their coreferential men-
+tions in the CRAFT dataset, segmented into four ranges. While most coreference links (76.14%) fall
+within 0-500 words, a substantial portion (over 23%) spans distances up to 12,000 words. These
+long-range dependencies present a significant challenge for coreference models, which must retain
+and retrieve relevant context across spans exceeding the effective window of standard neural archi-
+tectures.
+
+In addition to these distance-based challenges, the dataset itself contains numerous subtle forms
+of annotations variability that could be challenging for LLMs. For example, mentions of age: “3
+months of age”; statistical and symbolic variables may be abbreviated as single letters like “n”;
+temporal references: “1997”; dosage information often mixes numbers and units, as in “9 mg/kg
+xylazine”; and biological sex descriptors appear inconsistently as “Male,” “M,” “Female,” or “F”’
+These heterogeneous expression patterns increase the complexity of accurate entity recognition and
+coreference resolution, making the dataset a very helpful benchmark for the current LLMs.
+
+5 MODELS
+
+For our span-based baseline, we evaluate SpanBERT-large-cased model ?, a span-optimized trans-
+former pretrained on masked span prediction, on one experiment of coreferencing resolution. Input
+documents are segmented into 150-word chunks using Stanza ?, as the model counting handle
+larger context inputs. We normalized the document chunking sizes using stanza for all the ex-
+periments to assure the same chunk indices production for proper evaluation. After chunking the
+document, noun/pronoun mentions are extracted via spaCy ?. Each mention is encoded using
+SpanBERT’s final-layer embeddings and clustered via agglomerative clustering with cosine similar-
+ity (r = 0.4) to group together mentions that semantically refer to the same entity, approximating
+coreference. For the generative approach, we evaluate three open-weight LLaMA models on each
+of the 4 coreferencing experiments:
+
+¢ LLaMA 3.3 70B-Instruct ?: a high-capacity model (128k context) released in April 2024.
+¢ Llama-3.1-8B-Instruct ?: a compact model optimized for efficient text-only inference.
+
+¢ LLaMA 4 Scout 17B ?: a 2025 multimodal model with a 10M-token context window and
+Mixture-of-Experts architecture.
+
+6 RESULTS ANALYSIS
+
+To ensure accurate evaluation, we removed 9335 gold-standard annotations from the CRAFT se-
+lected article that were not connected via relation entries. We then matched predicted resolutions
+
+https://github.com/UCDenver-ccp/CRAFT
+
+‘https://github.com/XXXX/BioCoref
+
+
+
+===== PAGE BREAK =====
+
+against the remaining 83,608 annotated spans using partial character overlap (>2 characters), en-
+suring case-insensitive alignment. Predictions were extracted from structured JSON when available,
+or via a fallback regex parser. Precision, recall, and F1 scores were computed at the mention level,
+with unmatched predictions treated as false positives and missed gold spans as false negatives.
+
+First, we report the performance of the span-based baseline SpanBERT-large, which achieves an
+F1 score of only 0.1322. This highlights the difficulty of biomedical coreference resolution for
+traditional models, due to limited context windows, domain-specific terminology, and the mismatch
+between general-domain fine-tuning and specialized biomedical discourse.
+
+All open-weight LLM experiments were conducted on a high-performance Google Cloud
+VM instance of type a2-highgpu-8g, equipped with 96 vCPUs, 680 GB of RAM,
+and 8 NVIDIA A100 GPUs (40 GB each). The environment was provisioned with the
+c0-deeplearning-common-cul118-v20241118—-debian-11-py310 boot disk image,
+ensuring compatibility with CUDA 11.8 and PyTorch 2.x frameworks.
+
+Table 2: Performance metrics for LOCAL and REF_CTX tasks
+
+Model       LOCAL        REF_CTX
+Precision Recall F1Score | Precision Recall F1 Score
+
+LLaMA 17B         0.825          0.613          0.704            0.850          0.573          0.685
+
+LLaMA 70B       0.800        0.458        0.583          0.805        0.390        0.525
+LLaMA 8B        0.874       0.723       0.791         0.906       0.539       0.676
+
+Table 3: Performance metrics for abb_dictionary and entity dictionary tasks
+
+Model       ABBR         ENTITY
+Precision Recall F1Score | Precision Recall F1 Score
+
+LLaMA 17B      0.919      0.400      0.558        0.891      0.633      0.740
+LLaMA 8B          0.868         0.653         0.745           0.882         0.551         0.678
+
+LLaMA 70B 0.844  0.395  0.538 0.826  0.379  0.519
+
+Our results reveal consistent patterns in how generative LLMs perform on coreference resolution in
+the biomedical domain:
+
+Model Scale vs. Effectiveness. LLaMA 8B and the 17B models outperformed the 70B variant
+across all experiments. This suggests that model scale alone is not indicative of better coreference
+performance, especially in domain-specific tasks. One likely explanation is that smaller models
+generalize more conservatively and make fewer overconfident errors, whereas larger models de-
+spite stronger generative capacity may be more susceptible to prompt misalignment and semantic
+overreach.
+
+To further probe local-only performance, we ran an additional variant of Experiment 1 where para-
+graphs were selected not sequentially by size of 200-word window, but based on the most frequent
+reference distance observed in the CRAFT corpus, which is 500 words. The goal of this experi-
+ment is to test whether LLMs perform better when the input chunk maximally aligns with natural
+coreference distances, rather than strict 200-word segmentation. Results are shown in Table[4]
+
+Impact of Coreference Distance. A noticeable drop in recall and Fl for LLaMA 17B and 8B is
+showin in this distance-aware local experiment variant. This suggests that proximity alone is insuffi-
+cient for robust coreference; many biomedical entities require contextual cues beyond sentence-local
+information. The LLaMA 8B model still achieved the highest F1 score. However, the decline in the
+performance, as the context size increases is now proven by this experiment as well as (experiment
+2: REF_CTX).
+
+
+
+===== PAGE BREAK =====
+
+Table 4: Performance metrics for distance-aware local coreference resolution
+
+Model   Precision Recall F1 Score
+
+LLaMA 70B       0.794        0.430        0.557
+LLaMA 17B      0.841      0.554      0.668
+LLaMA 8B        0.892       0.601       0.718
+
+Reference Context Has Mixed Effects. In Experiment 2, which incorporated a fixed reference
+paragraph to aid disambiguation, recall often dropped compared to the purely local setup (Experi-
+ment 1), particularly for LLaMA 8B and 70B. This result suggests that unstructured introduction to
+the entities does not necessarily guide the model to better locate the referencing in later paragraphs
+in the paper.
+
+Structured Dictionaries Improve Recall. Both the abbreviation-aware and entity-aware settings
+(Experiments 3 and 4) demonstrated measurable gains in recall and F1, especially for the 8B model.
+When supplied with structured input, such as abbreviation definitions or pre-extracted entity lists,
+the models were better able to identify correct antecedents. This effect was most pronounced in
+LLaMA 8B. These findings are consistent with evidence that structured, grounded prompting im-
+proves performance in information extraction tasks.
+
+Overall, these findings highlight both the promise and current limitations of generative LLMs for
+biomedical coreference. While auxiliary signals such as abbreviation and entity dictionaries can
+meaningfully boost performance, LLMs still struggle to integrate multi-paragraph context and re-
+solve less explicit coreferences.
+
+Model Performance by Coreference Type and Metric
+
+Recall (R)
+
+Precision (P)                                                                                                F1 Score
+
+Abbreviation
+
+Tee            0.971     0.983     0.979
+
+0.9
+Abbreviati                            hn          9 08:                                            0.896                                                      7
+"ama?                                 0.987        0.983                                                       0.896                                                                     0.940                            0.9
+Abbreviation                              5         ,                                                                                                          <
+llama8b              9       0.976     0.980         0.9                       0.947                  os                       0.961
+fronouns      986                 0.992      0.994                                              0.909                                                         ann                       os
+Tamat7                             0,982       0.984                                                0.847       0.9               0.7                                0.909
+0.8
+p             83                           0.984                       ),   4                    8                                                       n REE
+feet = 0.983                   0.975       0.984                            9                      0.780                                                               0.866                         07
+Definite
+lama7ob                0.777      0.770                  - 0.537      0.459      0.431      0.444           0.6
+Definite                  a
+‘ena                   ss                                       , 9.7                    oan    ons    = 9507
+0.6
+-0.5
+Paes 0.855 | 0.898                                                                                  0.740            8
+Indefinite
+Tecenog~ 0-540        0.536       0.576       0.563                                                       0.396       0.429                       -05e7                 0.469
+0.4                                                -0.5
+Indefinite                                                                -0.6                                                                                                                                                    .
+Werats— 0.532      0.547   one   0.615                                           0.283   osm                                        0.406   05
+
+Indefinite                                                                                                               4
+Tarte 0.584 0.596        0.575 0.596                                          0.458 ZT)        0.710                                          0.518
+
+-0.3
+REFCTX ABBR ENTITY    Local. =—RERICTX. ABBR entity
+Experiment
+
+i                   1                   i                   '
+LOCAL         REF_CTX          ABBR           ENTITY
+
+Figure 3: Heatmap of precision, recall, and Fl scores for LLaMA models (70B, 17B, 8B) across four
+experimental setups (LOCAL, REF CTX, ABBR, ENTITY) and coreference categories (pronouns,
+indefinite NPs, abbreviations, definite NPs).
+
+Coreference Type Sensitivity and Model Behavior. To better understand how the LLMs handle
+different forms of coreference, we evaluated their performance across the four categories: pronouns,
+indefinite noun phrases, abbreviations, and definite noun phrases, under the four contextual setups:
+LOCAL, REF_CTX, ABBR, and ENTITY.
+
+To support this analysis, we developed a post-processing pipeline to classify the predicted and the
+CRAFT ground truth mentions into four types using lexical heuristics, as the CRAFT dataset does
+not label coreference types. Pronoun, indefinite, and abbreviations dictionaries we prepared from the
+
+
+===== PAGE BREAK =====
+
+source articles and are available on our GitHub. Remaining mentions were treated as definite noun
+phrases. Each was then evaluated using the model’s original prediction labels to compute precision,
+recall, and F1 scores per type.
+
+As shown in Figure 3 pronoun coreference consistently achieved the highest FI scores across all
+LLaMA models, with LLaMA 70B reaching 0.975 under the REF_CTX setup. This strong perfor-
+mance is likely due to the frequent occurrence of pronouns in pretraining corpora and their reliance
+on short-range syntactic cues. Complementary evidence from Figure [4|confirms that pronouns were
+also resolved in high absolute counts across experiments, especially by LLaMA 17B under minimal
+context.
+
+Abbreviation coreference also exhibited strong performance, particularly under the ABBR and
+ENTITY experiments. Injecting abbreviation dictionaries yielded a noticeable increase in both F1
+scores (e.g., LLaMA 8B achieving 0.961 in ABBR) and mention resolution counts. These results
+affirm that domain-specific cues can significantly enhance model understanding of biomedical ab-
+breviation references.
+
+Coreference Type Comparison Across Models and Contexts
+
+Pronouns Coreference              Indefinite noun phrases Coreference            Abbreviation Coreference             Definite noun phrases Coreference
+
+16000
+6000                                  5000                                                                       50000
+14000
+5000
+4000                                 12000                                 40000
+2 4000                                                                    » 10000
+5                                           3000                                  3                                           30000
+© 3000                                                                    S 8000
+2000                                  6000                                 20000
+2000
+4000
+1000                                                                                                  10000
+1000                                                                               2000
+0                               0                               0                               0
+
+LOCAL REF CTX ABBR ENTITY        LOCAL REF CTX ABBR ENTITY        LOCAL REF CTX ABBR ENTITY        LOCAL REF CTX ABBR ENTITY
+llama70b i llamal7b ss ial lama8b
+
+Count
+Count
+
+Figure 4: Extracted coreference type counts by model and context.
+
+7 CONCLUSION
+
+Our study presented a systematic evaluation of generative large language models (LLMs) for coref-
+erence resolution in the biomedical domain. We benchmarked three LLaMA models across four
+prompt-based settings and compared them to a span-based baseline, using the richly annotated
+CRAFT corpus for evaluation.
+
+Overall, these results highlight the relationship between model size, coreference category, and the
+design of contextual input. They emphasize that targeted domain-specific augmentation, such as
+structured dictionaries, can have a greater impact on performance than model scale alone. Notably,
+smaller models can match or even exceed the performance of larger ones when paired with carefully
+designed prompts. Future directions should explore fine-tuning strategies, integration of external
+biomedical knowledge, and hybrid generative extractive systems to further enhance recall and ro-
+bustness.
+
+ACKNOWLEDGMENTS
+
+All Open-weight LLMs discussed in the paper were used for the purpose of inference and evalua-
+tion. OpenAI Models were used to refine approximately half of the manuscript, focusing solely on
+enhancing readability and grammatical accuracy. Great care was taken to ensure that no new content
+was introduced or that existing ideas were altered during this process.
+
+A APPENDIX
+
+A.1 PROMPT TEMPLATE
+
+To guide the language model’s behavior consistently across experiments, we employ a structured
+system prompt for each coreference type, and this prompt instructs the model to identify and resolve
+
+
+===== PAGE BREAK =====
+
+only a targeted subset of coreference expressions. In this example, which is a portion of the prompt,
+the focus is on definite noun phrase coreferences within a paragraph, while explicitly excluding
+pronouns, indefinite expressions, and abbreviations.
+
+System Prompt
+
+You are a scientific language model with expert-level understanding of coreference resolution.
+
+99 66.
+
+Your task is to extract and resolve ONLY definite noun phrase coreferences (e.g., “the gene”, “these
+
+proteins”, “such results”) within the paragraph.
+
+Skip the following:
+¢ Pronouns (e.g., “it”, “they’’)
+¢ Indefinite noun phrases (e.g., “a result”, “some proteins”)
+¢ Abbreviations (e.g., “IOP’’)
+
+Follow these steps:
+
+1. Extract coreference expressions that appear verbatim in the paragraph. Do NOT invent or
+rephrase them.
+
+. For each expression, resolve it to its correct antecedent using context from the same para-
+graph.
+
+3. Rewrite the paragraph by substituting each extracted expression with its resolved referent.
+
+DO NOT paraphrase, summarize, add, remove, or reorder any content. Preserve the original wording
+and sentence structure, except for the substitutions.
+
+Expected JSON Output Schema:
+
+{
+
+Extracted_Expressions": [
+"Texpression_1]",
+"Texpression_2]"
+
+I;
+
+"Resolutions": {
+"Texpression_1]": "[detailed explanation describing the antecedent]",
+"Texpression_2]": "[detailed explanation describing the antecedent]"
+hg
+"Rewritten_Paragraph": "[the rewritten paragraph, identical except for
+substitutions]"
+}
+Example:
+
+Input: “These results were unexpected. They indicate a new trend.”
+
+Rewritten: “The results were unexpected. The results indicate a new trend.”
+
+Example Output:
+{
+"Coreference_Resolution": {
+"Extracted_Expressions": [
+"W TOP W ,
+"IOPs",
+"W They wW
+] Lf
+"Resolutions": {
+"TOP": "intraocular pressure",
+"TOPs": "intraocular pressures",
+"They": "Genetically distinct mouse strains"
+} Lf
+"Rewritten_Paragraph": "Intraocular pressure in genetically distinct
+
+mice: an update and strain survey..."
+
+10
+
+
+
+===== PAGE BREAK =====
+
+11

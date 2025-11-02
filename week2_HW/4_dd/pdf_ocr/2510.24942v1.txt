@@ -1,0 +1,2906 @@
+arXiv:2510.24942v1 [cs.LG] 28 Oct 2025
+
+Finding Culture-Sensitive Neurons in Vision-Language Models
+
+Xiutian Zhao'?
+‘University of Edinburgh
+
+Abstract
+
+Despite their impressive performance, vision-
+language models (VLMs) still struggle on cul-
+turally situated inputs. To understand how
+VLMs process culturally grounded information,
+we study the presence of culture-sensitive neu-
+rons, i.e. neurons whose activations show pref-
+erential sensitivity to inputs associated with par-
+ticular cultural contexts. We examine whether
+such neurons are important for culturally di-
+verse visual question answering and where they
+are located. Using the CVQA benchmark, we
+identify neurons of culture selectivity and per-
+form causal tests by deactivating the neurons
+flagged by different identification methods. Ex-
+periments on three VLMs across 25 cultural
+groups demonstrate the existence of neurons
+whose ablation disproportionately harms per-
+formance on questions about the correspond-
+ing cultures, while having minimal effects on
+others. Moreover, we propose a new margin-
+based selector — Contrastive Activation Selec-
+tion (CAS), and show that it outperforms exist-
+ing probability- and entropy-based methods in
+identifying culture-sensitive neurons. Finally,
+our layer-wise analyses reveals that such neu-
+rons tend to cluster in certain decoder layers.
+Overall, our findings shed new light on the inter-
+
+nal organization of multimodal representations.
+1
+
+1 Introduction
+
+Vision-language models (VLMs) underpin many
+multimodal applications, from visual question an-
+swering (VQA) to chart captioning and document
+parsing (Liu et al., 2023; Li et al., 2023; Bai et al.,
+2025; Yue et al., 2025). Despite impressive per-
+formance, various works show that many VLMs
+struggle on culturally grounded visual content or
+culturally marked linguistic cues, and often exhibit
+systematic performance disparities across cultures
+
+‘Related code and data are available at https://github.
+com/xiutian/vlm-culture-neuron.
+
+Rochelle Choenni”
+?University of Amsterdam
+
+Rohit Saxena’        Ivan Titov!”
+3Johns Hopkins University
+
+(Romero et al., 2024; Nayak et al., 2024). Un-
+derstanding how and where such culture-related
+knowledge is represented within VLMs is impor-
+tant both for interpretability and fairness. Identify-
+ing subcomponents that are important for culture-
+related processing can not only improve our under-
+standing of the underlying mechanisms, but may
+also guide future efforts to enhance these capa-
+bilities during post-training, e.g., through sparse
+fine-tuning (Ansell et al., 2022; Ben Zaken et al.,
+2022) or activation steering (Turner et al., 2024;
+Rimsky et al., 2024).
+
+Prior work in neural network interpretability has
+shown that individual neurons can exhibit rela-
+tive specialization for certain concepts, modali-
+ties, or tasks (Bau et al., 2017, 2020). In large
+language models (LLMs), researchers have found
+neurons that are preferentially active for particu-
+lar languages (Tang et al., 2024), knowledge do-
+mains (Yu and Ananiadou, 2024) and styles (Lai
+et al., 2024). Analyses of VLMs, however, have pri-
+marily focused on modality-related aspects when
+identifying neuron functions (e.g., distinguishing
+neurons involved in visual vs. textual processing)
+(Huang et al., 2024; Fang et al., 2024; Xu et al.,
+2025), leaving other forms of specialization unex-
+plored. Specifically, it is unknown whether VLMs
+contain neurons that preferentially respond to in-
+puts from specific cultural contexts, as opposed to
+comparable inputs from others. This question is es-
+pecially relevant given that culture-related signals
+often arise from interactions between the visual
+and textual modalities. Addressing this gap can
+shed new light on how VLMs encode culturally
+grounded knowledge and where possible limita-
+tions or biases originate.
+
+Thus, we study whether VLMs contain neurons
+whose activity is selectively modulated by cultur-
+ally grounded inputs, without implying that these
+neurons are exclusively dedicated to culture. In-
+stead, we aim to identify neurons that show relative
+
+
+===== PAGE BREAK =====
+
+following occasions,
+is the food item
+shown in the image
+
+typically consumed?       ulture-
+
+Options:                    Sensitive
+,                    Neuron
+
+(1) Makar Sankrant         eke
+
+(2) Akshay Tritiya
+(3) Rakshabandhan
+(4) Kojagiri Pournim
+
+Generations
+
+Matches
+Vision-Language Models                                            Ground
+‘nen    rot                                             kK               Unmasked Answer         Truth?
+nstructions                                No-mas
+Question:          — EH —_——_——————___ Makar Sankrant
+Chinnaneln@ atts                                                        Random Selection Intervened Answer
+
+Makar Sankrant
+
+—>
+RND
+ees
+APE
+ee >
+CAS
+
+LAPE Intervened Answer
+
+Rakshabandhan     3)
+CAS Intervened Answer
+
+Akshay Tritiya           ©
+
+Figure 1: An ablation example of Qwen2.5-VL-7B on India-Marathi VQA subset. Given an image of Tilgul, an
+Indian sweet made from sesame seeds and jaggery, the full model selects the ground truth-matched option; RND
+mask does not affect the model’s decision, while LAPE and CAS masks redirect to different answers. Mentioned
+
+methods are explained in § 3.2.
+
+culture-selectivity, i.e. units whose activations ex-
+hibit stronger association with certain cultural con-
+texts compared to others, and to evaluate to what
+extent such neurons are critical for culture-specific
+performance. Concretely, we address the follow-
+ing questions: (1) Do VLMs contain such culture-
+sensitive neurons, i.e. neurons that preferentially
+activate on inputs tied to particular cultures? (2)
+Does ablating small, targeted subsets of these neu-
+rons selectively degrade a VLM’s performance on
+questions tied to the corresponding culture, with
+minimal impact on other cultures? (3) How are
+these neurons distributed across layers, and is the
+pattern consistent across model architectures and
+cultures?
+
+Following prior work on neuron detection (Tang
+et al., 2024; Huo et al., 2024; Huang et al., 2024;
+Fang et al., 2024), we adapt activation-based neu-
+ron analysis to a multimodal setting and evaluate
+on the CVQA benchmark (Romero et al., 2024),
+operationalizing culture via the CVQA taxonomy
+of country-language pairs. We conduct experi-
+ments on three VLMs : Qwen2.5-VL-7B (Bai et al.,
+2025), LLaVA-v1.6-Mistral-7B (Liu et al., 2023),
+and Pangea-7B (Yue et al., 2025), across 25 cul-
+tures. To minimize influence from differences in
+language proficiency or language-correlated effects,
+we constrain the experiments to a monolingual (En-
+glish) setting. Moreover, to better isolate culture-
+sensitive neurons, we introduce Contrastive Activa-
+tion Selection (CAS), a margin-based method that
+rewards large separation between a neuron’s acti-
+vation for its top-responding culture and its near-
+est competing culture, improving upon existing
+probability- and entropy-based selectors.
+
+We provide empirical evidence for the existence
+of culture-sensitive neurons in VLMs. Ablating
+these neurons disproportionately reduces model
+performance on questions tied to the correspond-
+ing culture while leaving others largely unaffected,
+suggesting a causal role in culturally grounded in-
+formation processing. Moreover, our layer-wise
+analysis reveals that these neurons are distributed
+across the decoder, with noticeable concentrations
+in mid-to-late layers. While we do observe some
+exceptions, this pattern remains largely consistent
+across the VLMs and cultures we examine. Overall,
+our results provide insight into how VLMs repre-
+sent cultural knowledge and suggest new avenues
+for targeted evaluation and intervention to mitigate
+cultural biases or steer model behavior.
+
+2 Related work
+
+Studying neuron specialization. Identifying
+specialized neurons that respond strongly to par-
+ticular features or concepts is an well-established
+practice in interpreting deep neural network mod-
+els. Early work on CNN interpretability (Bau et al.,
+2017, 2020) showed that individual hidden units
+can align with human-understandable concepts,
+such as objects, parts, colors, or even high-level
+concepts. Analogous analyzes have been applied
+to modern LLMs. For instance, Yu and Ananiadou
+(2024) showed potential neurons specialized at
+domain-knowledge; Tang et al. (2024) introduced
+an entropy-based method to find language-specific
+neurons. A recent concurrent work demonstrates
+evidence of culture-sensitive neurons in LLMs (Na-
+mazifard and Galke, 2025). However, in vision-
+language multimodal settings, existing efforts are
+
+
+===== PAGE BREAK =====
+
+Step 1                                       Step 2                                  Step 3
+Recording Activations             Identifying Culture-Sensitive Neurons      Intervention and Evaluation
+Culture                                                             Unmasked Answers   A
+Content                  +                                                                                               +
+Visual |                                              Accept if                     Discard if             Vicrontbacerl      F
+Question      Vision-based Questions                  anewer                 answer                  ision-based Questions
+Answering        (Identification Set)                           match                                  mismatch                       (Evaluation Set)
+.                                    Activation patterns
+Vision-                                                 for correctly                                       cee                            VLM
+Language                                      answered samples            1           2             n                  s
+Models
+Identification                |
+|                         Methods               fF                          es
+We collect                                                                                                                   Culture-sensitive
+both                                                                                                              -
+activation         SED   +    A                              Culture-sensitive                                         Neuron Masks     A          A
+atterns and                                                         Neuron Masks
+P              Activation Unmasked                                                                    Compare
+answers        Patterns     Answers                                                                   the results      Masked Unmasked
+Answers Answers
+
+Figure 2: Pipeline for identifying and validating culture-sensitive neurons: (1) record neuron activations on culture-
+specific VQAs, (2) identify influential neurons using several methods, and (3) evaluate their importance by ablating
+the top-r% neurons and measuring the effect on accuracy and answer divergence.
+
+limited to identifying modality- (Huang et al., 2024;
+Fang et al., 2024; Xu et al., 2025) or task-specific
+neurons (Neo et al., 2025).
+
+Cultural values and bias in VLMs. Culture
+is a complex, multifaceted construct involving
+shared knowledge, practices, symbols and social
+norms of a group (Tylor, 1871; Hofstede, 1980).
+Culture-related multimodal benchmarks, such as
+CVQA (Romero et al., 2024), CULTURALVQA
+(Nayak et al., 2024), and CUTLURALGROUND
+(de Dieu Nyandwi et al., 2025), approximate cul-
+ture via local knowledge and practices that are com-
+mon in a region or within a language group (Pawar
+et al., 2025). Such datasets test VLMs on culturally
+diverse content, often revealing VLMs’ substantial
+performance disparities across different cultures.
+Moreover, prior studies have found that VLMs tend
+to exhibit systematic biases both in the image per-
+ception and natural language reasoning (Madasu
+et al., 2025; Ananthram et al., 2025; Yadav et al.,
+2025).
+
+3 Methodology
+
+Following prior work on activation-based neuron
+analysis (Huo et al., 2024; Huang et al., 2024; Fang
+et al., 2024; Tang et al., 2024), we use a three-stage
+pipeline, illustrated in Figure 2. First, we pass cul-
+turally grounded and vision-based multiple-choice
+questions through each model and record neuron
+activation patterns as explained in § 3.1. Second,
+we score and select neurons for culture selectivity
+
+using the identification methods described in § 3.2.
+
+Finally, in § 3.3 we explain how we run interven-
+tion.
+
+3.1 Step 1: Recording Activations
+
+We instrument the decoder MLPs of each VLM and
+recording neuron activations on VQAs that the un-
+masked model answers correctly. The assumption
+is that neurons that are preferentially active when
+processing information tied to a particular culture
+will display distinctive activation patterns on the
+respective culture’s inputs.
+
+Within each decoder MLP, we monitor the non-
+linearity branch of the SwiGLU block (Shazeer,
+2020). Concretely, given pre-activations u and v,
+the gated branch is g = SiLU(w), which is then
+combined with v (Appendix B.1 Eq. 1). For each
+neuron 7 in layer / and token position t, we denote
+by ain, the scalar activation corresponding to g.
+These values serve as the basis for all subsequent
+Statistics.
+
+Activation statistics. Let C be the set of cultures.
+For a sample from culture c € C, and using a
+valid-token mask m,; € 0,1 to exclude padding
+and special markers, we accumulate three statistics
+for each neuron (1,7), note that [7], = max(z, 0):
+
+
+===== PAGE BREAK =====
+
+Kin += Yo mel(ai > 0).
+t
+
+si? r= Som [a\? Je   Te += Some.
+t                           t
+
+Here K counts how often a neuron fires positively,
+S measures the cumulative magnitude of its pos-
+itive responses, and TJ, records the total number
+of valid tokens for culture c. Only samples that
+the model answers correctly contribute, reducing
+noise from spurious activations. These aggregated
+statistics yield per-neuron activation profiles condi-
+tioned on culture, forming the foundation for our
+culture-sensitivity identification methods.
+
+Text and visual tokens. In the VLMs we study,
+the decoder consumes a sequence that interleaves
+prompt tokens with visual tokens produced up-
+stream. We instrument only the decoder, not the
+upstream vision encoders. Moreover, the mask
+mz respects each model’s attention mask so that
+padding and special markers (e.g., image delim-
+iters) are ignored.
+
+3.2 Step 2: Identification of Culture-Sensitive
+Neurons
+
+Using the counters from Step 3.1, we derive nor-
+malized statistics for each neuron—culture pair:
+
+(0)                    (0
+po) — Bin yp) _ Din
+
+ln                 _
+
+T..  )           In       T..  .
+
+PO reflects how often a neuron fires on culture c’s
+tokens, while (©) couples firing frequency with
+activation strength.
+
+Identification methods. As our identification
+methods for neuron scoring, we consider the fol-
+lowing four existing baseline methods:
+
+* Random Selection (RND) uniformly samples
+fixed number of neurons to evaluate if cultural
+subsets are inherently sensitive to arbitrary mask-
+ing. This baseline is culture-independent.
+
+¢ Activation Probability (LAP, Gurnee et al.,
+2024; Voita et al., 2024) ranks neurons by how
+often they fire for a given culture, which empha-
+sizes firing frequency alone.
+
+¢ Activation Probability Entropy (LAPE, Tang
+et al., 2024; Namazifard and Galke, 2025) mea-
+sures how selective a neuron’s firing is across
+cultures by computing the entropy of its normal-
+ized activation probabilities:
+
+LAPEin = —)> Ph? log P\?,
+ceEC
+
+(c)
+~                 P
+
+In          (c')*
+ve Pen
+Neurons with /ow entropy (peaked distributions)
+are considered more culture-sensitive.
+
+Mean Activation Difference (MAD, Bau et al.,
+2018; Dalvi et al., 2019) incorporates magnitude
+as well as frequency by comparing mean positive
+activations for one culture against the average
+over the others:
+
+MAD
+
+In  =
+7-9 1             (c)
+c’#c
+Larger positive differences indicate neurons that
+fire more strongly for culture c.
+
+Me?  _  M,°
+
+Appendix B.2 provides more details on above base-
+line identification methods.
+
+Neuron selection. For each culture c, these meth-
+ods return a ranking of neuron indices from most
+to least selective. Deciding how many of those neu-
+rons to select as culture-sensitive is a hyperparame-
+ter setting. To allow for a fair comparison across
+methods, we select the r% highest scoring neurons
+out of all MLP-neurons as culture-sensitive, where
+we set to r=1 in all our experiments.
+
+3.3. Step 3: Intervention through Neuron
+Deactivation
+
+We test whether the neurons selected in Step 2 are
+important for culture-sensitive behavior by mask-
+ing them at inference time and measuring the im-
+pact on the respective culture’s evaluation sub-
+set. Let giz € R? be the SwiGLU nonlinear-
+ity output at decoder layer / and token position
+t. From Mines) we form a binary keep-mask
+
+plmesre) € {0,1}: where:
+
+In
+
+r                =>
+
+During inference we multiply the gating branch by
+this vector (broadcast over tokens).
+
+
+===== PAGE BREAK =====
+
+3.4 Contrastive Activation Selection (CAS)
+
+Preliminary analysis revealed that in QWEN2.5-
+VL-7B and PANGEA-7B, a substantial fraction
+of neurons (12.27% and 9.57%; Appendix E Ta-
+ble 6) exhibit high activation variance across cul-
+tures. This suggests that a large mean-based dif-
+ference may not necessarily indicate cultural spe-
+cialization but may arise from high intrinsic vari-
+ability. To mitigate this, we introduce Contrastive
+Activation Selection (CAS), a margin-based selec-
+tor that measures the gap between the most and
+the second-most active cultures for each neuron.
+By focusing on this contrast rather than deviation
+from the mean, CAS is less sensitive to global
+variance and is expected to be more effective in
+high-variance models. We thus hypothesize that
+deactivating CAS-identified neurons will lead to
+a larger culture-specific performance drop in such
+models, while in low-variance models, CAS and
+MAD will likely identify similar neurons. Using
+the firing probabilities PO from Step 1, define
+
+;                                                            n
+
+Pi) = max PO, cf) = arg max PO
+
+ceC\ {ef}
+
+1   2).   1
+cas) — {Pin — Pins ife= cia.
+Sin (c) =            .
+
+,    —0oo,    otherwise.
+
+4 Experimental Setup
+
+4.1 Dataset and Culture Grouping
+
+We employ the CVQA dataset (Romero et al., 2024)
+as our testbed and operationalize ‘culture’ through
+CVQA’s country-language pair (e.g., ‘Ireland-
+Irish’) taxonomy. Each item is a VQA question
+paired with an image and tagged by a country-
+language pair. We keep independent pairs with
+unique language or country tag and aggregated
+pairs with shared attributes. A subset consist-
+ing of the first ten alphabetically ordered coun-
+try-language pairs is reported in Table 1 (the
+full list is provided in Appendix A.2). To mini-
+mize confounding from language proficiency, we
+use the dataset’s prepared English translations for
+both questions and answer options. Moreover,
+this mitigates the concern of identifying language
+rather than culture sensitive neurons. We separate
+the dataset by 50/50 into identification/evaluation
+splits: the identification split is used exclusively for
+activation logging (Step 1) and the evaluation split
+for masked generation and evaluation (Step 3).
+
+CVQA Pairs                   Cultures #Qs(I) #Qs(E)
+Brazil-Portuguese                        BRA               142                 142
+Bulgaria-Bulgarian                     BGR               185                 186
+China-Chinese                               CHN               155                 156
+Egypt-Egyptian Arabic          EGY            101             102
+Ethiopia-Amharic                         ETA                117                 117
+Ethiopia-Oromo                            ETO               107                 107
+France-Breton                         FRA            202             203
+India-Bengali                                                            143                 143
+India-Hindi                                                  100             101
+India-Marathi                                              101             101
+India-Tamil                                       IND                107                 107
+India-Telugu                                                              100                 100
+India-Urdu                                                                  110                 110
+Indonesia-Indonesian                                 206             206
+Indonesia-Javanese                      IDN                148                 149
+Indonesia-Minangkabau                                    125                 126
+Indonesia-Sundanese                                           100                 100
+Treland-Irish                                     IRL                163                 163
+Total                                                                             5178             5196
+
+Table 1: Culture subset and VQA statistics. CVQA
+country-language pairs with [‘India’, ‘Indonesia’ ] coun-
+try tag are assigned to one of the grouped cultures. #
+Qs (I) denotes the number of questions used for acti-
+vation recording and neuron identification, while # Qs
+(E) denotes the number of questions used for masked
+generation. Truncated for readability, full table in Ap-
+pendix A.2.
+
+4.2 Models
+
+We evaluate three widely used VLMs: (1) LLaVA-
+v1.6-Mistral-7B (Liu et al., 2023; Jiang et al.,
+2023), (2) Pangea-7B (Yue et al., 2025), and
+(3) Qwen2.5-VL-7B (Bai et al., 2025). The se-
+lected models differ in backbone, supervision, and
+cultural/linguistic coverage, allowing us to test
+whether culture-sensitive neurons emerge consis-
+tently across architectures and training paradigms.
+Moreover, we selected Pangea-7B because it was
+developed specifically to be a culturally inclusive
+multilingual VLM.
+
+4.3. Prompting and Decoding
+
+We use a fixed multiple-choice instruction template
+(Appendix A.3) for all models, requiring the out-
+put to be the complete option content rather than
+the label. Maximum generation length is set large
+enough (20) to return a full option token span; De-
+coding is deterministic (temperature 0; no sam-
+pling). generations violating the format are normal-
+ized by the extraction heuristic (Appendix A.4).
+
+
+===== PAGE BREAK =====
+
+VLM             Metric     Eval. Setting              RND     LAP LAPE MAD_~ CAS
+Self-Deactivation              —0.19 +096 +0.56 —4.64 —5.52
+
+Acc. A         Cross-Deactivation Avg.          -          +1.07 +061 —1.31 —0.64
+
+Qwen2.5-VL-7B                   Self—Cross Gap                  -         0.08      0.05      3.33      4.88
+Self-Deactivation               4.66       17.05       4.64 12.03 12.61
+
+Flip Rate Cross-Deactivation Avg.        -         17.21       4.12       5.96       4.25
+
+Self—Cross Gap                  -       —0.16 +052 +6.07 +8.36
+
+Self-Deactivation                   1.02 +1.00        0.74        4.20        4.33
+
+Acc. A      Cross-Deactivation Avg.       -       +0.89      0.37      1.34      0.72
+
+Pangea-7B                               Self—Cross Gap                     -        +0.11       0.38       2.86       3.61
+Self-Deactivation                  6.45        24.10        6.52 1355 12.99
+
+Flip Rate Cross-Deactivation Avg.        -        23.82       6.18       8.80       7.34
+
+Self—Cross Gap                  -       +0.28 +0.34 44.75 +4+5.65
+
+Self-Deactivation                         0.50          2.50          4.43           1.46           1.39
+
+Acc. A      Cross-Deactivation Avg.       -         2.74      4.44      0.53      0.63
+
+LLaVA-v1.6                         Self—Cross Gap                  -       +0.24 +0.01 —0.93 —0.76
+“Mistral-7B            Self-Deactivation       7.01 1782 1144 7.74 9.58
+Flip Rate Cross-Deactivation Avg.       -         17.74 = 11.28       6.56       7.63
+
+Self—Cross Gap            -     +0.08 +0.15 +1.18 +1.95
+
+Table 2: Ablation results on CVQA using culture-sensitive neurons selected by five identification methods. As
+explained in § 4.4 we report two evaluation settings: Self-Deactivation and Cross-Deactivation, with Self—Cross
+Gaps best reflecting cultural sensitivity. The best result in each setting is boldfaced. Note that non-gap values show
+percentage changes relative to the unablated full model. RND (Random Selection) is not a culture-specific masking
+
+and hence does not distinguish ‘self-’ or ‘cross-’ results.
+
+4.4 Measuring Cultural Sensitivity
+
+Using each neuron selector outlined in § 3, we
+obtain a set of culture-sensitive neurons for each
+source culture Csrc € C. To evaluate to what extent
+these neurons are indeed culture-sensitive, we study
+two conditions: (1) Self-deactivation: Csp¢ = Ceval,
+where the same culture from which the neurons
+were identified was used for evaluation. (2) Cross-
+deactivation: Csr¢ 4 Ceval, Where the neurons were
+identified from a culture that differs from the one
+under evaluation. This design allows us to test
+whether the selected neurons are primarily associ-
+ated with a particular culture rather than affecting
+the model’s overall capacity.
+
+Metrics We assess each condition using two met-
+rics: (1) Accuracy change (A): the difference in
+CVQA subset accuracy between the full model and
+the masked model. (2) Flip rate: the proportion
+of items whose predicted answers differ from the
+full model. These metrics are complementary, A
+measures the change in task performance, while
+flip rate reveals decision shifts even when overall
+accuracy remains unchanged.
+
+a Qwen2.5-VL-7B
+
+Identification Set
+
+0.8                                                          gy Qwen2.5-VL-7B
+0.7                                                             Evaluation Set
+0.6                                                          a Pangea-7B
+05                                                             Identification Set
+
+.                                                                     Pangea-7B
+0.4                                                          ™ Evaluation Set
+0.3                                      ~~           i, LLaVA-v1.6-Mistral-7B
+0.2                        =                                   Identification Set
+0.1                                                                    LLaVA-v1.6-Mistral-7B
+
+™ Evaluation Set
+
+Figure 3: Unablated full models per-culture accuracy
+on CVQA. Distribution of per-culture accuracies for the
+three models on the identification split (marked in dots)
+and the evaluation split (marked in solid color). The full
+table of per-culture results appears in Appendix E.
+
+Interpretation Ablating culture-sensitive neu-
+rons should harm performance when the evaluation
+culture matches the source culture (large negative
+A, high flip rate), but have minimal effect other-
+wise (A and flip rate close to 0). Hence, we focus
+on the gap between the self-deactivation effect and
+the average cross-deactivation effect as the main
+indicator of cultural sensitivity. Methods that yield
+larger self—cross gaps better isolate neurons that are
+critical, yet relatively specific to a given culture.
+
+
+===== PAGE BREAK =====
+
+15                               15                               15
+RND.#21 411 32 10 09 409 15 +18 05 +06 |      RND.#21 411 32 10 09 409 15 +18 05 +06 |      RND-421 411/32) 10 09 409 25 He 05 406 |      RND-421 411/32 19 09 409 15 418 05 «
+
+5.0                               5.0
+BRA! 35 32 BEY 025 saa [47 [tad 2a 26 8        BRA-414 05 13 10 409 29 405 02 09 06         ara (BR) +00 32 10 (434 19 34 21 402 12         RAW os 06 10 17 100 25 05 09 400
+
+S acr 49 (BBP) 20   09 +30 424 428 425-25   Sacrleze os 06 |20 417 419 05 +00 12 06 | 25   S BGR 07 405 26 -20 +26 19 20 35 17 406 25   SBGR +00 22 13 20 +26 28 05 +03 12 06 25
+s                         s                         s                         s
+Bcun. 35 443, 5a 410/460) +00 +30 +05 422 +12       Bcun.+00 411/45 10 117 28 405 06 02 06       3 cun. 28 a7 09 409 +00 02 14 12       3 cun. 21 Bory 0 [ea 09 08 05 08 05 +00
+°                     0.0   °                     0.0   °                     0.0   °                     0.0
+§ tov 28 443 45 s10/fE] ae s20 +14 sa «06       S$ ccvo7 416 06 +00 109 09 10 03 05 +18       Beov-a4 naa ae BRB] a7 47 (BS) a2 22 +06       § tcv-so0 25 32 BP) 09 47 34 09 27 +06
+2                         2                         2                         2
+3         F      elect 2s 9 er MBecolGaloolosloslos (aslaclsos (b-25 © craluo7sanliaelies o 15 18 15 406 -25 GeETA+07 05 26 39 09 09 10 17 +02 2 --25
+ra                         ra                         3                         3
+8                         8                         8                         8
+5                 408 409 +12       Seto. +14 400 06 10 +17 +09 +00 06 09 +06      § ero. .07 |432 26 20 a7 (Be) 2s 20 21 +00      Seto.+00 16 19 20 +00/47 +00 106 03 18
+(4                     5.0  (4                     5.0  B                     5.0  B                     5.0
+8                         8                         8                         8
+3                   409 417 425       GJ FRA-407 405 +90 10 09 +00 20 +05 12 +00       GRA +07 05 45 39 +17 +09 39 26 22 25       B FRA. 14 1 13 20 +00 +00 MB} +os a2 2s
+& wo. 2      +    3    vas 25 [-75  $ ino-s2 400 23 20 100 19 +00 18 09 +06 [-75 $ IND-07 05/45 no 426 19 10 44 19 06 [-75 $ inD-00 05 26 | 29 +09 09 3 02 ne [75
+§ ion $6) 22 (a ae RE) a7 0 20 v2 427       § ion +07 05 13 20 100 19 400 +00 15 +18       § pn. +07 22 45 29 17 47 34 03 |50 +00       § ion 21 100 13 120 v9 28 20 13 BBY oc
+a                     -10.0  a                     -10.0  a                     -10.0  a                     -10.0
+rnc fse fae RY +20 fis9) 19 90 12 4 08         IRL-421 05 400 400 26 +00 20 +00 05 -06         IRL-21 400 38 20 +00 09 49 32 42 |9         IRL-07 05 32 420 409 19 20 03 03
+BRA BGR CHIN EGY ETA ETO FRA IND IDN IRL            BRA BGR CHIN EGY ETA ETO FRA _IND IDN IRL            BRA BGR CHN EGY ETA ETO FRA_IND IDN. IRL            BRA BGR CHN EGY ETA ETO FRA_IND IDN. IRL
+Evaluation Culture VQA Subset                                       Evaluation Culture VQA Subset                                       Evaluation Culture VQA Subset                                       Evaluation Culture VQA Subset
+pNDI 7a) 22 32 29 26 47 5a 45 46 55 [ibs   pNDI 7a) 22 32 29 26 47 5a 45 46 55 [ibs   RNDJ 77) 22 32 29 26 47 54 45 46 55 Pos   RNDJ 77) 22 32 29 26 47 54 45 46 55 Pos
+BRA. 14 05 13 29 09 56 44 26 26 06     ona ORY 5 71 296875 74 69 50 49     ona ERY 20 as 49/68 19 34 32 29 25
+é                      20  é                      20  é                      20  é                      20
+5                       EGR. 42 05 06 39 34 37 34 24 19 06    Bacr a9 49 26 5977 75 50 [BB] ss 49    EGR. 42 75 26 59 26 47 15 27 40 18
+5                         5                         5                         5
+3                       Bcun-14 22/58 29 34 28 34 27 29 06    Scun- a2                    S cu. 35 2 BB) 60 fa) 25 39 33 37
+g                         g                         g                         g
+5                    15 5 ecy21 16 19 59 26 28 39 30 29 18 [IS 5 ecy!70                 1s Secy 42 16 so 6s [ed a6 45 32 [mis
+a                         a                         a                         a
+3                       Getm35 11 13 39 43 47 34 36 24 18    GS ema. as                    Get 21 38 26 58 oa faa 4938 29 37
+8                         8                         8                         8
+i=                         i=                         i=                         i=
+5                    to S€T0-28 11 06 29 sa 47 30 36 29 18 [yg SET0. 49                 ro BETO. 42 38 19 20 a fies) «9 S442 3a Mio
+3                         3                         3                         3
+8                         8                         8                         8
+3                       GRA. 21 05 00 49 43 19 48 29 26 00    % FRA 35                    FRA. 42 32 26 (78) 68 7 Be 33.25
+3                         3                         3                         3
+&                         &                         &                         &
+g                       So. 22 00 13 39 5a 19 30 5a 40 18    $ ino. a9                    $ no. 42 27 sa 29 60 47 « Bs 3
+3                      5  3                      5  3                      5  3                      5
+8                       BN. 21 05 13 39 34 19 49 27 43 18    ® DN 63 54 58 68 68 4 sa so fie 27    8 N77 32 26 a0 [BA] aa 39 = BB:
+a                         a                         a                         a
+IRL 21 05 00 39 26 37 39 24 26 06      IRL 49° 43   39 85 84 69 72 o     IRL-35 38 45 39 43 19 49 48 »
+i)                         i)                         i)                         i)
+
+BRA BGR CHN EGY ETA ETO FRA IND IDN IRL           BRA BGR CHN EGY ETA ETO FRA IND IDN IRL
+
+Evaluation Culture VQA Subset
+
+(b) LAPE
+
+BRA BGR CHN EGY ETA ETO FRA IND IDN IRL
+Evaluation Culture VQA Subset.
+
+(c) MAD
+
+BRA BGR CHN EGY ETA ETO FRA IND IDN IRL
+Evaluation Culture VQA Subset.
+
+(d) CAS
+
+Evaluation Culture VQA Subset
+
+(a) LAP
+
+Figure 4: Accuracy change A (top) and flip rate heatmaps (bottom) on CVQA for different identification methods
+(Qwen2.5-VL-7B; showing first ten cultures). On the y-axis we have the source culture for which neurons are
+identified and ablated and on the x-axis the culture used for evaluation. We report percentage changes relative to the
+unablated full model. Diagonal cells show self-deactivation results. Results for all culture pairs are in Appendix D.3.
+
+5 Results
+
+5.1 Baseline Model Performance on CVQA
+
+We first assess the unablated full model perfor-
+mance on CVQA, shown in Figure 3. All three
+VLMs exhibit substantial variation in performance
+across cultures. Qwen2.5-VL-7B achieves the high-
+est median accuracy (* 0.60), while Pangea-7B
+and LLaVA-v1.6-Mistral-7B reach around 0.50.
+Importantly, identification and evaluation splits
+yield similar performance, suggesting that sub-
+sequent ablation results are not confounded by
+train—test mismatch. Overall, the models show
+uneven cultural competence but stable baselines,
+providing a reliable reference point for neuron ab-
+lations.
+
+5.2 Culture-Sensitive Neuron Ablation
+
+Table 2 presents the main results. We report ac-
+curacy change (A) and flip rates when deactivat-
+ing neurons selected by each identification method
+(§3.2). We analyze two evaluation settings as de-
+fined in § 4.4: self-deactivation (masking neurons
+identified for the same culture as the evaluation set)
+and cross-deactivation (masking neurons identified
+for a different culture).
+
+Qwen2.5-VL-7B and Pangea-7B. CAS yields
+the largest self-deactivation drops in accuracy
+
+(Qwen: —5.52%; Pangea: —4.33%) paired with
+small cross-deactivation changes (< 1%), show-
+ing that the selected neurons are both important
+and relatively specific to their source culture. The
+associated flip-rate gaps are likewise large and pos-
+itive, indicating that predictions change substan-
+tially only within the target culture. By contrast,
+LAP and MAD often produce broader off-diagonal
+interference, capturing neurons linked to shared
+or generic multimodal cues rather than culture-
+specific signals. Occasionally, LAP even improves
+performance upon masking, while this seems coun-
+terintuitive, this is a known phenomenon that can
+be explained as pruning overly dominant or noisy
+activations (Ali et al., 2025).
+
+LLaVA-v1.6-Mistral-7B. For LLaVA, LAP in-
+duces the strongest self-deactivation drop (—2.5%)
+but also larger cross-cultural spillover. CAS and
+MAD are more isolated yet smaller in magnitude,
+suggesting that cultural information is more dif-
+fusely distributed in this model.
+
+5.2.1 Culture-Specific Patterns
+
+We now delve into a more fine-grained per-culture
+analysis. Figure 4 visualizes accuracy changes (A)
+and flip-rates for Qwen2.5-VL-7B. For readability,
+we visualize the first ten cultures; see Appendix D
+for full results. We find that CAS produces sharp
+
+
+===== PAGE BREAK =====
+
+diagonal degradations (e.g., CHN, FRA) with lim-
+ited but non-negligible off-diagonal changes, evi-
+dencing strong mapping between masked neuron
+sets and cultures. Yet, LAP shows broad column-
+shaped reductions (large off-diagonals), pointing
+to less specific features. Interestingly, we find that
+for many cultures deactivating neurons associated
+with any culture positively impacts performance
+(e.g. BGR, ETA), suggesting that those neurons
+were negatively intervening. Specifically, we ob-
+serve clear distinctions between cultures for which
+ablation always has a negative (e.g. BRA, CHN) or
+positive effect. Furthermore, LAPE reveals fairly
+little selectivity, while MAD sits between LAPE
+and CAS. The flip-rate matrices mirror these dis-
+tinctions: CAS achieves the cleanest separation
+between self and cross conditions.
+
+5.3 Distribution Patterns across Layers
+
+Figure 5 shows the layer-wise distribution of
+culture-sensitive neurons identified in Qwen2.5-
+VL-7B (28-layer decoder). Understanding where
+such neurons concentrate within the network can
+offer clues about how culture-related information
+is integrated e.g. whether it is handled early, during
+basic feature fusion, or later, during high-level rea-
+soning. Moreover, comparing distributions across
+identification methods reveals whether different
+methods capture similar or distinct functional sub-
+spaces, while cross-cultural differences can hint at
+culture-specific processing pathways.
+
+We observe that culture-sensitive neurons gen-
+erally cluster in the first layer (layer 0) and the
+early-mid layers (6-8), with relatively sparse pres-
+ence in deeper blocks. Interestingly, MAD tends
+to bypass the central layers (15-18), whereas CAS
+identifies neurons more evenly across mid-to-late
+layers. CAS also shows culture-specific deviations,
+for example, in BGR and IDN, layers 6-8 con-
+tain a higher proportion of selected neurons than
+in other cultures. These patterns suggest that both
+the choice of method and culture influence which
+layers of the model are most engaged in culturally
+grounded processing.
+
+5.4 Effect of Ablation on Model Behavior
+
+Figure | highlights two key observations about
+how ablation disrupts model behavior. First, we
+confirm that instruction-following remains intact:
+even after ablation, the model respects the instruc-
+tion format constraint (i.e. generating one of the
+listed options), suggesting that decoder-level mask-
+
+103
+10?
+101
+
+(a) LAP
+
+103
+
+102
+1
+
+10!
+
+(b) LAPE
+
+(c) MAD
+
+Figure 5: Layer-wise counts of identified neurons by
+different methods (Qwen2.5-VL-7B; log-scaled color).
+
+ing does not broadly damage generation or task
+framing. Second, we find that different identifica-
+tion methods perturb cultural knowledge in distinct
+ways: RND yields only small changes, suggest-
+ing that arbitrary neurons are rarely detrimental for
+culture-specific performance. In contrast, LAPE
+and CAS push the model to different incorrect but
+plausible options. This suggests that the ablated
+neurons induce selective culture degradation.
+
+Overall, our analyses reveal several consistent pat-
+terns across 25 cultural groups and three model ar-
+chitectures: (1) A select subset of decoder neurons
+exhibit clear culture-sensitive activation patterns,
+suggesting that cultural knowledge is at least in
+part encoded locally. (2) These neurons play an
+important role in culturally grounded processing:
+their removal selectively degrades performance on
+the corresponding culture while largely preserving
+performance elsewhere. (3) Culture-sensitive neu-
+
+
+===== PAGE BREAK =====
+
+rons are not uniformly distributed but cluster in the
+foremost and early mid decoder layers. (4) Among
+all identification methods, CAS most effectively
+isolates such neurons.
+
+6 Conclusion
+
+This study provides empirical evidence for the
+existence of culture-sensitive neurons in VLMs
+by showing inference-time ablations of targeted
+subsets of neurons that selectively disrupt VLM’s
+culture-specific performance. We introduce a
+margin-based selector (CAS) that allows for more
+precise identification of culture-sensitive neurons.
+Our method detects neurons whose ablation yields
+the largest self-deactivation drops with minimal
+cross-deactivation spillover on Qwen2.5-VL-7B
+and Pangea-7B. Layer-wise analyses reveal con-
+sistent concentration of culture-sensitive neurons
+across cultures. These results highlight the poten-
+tial for small, targeted, activation interventions to
+mitigate cultural biases and improve cultural align-
+ment without retraining the full model. Future work
+should extend the search beyond decoder MLPs
+and pair identification with activation steering.
+
+Acknowledgments
+
+We thank Simon King, Korin Richmond, and
+Catherine Lai at the University of Edinburgh for
+their constant support during the course of the
+project. Special thanks to Jinzuomu Zhong for
+providing help on computational resources.
+
+Limitations
+
+Defining ‘culture’. We use CVQA’s coun-
+try-language taxonomy and, for fairness to mul-
+tilingual models, solely the English-translated
+prompts to decouple language skill from cultural
+recognition. This choice makes the construct closer
+to visual cultural knowledge than to culture-as-
+language-practice (Kramsch, 2014). For multilin-
+gual models, it remains unknown whether our ob-
+servations would still emerge, which we leave for
+future work.
+
+Model components. Our analysis is restricted to
+decoder MLP neurons and does not cover atten-
+tion heads, vision encoders, or alignment modules,
+which may also encode culture-sensitive behavior.
+We rely on activation-frequency summaries rather
+than more fine-grained temporal or token-level dy-
+namics, and we fix hyperparameters for neuron
+selection based on computational budget.
+
+Ethical Considerations
+
+This study aims to improve transparency and fair-
+ness in multimodal models by examining culture-
+sensitive neurons. All experiments are conducted
+on publicly available datasets (primarily CVQA),
+and no new human subject data or personally iden-
+tifiable information is used.
+
+A potential ethical concern lies in the definition
+of ‘culture.’ For experimental feasibility, we adopt
+CVQA’s taxonomy of country—language pairs and,
+in some cases, group multiple pairs that share a
+common country or language tag. Such group-
+ing is a dataset-driven simplification and does not
+reflect the diversity, fluidity, or internal variation
+within cultural communities. Our results should
+not be interpreted as essentializing or stereotyping
+real-world cultures but rather as insights into how
+models respond to the categories provided by the
+benchmark.
+
+The methods presented are intended for diagnos-
+tic use only. While they can help reveal and quan-
+tify cultural disparities in model behavior, they are
+not in themselves fairness interventions. Misuse
+of these methods to draw normative claims about
+communities would be harmful and contrary to the
+goals of this work. We encourage future studies
+to incorporate broader and more inclusive datasets
+when assessing and mitigating cultural bias in mul-
+timodal systems.
+
+References
+
+Ameen Ali, Shahar Katz, Lior Wolf, and Ivan Titov.
+2025. Detecting and pruning prominent but detri-
+mental neurons in large language models. Preprint,
+arXiv:2507.09185.
+
+Amith Ananthram, Elias Stengel-Eskin, Mohit Bansal,
+and Kathleen McKeown. 2025. See it from my per-
+spective: How language affects cultural bias in image
+understanding. Preprint, arXiv:2406.11665.
+
+Alan Ansell, Edoardo Ponti, Anna Korhonen, and Ivan
+Vuli¢. 2022. Composable sparse fine-tuning for cross-
+lingual transfer. In Proceedings of the 60th Annual
+Meeting of the Association for Computational Lin-
+guistics (Volume 1: Long Papers), pages 1778-1796,
+Dublin, Ireland. Association for Computational Lin-
+guistics.
+
+Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wen-
+bin Ge, Sibo Song, Kai Dang, Peng Wang, Shi-
+jie Wang, Jun Tang, Humen Zhong, Yuanzhi Zhu,
+Mingkun Yang, Zhaohai Li, Jiangiang Wan, Pengfei
+Wang, Wei Ding, Zheren Fu, Yiheng Xu, and 8 others.
+2025. Qwen2.5-vl technical report. arXiv preprint
+arXiv:2502.13923.
+
+
+===== PAGE BREAK =====
+
+Anthony Bau, Yonatan Belinkov, Hassan Sajjad, Nadir
+Durrani, Fahim Dalvi, and James Glass. 2018. Iden-
+tifying and controlling important neurons in neural
+machine translation. Preprint, arXiv:1811.01157.
+
+David Bau, Bolei Zhou, Aditya Khosla, Aude Oliva, and
+Antonio Torralba. 2017. Network dissection: Quanti-
+fying interpretability of deep visual representations.
+Preprint, arXiv:1704.05796.
+
+David Bau, Jun-Yan Zhu, Hendrik Strobelt, Agata
+Lapedriza, Bolei Zhou, and Antonio Torralba. 2020.
+Understanding the role of individual units in a
+deep neural network. Proceedings of the National
+Academy of Sciences, 117(48):3007 1—30078.
+
+Elad Ben Zaken, Yoav Goldberg, and Shauli Ravfogel.
+2022. BitFit: Simple parameter-efficient fine-tuning
+for transformer-based masked language-models. In
+Proceedings of the 60th Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 2:
+Short Papers), pages 1—9, Dublin, Ireland. Associa-
+tion for Computational Linguistics.
+
+Fahim Dalvi, Nadir Durrani, Hassan Sajjad, Yonatan Be-
+linkov, Anthony Bau, and James Glass. 2019. What
+is one grain of sand in the desert? analyzing individ-
+ual neurons in deep nlp models. In Proceedings of
+the Thirty-Third AAAI Conference on Artificial Intelli-
+gence and Thirty-First Innovative Applications of Ar-
+tificial Intelligence Conference and Ninth AAAI Sym-
+posium on Educational Advances in Artificial Intelli-
+gence, AAAT 19MAAT 19/EAAT 19. AAAI Press.
+
+Jean de Dieu Nyandwi, Yueqi Song, Simran Khanuja,
+and Graham Neubig. 2025. Grounding multilingual
+multimodal Ilms with cultural knowledge. Preprint,
+arXiv:2508.07414.
+
+Junfeng Fang, Zac Bi, Ruipeng Wang, Houcheng Jiang,
+Yuan Gao, Kun Wang, An Zhang, Jie Shi, Xiang
+Wang, and Tat-Seng Chua. 2024. Towards neuron
+attributions in multi-modal large language models.
+In The Thirty-eighth Annual Conference on Neural
+Information Processing Systems.
+
+Wes Gurnee, Theo Horsley, Zifan Carl Guo, Tara Rezaei
+Kheirkhah, Qinyi Sun, Will Hathaway, Neel Nanda,
+and Dimitris Bertsimas. 2024. Universal neurons in
+gpt2 language models. Preprint, arXiv:2401.12181.
+
+Geert Hofstede. 1980. Culture and organizations. In-
+ternational studies of management & organization,
+
+10(4):15—41.
+
+Kaichen Huang, Jiahao Huo, Yibo Yan, Kun Wang,
+Yutao Yue, and Xuming Hu. 2024. Miner: Min-
+ing the underlying pattern of modality-specific neu-
+rons in multimodal large language models. Preprint,
+arXiv:2410.04819.
+
+Jiahao Huo, Yibo Yan, Boren Hu, Yutao Yue, and Xum-
+ing Hu. 2024. MMNeuron: Discovering neuron-level
+domain-specific interpretation in multimodal large
+language model. In Proceedings of the 2024 Con-
+ference on Empirical Methods in Natural Language
+
+10
+
+Processing, pages 6801-6816, Miami, Florida, USA.
+Association for Computational Linguistics.
+
+Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-
+sch, Chris Bamford, Devendra Singh Chaplot, Diego
+de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+laume Lample, Lucile Saulnier, Lélio Renard Lavaud,
+Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,
+Thibaut Lavril, Thomas Wang, Timothée Lacroix,
+and William El Sayed. 2023. Mistral 7b. Preprint,
+arXiv:2310.06825.
+
+Claire Kramsch. 2014. Language and culture. AJLA
+review, 27(1):30-55.
+
+Wen Lai, Viktor Hangya, and Alexander Fraser. 2024.
+Style-specific neurons for steering Ilms in text style
+transfer. In Proceedings of the 2024 Conference on
+Empirical Methods in Natural Language Processing,
+pages 13427-13443.
+
+Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi.
+2023. Blip-2: Bootstrapping language-image pre-
+training with frozen image encoders and large lan-
+guage models. Preprint, arXiv:2301.12597.
+
+Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae
+Lee. 2023. Visual instruction tuning. Preprint,
+arXiv:2304.08485.
+
+Avinash Madasu, Vasudev Lal, and Phillip Howard.
+2025. Cultural awareness in vision-language
+models: A cross-country exploration. Preprint,
+arXiv:2505.20326.
+
+Danial Namazifard and Lukas Galke. 2025. Isolating
+culture neurons in multilingual large language mod-
+els. arXiv preprint arXiv:2508.02241.
+
+Shravan Nayak, Kanishk Jain, Rabiul Awal, Siva
+Reddy, Sjoerd Van Steenkiste, Lisa Anne Hendricks,
+Karolina Stanczak, and Aishwarya Agrawal. 2024.
+Benchmarking vision language models for cultural
+understanding. In Proceedings of the 2024 Confer-
+ence on Empirical Methods in Natural Language
+Processing, pages 5769-5790, Miami, Florida, USA.
+Association for Computational Linguistics.
+
+Clement Neo, Luke Ong, Philip Torr, Mor Geva, David
+Krueger, and Fazl Barez. 2025. Towards interpret-
+ing visual information processing in vision-language
+models. Preprint, arXiv:2410.07149.
+
+Siddhesh Pawar, Junyeong Park, Jiho Jin, Arnav
+Arora, Junho Myung, Srishti Yadav, Faiz Ghifari
+Haznitrama, Inhwa Song, Alice Oh, and Isabelle Au-
+genstein. 2025. Survey of cultural awareness in lan-
+guage models: Text and beyond. Computational
+Linguistics, pages 1-96.
+
+Qwen, :, An Yang, Baosong Yang, Beichen Zhang,
+Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan
+Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan
+Lin, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin
+Yang, Jiaxi Yang, Jingren Zhou, and 25 oth-
+ers. 2025. Qwen2.5 technical report. Preprint,
+arXiv:2412.15115.
+
+
+===== PAGE BREAK =====
+
+Nina Rimsky, Nick Gabrieli, Julian Schulz, Meg Tong,
+Evan Hubinger, and Alexander Turner. 2024. Steer-
+ing llama 2 via contrastive activation addition. In
+Proceedings of the 62nd Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 15504—15522, Bangkok, Thai-
+land. Association for Computational Linguistics.
+
+David Romero, Chenyang Lyu, Haryo Akbarianto Wi-
+bowo, Teresa Lynn, Injy Hamed, Aditya Nanda
+Kishore, Aishik Mandal, Alina Dragonetti, Artem
+Abzaliev, Atnafu Lambebo Tonja, Bontu Fufa Balcha,
+Chenxi Whitehouse, Christian Salamea, Dan John
+Velasco, David Ifeoluwa Adelani, David Le Meur,
+Emilio Villa-Cueva, Fajri Koto, Fauzan Farooqui, and
+57 others. 2024. Cvqa: Culturally-diverse multilin-
+gual visual question answering benchmark. Preprint,
+arXiv:2406.05967.
+
+Noam Shazeer. 2020. Glu variants improve transformer.
+Preprint, arXiv:2002.05202.
+
+Tianyi Tang, Wenyang Luo, Haoyang Huang, Dong-
+dong Zhang, Xiaolei Wang, Xin Zhao, Furu Wei,
+and Ji-Rong Wen. 2024. Language-specific neurons:
+The key to multilingual capabilities in large language
+models. In Proceedings of the 62nd Annual Meeting
+of the Association for Computational Linguistics (Vol-
+ume 1: Long Papers), pages 5701-5715, Bangkok,
+Thailand. Association for Computational Linguistics.
+
+Alexander Matt Turner, Lisa Thiergart, Gavin Leech,
+David Udell, Juan J. Vazquez, Ulisse Mini, and
+Monte MacDiarmid. 2024. Steering language
+models with activation engineering. Preprint,
+arXiv:2308.10248.
+
+Edward Burnett Tylor. 1871. Primitive culture: re-
+searches into the development of mythology, philoso-
+phy, religion, art, and custom, volume 2. J. Murray.
+
+Elena Voita, Javier Ferrando, and Christoforos Nalm-
+pantis. 2024. Neurons in large language models:
+Dead, n-gram, positional. In Findings of the Asso-
+ciation for Computational Linguistics: ACL 2024,
+pages 1288-1301, Bangkok, Thailand. Association
+for Computational Linguistics.
+
+Jiaqi Xu, Cuiling Lan, Xuejin Chen, and Yan Lu. 2025.
+Deciphering functions of neurons in vision-language
+models. Preprint, arXiv:2502.18485.
+
+Srishti Yadav, Zhi Zhang, Daniel Hershcovich, and
+Ekaterina Shutova. 2025. Beyond words: Explor-
+ing cultural value sensitivity in multimodal models.
+Preprint, arXiv:2502.14906.
+
+An Yang, Baosong Yang, Binyuan Hui, Bo Zheng,
+Bowen Yu, Chang Zhou, Chengpeng Li, Chengyuan
+Li, Dayiheng Liu, Fei Huang, Guanting Dong, Hao-
+ran Wei, Huan Lin, Jialong Tang, Jialin Wang, Jian
+Yang, Jianhong Tu, Jianwei Zhang, Jianxin Ma, and
+43 others. 2024. Qwen2 technical report. Preprint,
+arXiv:2407.10671.
+
+11
+
+Zeping Yu and Sophia Ananiadou. 2024. Neuron-level
+knowledge attribution in large language models. In
+Proceedings of the 2024 Conference on Empirical
+Methods in Natural Language Processing, pages
+3267-3280, Miami, Florida, USA. Association for
+Computational Linguistics.
+
+Xiang Yue, Yueqi Song, Akari Asai, Seungone Kim,
+Jean de Dieu Nyandwi, Simran Khanuja, Anjali Kan-
+tharuban, Lintang Sutawika, Sathyanarayanan Ra-
+mamoorthy, and Graham Neubig. 2025. Pangea: A
+fully open multilingual multimodal Ilm for 39 lan-
+guages. Preprint, arXiv:2410.16153.
+
+Xiutian Zhao, Ke Wang, and Wei Peng. 2024. Mea-
+suring the inconsistency of large language models in
+preferential ranking. In Proceedings of the 1st Work-
+shop on Towards Knowledgeable Language Models
+(KnowLLM 2024), pages 171-176, Bangkok, Thai-
+land. Association for Computational Linguistics.
+
+Chujie Zheng, Hao Zhou, Fandong Meng, Jie Zhou,
+and Minlie Huang. 2023. Large language models are
+not robust multiple choice selectors. arXiv preprint
+arXiv:2309.03882.
+
+
+===== PAGE BREAK =====
+
+A Reproducibility
+A.1 Models and Sources
+
+Models                                    Sources
+
+LLaVA-v1.6-Mistral-7B
+Pangea-7B
+Qwen2.5-VL-7B
+
+https: //huggingface.co/llava-hf/LLaVA-v1.6-Mistral-7B-hf
+https: //huggingface. co/neulab/Pangea-7B
+https: //huggingface.co/Qwen/qwen2.5-v1l-7b-Instruct
+
+Table 3: Specification and sources of the evaluated mod-
+els.
+
+A.2. Culture Grouping of CVQA
+
+The CVQA benchmark comprises 39 coun-
+try—language pairs, several of which share the same
+country or language tags. To study potential group-
+ing effects, we construct three aggregated culture
+sets that pool pairs with a shared attribute: India-
+all (IND) (all pairs tagged with country ‘India’),
+Indonesia-all (IDN) (all pairs tagged with coun-
+try ‘Indonesia’ ), and All-Spanish (ESP) (all pairs
+whose language is Spanish). Table 4 reports the
+mapping from individual pairs to each aggregate
+and the number of questions per subset in the iden-
+tification and evaluation splits.
+
+A.3. Prompt Template for Multiple-Choice
+VQA
+
+Listing 1: Prompt template used for VQA generation
+
+Answer the following multiple-choice question
+based on the image.
+
+Question:
+{question}
+
+Options:
+{option
+{option
+{option
+{option
+
+1}
+2}
+3}
+4}
+
+Your response must be ONLY the text of the
+correct option from the list above, and
+nothing else.
+
+A.4 Answer Normalization Process
+
+To ensure reliable evaluation of model predictions
+in the multiple-choice setting, we implemented a
+normalization procedure to mitigate inconsisten-
+cies in the format and phrasing of generated out-
+puts. The complete procedure is summarized in
+Algorithm 1.
+
+First, the prediction string is converted to low-
+ercase and standardized by collapsing all whites-
+pace into single spaces and trimming leading and
+trailing spaces. This step minimizes mismatches
+
+12
+
+CVQA Pairs                                 Grouped Cultures #Qs(I) #Qs(E)
+Brazil-Portuguese                              BRA                      142               142
+Bulgaria-Bulgarian            BGR          185       186
+China-Chinese                                    CHN                      155               156
+Egypt-Egyptian Arabic                    EGY                      101               102
+Ethiopia-Amharic           ETA        117     117
+Ethiopia-Oromo                                  ETO                       107               107
+France-Breton                                            FRA                          202                 203
+India-Bengali                           143     143
+India-Hindi                              100      101
+India-Marathi                            101      101
+India-Tamil                                           IND                       107               107
+India-Telugu                                                                         100               100
+India-Urdu                             110     110
+Indonesia-Indonesian                     206     206
+Indonesia-Javanese                            IDN                       148               149
+Indonesia-Minangkabau                      125      126
+Indonesia-Sundanese                        100      100
+Treland-Irish                                          IRL                       163               163
+Japan-Japanese                 JPN           101       102
+Kenya-Swahili                KEN          136      137
+Malaysia-Malay                                 MYS                      157               158
+Mongolia-Mongolian         MNG        156      156
+Nigeria-Igbo                                        NGA                      100               100
+Norway-Norwegian                          NOR                      146               150
+Pakistan-Urdu                                      PAK                       108               108
+Philippines-Filipino                           PHL                       101               102
+Romania-Romanian                          ROU                      151               151
+Russia-Russian                                    RUS                       100               100
+Rwanda-Kinyarwanda                     RWA                      117               118
+Singapore-Chinese                             SGP                       106               106
+South Korea-Korean                       KOR                     145              145
+Argentina-Spanish                                                             132               133
+Chile-Spanish                             117      117
+Colombia-Spanish                                                             120               121
+Ecuador-Spanish             ESP         181     181
+Mexico-Spanish                                                                  161               162
+Spain-Spanish                           159     159
+Uruguay-Spanish                          157      158
+Sri Lanka-Sinhala                              LKA                      112               113
+Total                                 5178    5196
+
+Table 4: Culture subsets and VQA statistics. CVQA
+country-language pairs with ‘Spanish’ language tag or
+[‘India’, ‘Indonesia’ ] country tag are assigned to one of
+the aggregated cultures, and other pairs remain stand-
+alone. # Qs (I) denotes the number of questions used for
+activation recording and neuron identification, while #
+Qs (E) denotes the number of questions used for masked
+generation and evaluation.
+
+caused by case sensitivity or formatting irregulari-
+ties. Each answer option is similarly normalized to
+lowercase. The algorithm then searches for whole-
+word matches of each choice within the normalized
+prediction using word-boundary matching to pre-
+vent false positives. Because LLMs are known to
+exhibit label bias in multiple-choice answering set-
+tings (Zheng et al., 2023; Zhao et al., 2024), we
+require the model to output the full content of the
+
+
+===== PAGE BREAK =====
+
+chosen option rather than its label (e.g., ‘A’, ‘B’).
+
+Although the prompt explicitly instructs the
+model to generate a single answer (Appendix A.3),
+instruction-tuned language models may still pro-
+duce extended reasoning, which makes simple sub-
+string matching insufficient. Therefore, we applied
+a heuristic when multiple choices appear in the
+output: the last-mentioned choice is treated as the
+model’s final decision. This heuristic reflects the
+common generation pattern where models delib-
+erate over several options before declaring a final
+answer (e.g., ‘Option A is plausible, but B is incor-
+rect, so the answer is C’). If no choice can be con-
+fidently identified using this rule, the system falls
+back to a less robust substring search, checking
+whether the ground-truth option appears anywhere
+in the prediction text.
+
+This two-stage normalization and extraction pro-
+cess improves the evaluation’s robustness to var-
+ied model output styles while prioritizing the most
+plausible interpretation of the model’s intended fi-
+nal answer.
+
+Algorithm 1: Answer Normalization and
+Extraction
+Input: Prediction string P, list of choices
+C, ground truth G
+Output: Boolean indicating whether
+prediction is correct
+normalize P: lowercase, collapse
+whitespace, trim edges;
+Initialize last_choice < None,
+last_pos + —1;
+foreach choice c € C' do
+normalize c;
+Find all word-boundary matches of c in
+P;
+foreach occurrence at position pos do
+if pos > last_pos then
+
+L last_pos < pos;
+
+last_choice «+ c;
+if last_choice 4 None then
+|_ return (Jast_choice = G);
+else
+return (whether G appears in P as
+substring);
+
+13
+
+B_ Activation Recording and
+Identification Details
+
+B.1 Activation Extraction
+
+We record neuron activations by attaching forward
+hooks to the nonlinearity branch of each decoder
+MLP. Specifically, in common transformer imple-
+mentations, this branch is named act_fn in the
+SwiGLU block:
+
+U= hy-1Wa + bu,
+q = SiLU(u),
+
+v= hy_1W, + by,
+
+2=(gOv)Wo+bo.
+
+For each neuron n in layer / and token position
+t, we log the scalar activation a), from g. Be-
+cause o(-) > 0, SiLU(«) shares the sign of its
+pre-activation x, so I(aj4 > 0) is equivalent to
+I(uinz > 0), making sign-based counts inexpen-
+sive.
+
+We also ensure that the valid-token mask m;
+respects each model’s internal attention mask,
+thereby excluding padding, image delimiters, and
+other special tokens.
+
+B.2_ Baseline Identification Method
+Implementation
+
+B.2.1 Random Selection (RND)
+
+We use a global random baseline that samples a
+fixed total number of neurons (i.e. r%) as the tar-
+geted mask but draws them uniformly from all
+layers, without enforcing any layer-wise quota.
+This choice avoids additional bookkeeping and is
+substantially more compute-efficient than a layer-
+matched variant that mirrors a method’s per-layer
+counts. To verify that conclusions are not an ar-
+tifact of the layer distribution, we probed a layer-
+matched random baseline (matching CAS’s per-
+layer histogram). Accuracy changes and flip rates
+were comparable to the global RND within sam-
+pling variance, so we report the global RND in the
+main text for simplicity and efficiency.
+
+B.2.2 Activation Probability (LAP)
+
+LAP (Gurnee et al., 2024; Voita et al., 2024) selects
+neurons that often fire for a given aspect (‘language’
+in the original works; here adapted to culture). Us-
+ing the activation probability from Eq. (2),
+
+1
+
+Te
+Po  = Tt   1 1(a)%, > 0)      (2)
+we define the LAP score for culture c as
+stn’ (c) = Phi     3)
+
+We apply two simple filters before selection:
+
+
+===== PAGE BREAK =====
+
+1. Activity filter. Compute a global activity
+threshold p;y, as the a-percentile over all val-
+
+ues in {PO} (we use a=95). Discard triples
+
+(1,n,c) with Po  < pth to remove rarely fir-
+ing neurons.
+
+2. Competition tie-break. When needed, pre-
+fer neurons with a larger probability margin
+ota (ec )= PK ? _ max clée Pe ) , encourag-
+ing comparative culture selectivity without
+computing entropy.
+
+For each culture c, we rank the remaining neu-
+ron indices (1,n) by sin’ (c ) (with Ota (c) asa
+tie-breaker) and then select the top r% across all
+decoder MLP neurons (we use r=1).
+
+B.2.3 Activation Probability Entropy (LAPE)
+
+LAPE (Tang et al., 2024; Namazifard and Galke,
+2025) prefers neurons whose activations across cul-
+tures are concentrated. Using the same activation
+
+(
+
+probabilities P;, <)  , define the normalized distribu-
+
+tion                       fo)
+Cc
+pO = ttn
+
+In = ey
+
+ee Pen
+and compute the Shannon entropy
+Hin = — >> p,? log}.        (4)
+cEC
+
+Lower H,,, indicates stronger specialization.
+
+1. Activity filter. Drop (/,) with max, PO I<
+Dth, using the same global activity threshold
+
+Pth (the a-percentile over all {Po   n,  we use
+a=95).
+
+2. Low-entropy pool. Among the survivors,
+keep a low-entropy pool by taking the lowest
+p% according to Hj, (chosen only to form a
+sufficiently selective candidate set).
+
+3. Culture assignment. Assign each kept
+neuron (/,n) to its top culture c* =
+
+arg max, Pp)  provided PK > Poa where
+
+In?
+Pbar is the G-percentile of all {Pe   Z (we use
+B=90).
+
+For each culture c, cank the neurons assigned
+
+to c by decreasing PK   ) (breaking ties by lower
+
+Hn, then by larger margin PK? — Maxe4e PO).
+
+Finally, select the top r% across all decoder MLP
+neurons for that culture.
+
+B.2.4 Mean Activation Difference (MAD)
+
+MAD scores neurons by how much more strongly
+they respond to culture c than to other cultures,
+using magnitude-aware signals (Bau et al., 2018;
+Dalvi et al., 2019). Using the mean positive activa-
+
+tion M, ©) from Eq. (1), define
+
+~(-¢      1          oe
+c'EC\{c}
+sAP(c) = Mi) a?   (6)
+
+To avoid selecting neurons that spike rarely but
+strongly, we apply the same activity gate as in
+LAP/LAPE:
+
+keep (1,1, c) only if Po  > pth;      (7)
+where pth is the a-percentile over all {P, (4 (we
+use a=95). For scale stability across layers,  one
+may optionally apply a layer-wise z-normalization
+to M before computing (6); our main results use
+the unnormalized form with the gate in (7).
+
+For each culture c, rank all decoder-MLP neu-
+
+rons (1,n) by decreasing sh P (c).  Break ties
+
+(c)                                                 (c)
+
+by larger Pr  , then by larger margin MM, —
+
+max z¢ M, (c ),  Finally, select the top r% across
+all decoder MLP neurons for that culture.
+
+B.3 Metrics
+
+Let N be the number of items in a culture subset.
+Let ams* and qful denote the model’s predicted
+answers with and without ablation masking (after
+normalization; §A.4) for item 7 before and after
+masking, respectively. Let yf”, ymsk © {0,1}
+indicate correctness under the two runs.
+
+N
+1
+Acctu = 55 Ss ye,                     (8)
+i=1
+1   N
+ACCmask = N » yk,                  (9)
+i=
+
+AAcc = AcCmask — ACCfull-            (10)
+
+Flip rate. We measure the proportion of items
+whose predicted answers change:
+
+N
+
+1
+
+i=1
+
+
+===== PAGE BREAK =====
+
+C_ Layer-wise Neuron Distribution
+
+We illustrate the number of identified neurons per
+layer across all selected cultures of LLaVA-v1.6-
+Mistral-7B in Figure 6 and Pangea-7B in Figure 7.
+We use a logarithmic scale to compress the color
+range for the very high values in dominant layers
+and expand the color range for the lower values in
+the other layers.
+
+0
+e                                                                                10?
+9
+12
+15
+18                                               10?
+21
+24
+27
+30                                                                                 101
+(a) LAP
+0
+e                                                                                10?
+9
+12
+15
+18                                               10?
+21
+24
+27
+30                                                                                 101
+(b) LAPE
+0
+e                                                                                10?
+9
+12
+15
+18                                               10?
+21
+24
+27
+30                                                                                 101
+(c) MAD
+0
+e                                                                                10?
+9
+12
+15
+24
+27
+30                                                                                 10!
+
+LKA
+
+$x4,0808
+OF
+Sos GGCE
+
+Figure 6: Layer-wise counts of identified neurons
+(LLaVA-v1.6-Mistral-7B).
+
+LLaVA-v1.6-Mistral-7B Culture-sensitive neu-
+ron distributions vary more across methods than
+Qwen2.5-VL-7B and Pangea-7B. LAP and LAPE
+emphasize first and last layers.
+
+Across early-to-mid layers (1-20), both methods
+also have coverage, whereas the clear purple band
+between layers (21-27) indicates neglect of those
+layers. MAD shows concentrations in mid-to-late
+layers (15-24). CAS is sparser than MAD and
+locates more neurons in early layers (0-6).
+
+15
+
+0
+5                                                                                 10
+9
+12
+21
+24
+27                                                                                 10!
+(a) LAP
+103
+3                                                                                 10?
+10!
+(b) LAPE
+103
+3                                                                                 10?
+10!
+(c) MAD
+10
+102
+10!
+
+<os
+os
+
+su25 6   027% 29 0daevirayvsiaag
+OF     eou>   IIODSU0N
+ees enbe 2B ee ESOS ez OB SROs
+
+(d) CAS
+
+Figure 7: Layer-wise counts of identified neurons
+(Pangea-7B).
+
+Pangea-7B Activation density distribution across
+layers for Pangea-7B is very similar to the one for
+Qwen2.5-VL-7B, as shown in Figure 7. This is
+largely expected, as the language component of
+Pangea-7B uses a Qwen2-7B-Instruct backbone
+(Yang et al., 2024), which is the direct predeces-
+sor of Qwen2.5-7B-Instruct (Qwen et al., 2025),
+the language component of Qwen2.5-VL-7B. They
+both share a 28-layer architecture. Similar with
+Qwen?2.5-VL-7B, the aggregated culture ESP ex-
+hibits distinctive patterns in comparison with other
+cultures, with neuron concentration on early layers
+(0-5).
+
+D_ Full Ablation Matrices
+
+D.1 Pangea-7B Ablation Results
+
+Accuracy change. In Figure 8, off-diagonal pat-
+terns reveal key differences in cultural specificity
+between methods. LAP produces widespread cross-
+
+
+===== PAGE BREAK =====
+
+10.0
+BGR..28 +11 438 +20 +00
+CHN-.07 405/45 +20 +09
+EGY -+0.0 +1.6      421.0 +17)
+ec |                                                                                          15
+ETA-14 0.5 44.5 +1.0 +000
+£TO. 42-16 445 +1.0 +00)
+o                                                                                                           5.0
+2
+2
+5
+a
+Zz
+zg
+2
+S|                                                                                                                         “2.5
+Lo)
+2
+gz
+5
+3
+a
+3                       he 05 eee] =                                                oo
+g                                    42.6 +0, 2-31 420
+oO
+by                                      r
+o
+fay
+-25
+-5.0
+BRABGRCHN EGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+4
+2
+-0
+2
+© IDN.28 ‘ao ac 3  a
+Fi}
+@ irt-o7 411 32 20 onal
+2                                                                                                           -2
+2
+S
+Lo)
+2
+g           y
+5                                                                                                           =
+3 MING +0.7 43                                                                                                      a
+a
+5]
+2
+icy
+=
+ial                                                                                                           6
+o
+5 9 9 000-10 0
+ROU--1.4 +1.6 -3.2 +1.0 +0.0   +2.5 0.3 -0.7 +0.0 -1.0     S  .
+RWA.-0.7 43    [4s 09 +19 ao a5 45 18 +1.0-07 413-19 20    a te 26 10-34 400-07 -05 18
+SGP.21 2:      z     09 as 42/5237    415/84) 32 400-13 28 20/46 10 25    [2 /em +0.0
+KOR 42 400/51 29/654 100+05 23 12 18 439415 +13 400450 20 +09 +20 46 41040040055 17 09          a5
+
+ESP.28 411 38 400-17 37 05 23 02 18 12043640
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+
+(c) MAD
+
+[38 10 27 400420 20 420.34 38 14 30 BEY
+
+“1.9 42.0 40.0 -1.9 +0.0 -13 41.0 +0.0 41.9 40.7 +0.7
+
+         neo                 wool
+
++0.0 40.2 40.9
+
+(20 408 409-14 +06 09
+
+41.026 +0 0 +0.0 +00 -0.7 +1.0+0.9          w
+28   0 +0.0 +0.0 -0.8 +00 -0.7 +0.7/EY)
+o                                                                                    413 400 +00 20 “1.0 40.8 +00 -1.4 40.2
+2
+2                        0.5 -0.8 -0.5 $1.2 +0.0 -0.7 +0.6 06 420-13 +09 +00    -1.0 +0.8 +0.9 -0.7 +0.8 -0.9
+5
+2 om tet Eat =f 400 22 +0049                         +00 0.9 -0.7 +0.8 09
+2
+S  JPN--0.7 +0.                                 E                                          40.9 -0.7 +0.8 +0.0       0
+é                                                                                                                                   +0.  a4 +0.5 +0.0
+@                                                                                                       07 10/88
+5
+3
+a
+5]
+2
+8                                                                                                                                                -2
+o
+o
+é     sien o5 0-8 news asian 67 A807
+FB 41505414412 10 asag +0.0 +1.0 +0.0 +0.0 +0.0
+RUS--0.7 41.1 +00 -10 Fe+00 +05 -05 422 06 -1.0 40.7 +0.0 -1.3 +1.0 +0.7 419 -1.0 +0.  20  1.7 +0.0 40.0412 18
+RWA aa +0.0 -0.6 20 0        +1.0 +0.6 +0.9 +0.0 +0.0 +0.  19 406420   7 40.0+1.0 0.7 1.0 17 8 14 103/27)          “4
+
+SGP-400405 06 20)         420-15 -03 -06 +008 +06 06 420-07 1.9 410-13 10 +08 409-14 +00 09
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHLROURUSRWASGPKOR ESP LKA
+Evaluation Culture VQA Subset
+
+RND--07 41.1413 +00 426 42.8149 +03 +02 +00 20 +29 +19 426430 +00437839 07 $B +00 +09 42.1 +01 +09
+
+BGR. 40.0 40.0 40.0 +41,0 409409 405 -15 400-25 29-07 19-13 3042040020 13 40 408-09 21 06 418
+
+CHN-+0.0 40.5 -2.6 +0.040.9419 10 08 -0.7 06 410 -0.7 19 13 -10 20 +00
+
+cr 2 neo o5 5 a2 20 Be
+
+ETA-28                                                  [53 100.17 09 14 14 09
+2.0425 +0.0421 03 09
+0
+a
+2
+ij
+5
+a
+2
+g                                                                       --2
+2
+S
+fs)
+ra
+2
+5
+3                                                                        -4
+8
+3
+3                                             0 08 saa: -10 +00
+g                      Bess: 417 421406 20 +0.                09 #10 +20 40.0 42.5 +09 +00 +017 +00
+& PAK-407 40.0413 2       30.02 #14431 = 41.9 430 +00 09 +00 13 +00 +08 +0028 +11 +18     -6
+© pHL-+00 416 26 | +10 40.04.0415 13 a I 2 98 2s
+ROU--14 38-26 20-09 42842032 09 +18 10-15 +00 32 +30+00+09 -20PM+00K42      E
+RUS. 28 11.6 +00 2.9 40.0419 41.008 407 25 29 429-32 06 420-27 2943,   7.0                   8
+Rwa [49 48 1.3 29 42.6437 ae 25-29-15 19 26 410-40 37
+.                   1.0 +0013 06 20 23 2:
+KOR.-07 411-19 29 409/437 41.0 05 +22 +06   Re es Pe
+-10
+
+ESP. 1.4 41.1 432410 09 409400 09 0.7 418-39 422406 13 410-07 28 449-07 400408447 21 21 +00
+
+Uh-28 43 32|BB s20+09 08 24 22 96 +10 44 23 [BH|-00 39 499.
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset.
+
+(d) CAS
+
+Figure 8: Accuracy change A heatmap for Pangea-7B after deactivating neurons identified by different methods,
+
+shown for all evaluated cultures.
+
+cultural interference, with off-diagonal values vary
+dramatically (exceeding —5% and +10%). This
+suggests that LAP often selects neurons encoding
+features shared across multiple cultures, potentially
+diluting cultural isolation. LAPE reduces this in-
+terference, with most off-diagonal values between
+—2% and +2%, but its self-deactivation magni-
+tudes are generally smaller, implying weaker cap-
+ture of high-impact culture-sensitive neurons.
+
+MAD and CAS produce the largest and most
+consistent negative accuracy changes in the self-
+deactivation diagonal. MAD exhibits particularly
+strong effects for SGP (—9.4%) and EGY (—7.8%),
+indicating that its selected neurons are highly influ-
+
+16
+
+ential for these cultural subsets. CAS yields large
+drops for ROU (—11.3%) and IRL (—8.6%).
+
+MAD, while producing strong self-deactivation
+drops, also shows notable cross-effects for re-
+lated cultural groups, especially within African
+and Asian subsets, indicating partial overlap in
+feature encoding. In contrast, CAS achieves a fa-
+vorable balance: its self-deactivation effects are
+large, yet most cross-deactivation changes remain
+within +1.5%, demonstrating targeted neuron re-
+moval that minimally impacts unrelated cultural
+subsets.
+
+
+
+===== PAGE BREAK =====
+
+RND-63 43 38 39 60 47 99 57 77 86 59 88 32 7.7 30 40 56 59 46 80 34 28 76 81 62
+
+32.5
+30.0
+27.5
+a
+is
+2
+5
+a
+Zz                                                             25.0
+4
+2
+3
+Lo)
+g
+2
+5
+© MNG                                                          22.5
+a
+3
+2
+ic
+2
+i]
+o
+fat                                                             20.0
+175
+a.
+19.9 ER 205|                                               15.0
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+(a) LAP
+RND-63 43 38 39 60 47 (BB) s27 77 86 59 88 32 77 30 40 56 59 46 80 34 28 7.6 B1 62    25
+BGR. 85 86 96 BI 77 56 s0 88 fBG 02             + EO a3 35 “i
+CHN- 5.6 86   59 7.7 56 64 7.9
+EGY-49 81 58
+20
+
+ea >>
+co a
+
+IND-56 48 71 78 94 75
+
+IDN-7.0 75 77 39 85 4
+
+IRL 63 86 8s
+JPN-63 48 71 69 43 3
+ken 06 RB 96 26 94 5.
+mys. 70 65 igg 78 43 65 ila 92
+MNG-49 86 64 59 BB so 69 sa fo
+NGA/85 59 718 68 84 89 97 |
+Nori 2 f08)|iam 24 65
+PAK-5.6 86 64 88 85 5.
+PHL Oe HBAS 70 77 6s GiB|9e            J
+
+ROU-7.0 59 71 49 51 75 a 73 90/98 49/95 63 |96 90 §
+RUS-28 65/90/88 68 75 84 89 108   9 73 57 HB co 67
+75 58 69 flll)93 79 72     29/95/51 93 300 67 GRE 7.     :
+oa 64 BW os 2     82     59 8 fl e3 20 80 ss 78 98) 70 |93 HMB 90 |94 72    5
+43 BBB so aoa ss fa ce fils 92 so 73 76 77 70 60 65 78 86 So sa
+86 90 78 68 75 54 88)   3/88) 66 5.7 HBO 52 27/88 60 60 a5 94
+
+7.0 58 69   37   47 88 74 39 88 44 83 80 53 56 78 93 70 51 75 76 84
+
+Deactivated Source Culture Neurons
+
+RWA. 4.9
+
+SGP. 7.7
+
+KOR- 7.0
+ESP. 8.5
+LKA- 6.3
+
+BRABGRCHN EGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHLROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+
+(c) MAD
+
+Deactivated Source Culture Neurons
+
+PHL- 0.0 05
+
+rou {35} 16                  :               |
+
+Rus {35 12          5 2.            E                            A
+RWA- 2.1 2.2           Z         3       7.
+
+SGP-14 16
+KOR.28 05
+esp 00
+
+ws oe aoe BJ 28 a    | ee ee
+i)
+
+BRABGRCHN EGY ETA ETO FRA IND IDN IRL JPN KENMYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+
+(b) LAPE
+
+RND-63 43 38 39 60
+
+22.5
+BRA BB) 59 64 (BB) 51 19 44 47 65 61 59 66 32 58 30 53 56 39[Bb) 70 25 38 5s [BB) 62
+51 30 33 56
+20.0
+ws
+» IND /8S 65 oa [ae 43 47 64                 20 fil 78   80
+2                                                         15.0
+© IWN-56 48 51 78 43 56 64 o4            60 27 74 59 (BB) 50 5985)  Be
+5
+Z int-28 48/83) 39 B47 59 40
+ge
+S
+é             75 79       78 flo2 63   z
+@wys.63 54 se 78 51 47 44 73/98 fad s9 =          é          3
+5
+BMNG 63 59 77 69 60 56 [84 59 a1 92 7:          40 4678 73 20 25 OM 62 [87 80
+2                                                         10.0
+BNGA. 77 65 83/88) 51 56 59 74                60 74 69 BR 70 [83] 75 76 95 71
+SNOR-28 43 64 39 34 37 64 41           7a 30 PJ 46 69 46 60 59 85/55 63 5a
+% pak [Ba] 43 26 39 |77 [B)|as 4     69 [BB 44 71 50 40 46 39/79 40 42 75 69 79 53
+o
+17.5
+cy PHL |B) 59 30 [BB] 6o 47 49 4 iba   69 73 63 77 70 33 74 A os 20 68 92 [BH 72 44
+ROU-56 70 77 39 26 [BA 59 65     29 02 76 71/9053 6s 20 AiR so 76 66 48 74 62
+RUS 85 59 38 49/85) 56 69 53           (BB) 20 67 37 49 [a6 BJ 42 75 41 79 7a
+RWA. 77 70 64 |B8 7.7 [83] 69 54     ae:  4 [80 67 74 49 73 so BR «7 34 72 80    5.0
+SGP.63 54 83 78 51 47 64       49 58 63 [83) 40 [BB] 27 29 |79 30 Bes 61 62
+KOR 49 43 83/69 77 37 49       78 58 “ie 40 56 59 60 40 25 [BA     27
+25
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+
+(d) CAS
+
+Figure 9: Flip Rate heatmap for Pangea-7B after deactivating neurons identified by different methods, shown for all
+
+evaluated cultures.
+
+Flip rate. In Figure 9, LAP produces the highest
+and most widespread flip rates, with substantial off-
+diagonal deactivation values exceeding 25% (e.g.,
+EGY, RWA, PHL, etc.) LAPE markedly reduces
+off-diagonal rates (generally below 7%) but also
+yields lower self-deactivation magnitudes.
+
+MAD achieves large self-deactivation flip rates
+(often 10 — 20%) but also moderate cross-effects,
+especially among related cultural groups. CAS
+offers a strong balance: self-deactivation rates re-
+main high for several cultures (e.g., 20.9% for
+IRL, 17.9% for ROU and KOR), while off-diagonal
+effects are generally modest, indicating effective
+cultural specificity. We notice the unique pattern
+
+17
+
+shown for deactivating JPN neurons. After dissect-
+ing the results, we found that this was likely due to
+the model’s initial bias (extreme low performance
+on JPN-specific training subset), causing the mod-
+els fail to accumulate culture-sensitive activation
+signals through sufficient successful VQA cases.
+Overall, these patterns align with the accuracy
+A results. LAP fail to target culture-sensitive neu-
+rons in general; LAPE improves the isolation of
+such neurons but the results remain unsatisfactory;
+MAD captures powerful but partially shared rep-
+resentations, and CAS combines substantial self-
+impact with minimal cross-cultural interference.
+Taken together, for Pangea-7B, the heatmaps re-
+
+
+===== PAGE BREAK =====
+
+RND-+0.0+0.0-13 -10 26 +19 30 12
+
+03-12 20 36 425-13 $0 +07428.29 413-10 44241934 03 444
+
+75
+
+BRA-+0.0 38 13 10 -17+09-30 18 -
+
+BGR 42 22 26 2.0 34 et Eee
+
+CHN--14 34                                                                            5.0
+
+EGY-+0.0 -1
+
+ETA--14 38 13
+
+“11 19 29 26 42
+IRL-407-1.6 3.2 400-34 cool os ES
+JPN. +07 38 |S: +0043 09/68 400 -
+KEN 428.32 29 10 5141925 08 4
+
+“16 38 -10 26 +19 -30 +03
+
+ETO-+0.7                                                                                                               25
+
+FRA-+0.0 7
+IND. -0.7
+
+IDN-+0.7
+
+0.0
+
+-25
+MYS-+0.7
+MNG-+1.4 -14
+
+NGA-+07 2.7 21                                                            50)
+NOR-+0.0 -2.2 -24
+
+PAK..0.7 ~
+
+Deactivated Source Culture Neurons
+
+PHL-+0.7 -31
+-75
+ROU-+0.0 2.2 -19 29 21
+
+-10.0
+
+52 26                        -12.5
+
+MYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA,
+
+LKA-+00 16 38 29 34 419-44 02 Eg
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN
+
+Evaluation Culture VQA Subset.
+
+RND-40.0 400-13 1026 419-30 12 03 1.2 2086425 23 B)+0.7428 29 +13 20 (PP +19|34 03 PP
+
+BRA.21 422.26 9BB+00.09 20-17 10 18 20 07 419 26 +00+00 419.20 407/30 oe Bey +4.
+BGR-+00 +00 +0.0400+17 40.0 15 +12 24 412.2936 +0013 [A 07 4                  4
+CHN-+0.0 42.6 ERY 1.0 +0.0428 +05 06 +03 +00   7 +0,      z
+
+EGY 400 11 29428417 09 10 05 -05 +09
+ETA-41.4 22 [2 s10 “17 409-15 -0.3 -0:
+
+ETO--14 11 26 +10 40.9 40.9 05 +02 -0:
+FRA-42.1 41.6 -0.6 41.0 -0.9 +00 -1.
+IND--0.7 +12 BB +00 26 428
+
+IDN-+0.7 16 +06 41.0 0.9 +0.0 «1,
+IRL
+JPN-44 16 2.3 40.0426 40.0 2.0 08 1:
+
+KEN 421 22 413 20 409428 10 -06 0:
+
+MYS-+0.0 -1.1 -13 +2.0 +0.9+0.0 -10 +
+
+MNG--0.7 -22 +06+10-09 +00 -10 08 -1!
+
+NGA "BB +00 0.0428 1.7 409-10 02 2,
+
+NOR 42:1 1.1 +00 +10 09 +09 +10
+
+Es 2 ns 4 0        7-2
+
+“1.0 +0.9
+
+Deactivated Source Culture Neurons
+
+1.2 406 -1.0 40.7 -13 06 30 -13 +09 -10
+
+PHLW28 1.6 2.3 +10+09[%%) +00 08
+
+-1.3 42.0 +0.9 40.9 -1.0 21-1.
+
+RWA-400 11 26 10409129 15 06 4
+
+“11 +18
+
+RUS                                                                                                      Buy +4.4
+
+29 420 -10 417-19 21-04 Ae
+
+“1.0 +1.3 -1.0 40.8 40.0 +0.7 -
+0.7 +18
+
+of
+
+12
+RWASGP KOR ESP LKA
+
+-13 -10 +09 -09 410-14 -1)
+
+40.0 42.0 26 +0.9 2.0 +06 03 ~
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHLROU
+Evaluation Culture VQA Subset
+
+(c) MAD
+
+RND-#0.0400 13 10 26 419-30 12 -03 12 2086425 13 P)+0.7 428 29 +13 10 MAB +19|34 -03 PP      5
+
+BRA 28405 419428400428 05 1.7 03 418400400419 13 M0) 0.7 187 10 13 10 417.09 07 05 418
+BGR-407 400400429 1.7 09 20 08 -09 +06 20 100419 26/1) 40.7437 +00420 20 11740907 104885
+CHN 40.7405 06 +1009 419405 05 -14 +1220 400 +00 2.9 [40 42:7 +09 1.0 +20+0 0434 +09 4 +04 EY        G
+EGY 428           429 26 419405 03 +02+0 oe]   7 41.9 40.0 2.0 -1.3 $39) +0.0420-10 +00 09 21 0.1 +18
+BTA-H14 400-32 400-09 11.9415 02 22 418 20/29 41340630 1.3.19 10 Ha s30425 40.0 2.1 402 41.8
+
+£TO-+07 22 [38 11.0 +00419 20 +06 14
+FRA-41.4 41.1 -13 +20(43 +09 +15 -0.2 40.9 +06           +10 -13 419400407 4          4         4
+uy IND-40.7 400400429 -09 409-10 06 02 ose on 20  2 is oa 21-01 418
+2 int-+07400413 a0 Bes 10 -06 -12 412-20 15 +06 1.3 2        F             0              >
+§ JPN-+00405 96 110-09 400-05 15 14 +0029 22 +00 19 [40-12 ff        3 400434 a
+3 KEN 42.4 40040640009 09 420.03 07 12 29 +00f7¥| 13 [40-07 09 10 +26+00/EE
+$ mys 42342 +06 fEE}+09 +00 “15 40.3 -0.7 41.              :     33  .0 2:
+3 MNG-#21 405/32 120 +00+09 20 09 40.3406 29                                                             5
+NGA+07 11 26 429-09 +0905 +03 02 118.29 15 432 +00/40) 07
+8 Nor 35 411 06 -1.0 +0.0 40.9 40.0 -11 -09 +12 10 22 419-19     40     1.0 42.0 +0.04a2 +19 -0.7 -02
+& pak-r07 05 13 42009 409.25 05 05 +12 20-28 +00 19.40 +20 28 20 x00} +17 100 07 vos fey)
+© prt.421+00-13 ME) 17 +0005 -17 +05+00-20 15 es 06 -10 -2.0 -0.9 +0.0420 +1.0+17 400-21 -0.2 +18      L_>
+ROU-414 40.5 -1.9 41.0 -09 -0.9 40.0 -0.2 -0.3 412-20 40.0 06 -1.
+RUS-41.4 22 1.9 41.0 40.9419 400-06 -12 -06
+RWA-+0.7 2.2 32429 “LT 409 2.0 -06 -0.7 41.8420 -2.2 +19
+-4
+
+SGP-H14 400-06 110-17 40941503 -15 41840015 425 2.
+
+ESP. 40.0 400|32 410 09 409-20 05 +03 06 58 +00 +19 -04
+LKA-40.7 05 -1.9 +0.0 +0.9 +0:
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHLROURUSRWASGPKOR ESP LKA
+Evaluation Culture VQA Subset
+
+RND-#0.0400 13 10/26 1.9-30 12 03 12 2086425 23 B)+0.7428 29 +13 20 (PP +19|34 03 PP      6
+
+4
+EGY. 40.7 +00 406429 +00+00+10 08 14 +0
+ETA-+00 +00 26
+ETO 42.1400 06 +
+2
+FRA-+07 16 13 429
+wy IND-+07     9 2.
+2
+2
+5
+a
+2
+o                                                                                                0
+2
+S
+3
+@
+i
+5
+3 MNG 428422 “13 42.0 +09 41                 9      7 40.0 2              J
+wa                                                                                               -2
+BNGA-+00 05 [3298 +00 119 484 +00 oe | 06 and 20 40.0 40.0 -2 ys — ee  ,
+S$ or 428 27 119-1.0417       20 1               as       3400/29 Fae        9-14
+ PAK +07 41.1 +0088 +0.9/9%) 2.                              427-09 10 400-10 417-09 +14 11 +09
+© pHL-o7 416 19 +00PE)+09 15 02 09 +06 20 29 32 06 M0) +0.0 09 38)       40.8 41.9 +00 2.             4
+ROU-#0.0 41.1 -0.6 $1.0 40,0 41.9405 -1.4 -1.2 41.2 -1.0 -0.7 413400 20 20 40.0429    42.0408 0.9 +0.0 -0.8 fen
+RUS +0. +00|26 -10 09 +00 20 08 +00 25 29 +0.7+00+00 20 +00+09 10 +00+00425+19 21 16 /7e|
+RWA-14 11 13 429409419 10 +02 24 12 20 22 13 +13|40 20 +09|28 42640 +08 28 +0.7 10 +00
+SGP-+0.0 05 +13 +0.0 +0.0+09+05 -1.4 1.0 +00 RR) +07 13 4134       0.9 +0.0 +0.  |e +0.9 -0.7 au        6
+
+KOR.-0.7 -05 -06 -10 +0.9419 -05 -0.2
+
+ESP--1.4 411-19 420126 419-05 +02 -1!          (B2BE) 10 20 09 1 ag   40.0 -09 14 -16 +09
+LKA-400 411-19 429 +09 400 05 402.09 +0029 22 13 19 30 40.7489 +1013 10 sa 07 01
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHLROURUSRWASGPKOR ESP LKA
+Evaluation Culture VQA Subset
+
+(d) CAS
+
+Figure 10: Accuracy change A heatmap for LLaVA-v1.6-Mistral-7B after deactivating neurons identified by
+
+different methods, shown for all evaluated cultures.
+
+inforce CAS’s strength in isolating neurons with
+concentrated cultural influence while maintaining
+low collateral impact. LAP shows broader but less
+specific disruption, LAPE favors specificity at the
+expense of impact, and MAD captures strong but
+partially entangled cultural representations. These
+results are consistent with the patterns observed
+for Qwen2.5-VL-7B, suggesting that CAS’s ad-
+vantages generalize across models with different
+training data and architecture choices.
+
+D.2. LLaVA-v1.6-Mistral-7B Ablation Results
+
+Accuracy change. As demonstrated in Figure 10,
+LAP induces the largest and most consistent ac-
+
+18
+
+curacy change variance drops (between —10%
+and +5), but show no discrimination on self-
+deactivation effects and cross-deactivation inter-
+ferences. This aligns with the aggregate re-
+sults in Table 2, where LAP yields the strongest
+self-deactivation impact for this model. LAPE
+shows similar incapability of distinguishing culture-
+sensitive neurons but with smaller impact magni-
+tude. In contrast, CAS and MAD produce stronger
+diagonal drops than cross-diagonal ones on aver-
+age, suggesting that the neurons identified by these
+methods are more likely to contribute to culture-
+sensitive information processing.
+
+
+===== PAGE BREAK =====
+
+RND-28 54 115 49 26 37 69 88 86 25 98 66 89 9.0 70 87 65 88 66 1105.9 75 76 55 6.2
+
+Deactivated Source Culture Neurons
+
+BRABGRCHN EGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHLROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+
+(a) LAP
+eo seo» + REED > EER Es
+
+Bra_49 (iB
+
+Deactivated Source Culture Neurons
+
+BRABGRCHN EGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHLROURUSRWASGP KOR ESP LI
+Evaluation Culture VQA Subset
+
+(c) MAD
+
+Deactivated Source Culture Neurons
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KENMYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+
+(b) LAPE
+ao. 20 54 FRR) 9 26 3 (65) BGR] 2 EE) BB] ES ee eel = al ss (aa)
+
+CHN- 3.5 so
+
+EGY .
+
+ETA- 42
+
+Deactivated Source Culture Neurons
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KENMYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+
+(d) CAS
+
+Figure 11: Flip Rate heatmap for LLaVA-v1.6-Mistral-7B after deactivating neurons identified by different methods,
+
+shown for all evaluated cultures.
+
+Flip rate. Figure 11 shows the flip rates for
+LLaVA-v1.6-Mistral-7B. LAP yields the highest
+self-deactivation flip rates, with multiple diagonal
+values exceeding 30% and substantial off-diagonal
+effects across unrelated cultures. LAPE reduces
+off-diagonal interference, generally keeping cross-
+cultural flip rates below 10%, but also produces
+smaller self-deactivation rates (also often under
+10%).
+
+MAD results in moderate self-deactivation flip
+rates (7-13%) and low-to-moderate cross-effects,
+pointing to a balance between specificity and im-
+pact, though less pronounced than in Qwen2.5-VL-
+7B or Pangea-7B. CAS produces mixed results for
+
+19
+
+this model. Self-deactivation flip rates are moder-
+ate (10-20% for the most affected cultures), and
+off-diagonal values remain relatively contained.
+While CAS maintains reasonable specificity, its
+self-impact here is smaller than for the other two
+models.
+
+Overall, for LLaVA-v1.6-Mistral-7B, LAP
+emerges as the most disruptive method in terms
+of raw self-deactivation impact, albeit with higher
+cross-cultural spillover, while LAPE produces a
+mixed pattern of moderate self-impact and dis-
+persed cross-effects. CAS and MAD maintain
+higher specificity with smaller cross-deactivation
+effects. These results could suggest that cultural
+
+
+===== PAGE BREAK =====
+
+0 09 409-15 418-05 406400115 06 26 420-07 19 410.26 2040809 0.7 04 18
+
+444121426 18         432-19 20 447/56 439 07 420117 09 448402 18                                    ;                     :            .
+9 43.0424 42.8 42509422 41.3419 30 133      se +13 42.0 08 409455.                                           ocr (Ey) 05 06 20417                        .                                                                  +0.7 05
+.0 43.0 +05 42.2 +1.2BEE 42.9 41.9 1.3             +40        .      .                      CHN oo SERB -20 ER] + 06 02 06 EES 9643    +00 +00 09 |         7 10)       407400 09
+19 420 41.4431 +06/B E129 +06 42.6 10 W6a       ;      .7 400441 02 4       10           EGY-07 126 06 +00+09.09 10 03 05 HB +00415 06         a        ;       rota
+ag 415429110433]                                                                210013 +00409 09   Ss ss   +06 20   oe   sf     3          40.0
+42.0 +0.8 40.9 41.2                                                                                                                                                                                 406 +0.0 41.5 11.3 +06|20 -0.7 +00                       +409
+09 425 +09 41.7 425M +22 -13 +26 -10
+
+(3.7439 +21 415 +25 429425126 50.     42.0 1.0 +0.0 -0.9 45.5 +0.2 -0.9
+
+9 43.7 44           +13 +0.0 -10
+
+a BE 15 +19 08 LL | 10010 08
+
++0.9 +09
+
+0.0 +0.0 +0.1
+
+42.0 +0.0 +0.0 +1.9
+
+MYS-.07 405/23]            5 +0.             y            409407 402/18
+
+Deactivated Source Culture Neurons
+Deactivated Source Culture Neurons
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHLROURUSRWASGPKOR ESP LKA                                        BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN a MYSMNGNGANOR PAK PHLROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset                                                                                                           Evaluation Culture VQA Subset
+
+(a) LAP                                                                             (b) LAPE
+
+MING 2a +05 -06
+407 400-17 19 441-04 27,     0
+407 #1047 09 #3441509
+42.1412 +18      06 +06 +0.0             20 34 a        B               sor a                     me  .0 40.0 +0.0 -0.   2            7 40.
+41.7 40.7 42.5 MEE 40.7 +0.6 42.6 2.0                  40.7 +00 -08               :                                        KOR-414 05 08                                     J                       0 41,0 +0.           “ai      #10 400 +00 +0.7 +0.
+| fee          0.6 +00   453   39407 10 17 47)     .                       ESP-+0.0 +0.0 05 20                                                      0 +0.7 -0.
+443-28 434421405 +12        +06 +060) +40    58 20 100-42 38          :                                   0-0.  a0          : a 0                       6 20,0  ;  aE        fe        40.7 -0.1 40.0
+
+RND-421413/32 10 09 409.45 418-05 406+00415 06 26 12007 49 410.26 2008-09 07 04 18             AND 421 12)82 10 09 409215 118-05 v0e+00415 06 26 420.07 19 410.26 20408 09 07 04 18 |,
+4
+BGR 07 405 26                                                                          ocn aa aE   Bok                  20 09 20-40 10 25 +19+00110+00
+CHN-2a #1        :           05 40.0 -1.0 oS SS = 20 nS 98 28 421.04 18      2
+2
+EGY +00 -05      as IB 2+ 5 soc sc 07           7428      20-98-09 14 04
+;                Be:                                                           ETA-+0.7 fal   09 -09 =| fe 412     :           7 400-20 20 +0.0 400409 +0.7 413
+Be eee eo
+-0
+rons 08 os   Bs 97-06 06 50 07 99 100.13 40 2.   5-002 11 404                                                                                        0
+.            re Meee |      ‘
+2
+5                                                                                                 °
+E                                                                    =|                          5
+a                                                                                       2          a
+2                                                                                                 2
+§                                                                                                 2                                                                                       -2
+Ss                                                                                                 s
+fel                                                                                                 3
+@
+g                                                                                      -4          g                       41.0405
+5                                                                                                 5
+3
+8                                                                                                 a
+zy                  417 419-15 12 22 40640015            :      /      .0 BE] -09 +0.                         3 vo a       40.0 40.9 1.0 +00       oo   Ze                                      “4
+g                            400 30 20 26 +00       :                         r                 0 a.                  6             $ nor-+00 22 06 29 09          96-15 +0010 on 30            .
+8                                  15 412                                a                                     8  PAK 421405 29 400 09 28 1.0 -12 05 412 420 407 13-06 10 20.37,
+is)                                                                                                            © pHi-+07 400.13 10 41740925 05 28       415 19 32 +00 407 +09]
+ROU--1.4 +0.0 -1.3      +0.0 -0.5 +0.2      +1.0 +0.7 +1,3 +0.0 -1.0 +0.0         +0.0 -0.8 -0.9 +0.0 +0.7 -0.9
+-8                                                                                                 -6
+RUS +00 22 +00 1.0426 09 Fed 07 0 EE Ss 40.0 1.0 i aso    coon
+RWA-+1.4 405                                                                                         RWA-+1.4 -0.5       09 09 20-09 07               613 10 20                   9407-04 28
+
+SGP-+00438 38 -10 +0.        .      u      7 +0.     0 +0.      :     .         y    4a                  SGP-400405 32 10 26 40040040503 12   vo   {a                            .
+KOR #14 -05 26 2043419 05 1,           B)t07 23 26 20 41:       .      ,           ,               mn             KoR.14 05 199) 26 09 30 +0.                                                49 07 401
+
+-8
+ESP. 24 #11                    Poe                      .                    041.3 1.          a                                  ESP-400 11 13 +00+00fEF)+15 +03 07 -06 +00 +00 +00 -06 +00 dad fad 07 10-17 428 +07 PY
+
+LKA.+0.7 26 38 10-0 0+09 05 Boz 15 41: day                                                  |                         LKA-40.0 05 13 40.0 09 428 10 402-12 06 10 415-13 400-10 +00 09 #1020 20 25, 40.0 40.7 41.3
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHL ROURUSRWASGPKOR ESP LKA                                          BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHLROURUSRWASGPKOR ESP LKA
+Evaluation Culture VQA Subset
+
+(c) MAD                                                                          (d) CAS
+
+Evaluation Culture VQA Subset
+
+Figure 12: Accuracy change A heatmap for Qwen2.5-VL-7B after deactivating neurons identified by different
+methods, shown for all evaluated cultures.
+
+knowledge in this model is more diffusely encoded,
+making high-specificity neuron targeting less im-
+pactful than in Qwen2.5-VL-7B or Pangea-7B.
+
+D.3. Qwen2.5-VL-7B Ablation Results
+
+Full results are presented in Figures 12 and 13.
+
+20
+
+
+===== PAGE BREAK =====
+
+RND-7.7 22 32 29 26 47 54 45 46 55 39 15 32 7.7 40 20 56 88 5.3 20 42 47 21 56 71
+
+EGY-12.7 12.9 135
+
+ETA aa 12. ua                                 2 13.
+ETO-12.7 129135                              95 (ise
+109 14
+
+17 12.0
+
+IND-134 11.8 115
+
+IDN-12.7 12: aaa
+IRL a5, 12.4 12.2                     :        9
+JPN-13.4 124 BE) 19.6205] 2.4              24 [65
+
+10.2
+MYS-134 13.4 13.5                          88 120
+
+MNG-13.4 12.9 12.2 (176 be ee
+
+Deactivated Source Culture Neurons
+
+PHL. a =. 28
+
+ROU 181 140 128
+
+RUS-11.3 13.4 >»
+RWA.248 145 115            [202]
+SGP-13.4 11.8 222 sa]
+
+4.0|21.3|19.6|20.5 eC)
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+
+CHN-42 48
+
+eGy {70) 54
+
+ETA-35 [65 45
+
+ETO-49 54 38
+
+pee] 4.7 3.4
+
+40/56 39 46 3.0 AR) 57 14 48
+
+30 52 [7B] 07 43
+
+40 [BBI7S 14 57 18
+
+co ao
+
+NOR- 4.2 3.8
+
+pak {6a 48   ‘
+
+PHL/56 3.2 32
+
+Be =     37 49 29 52 45 [Bl o7 FEE 29 66/7076) 66) 07 36
+oe    30 42   aan
+
+ROU/56 48     joa  (7482) 5 |o7 59 sa [B) 5. [B6) 1.2 28 49 PER) 30 52
+
+RUS- b> ila | 43 =| =>: eo He 00
+
+RWA42 48 58 69)                   7 (a           co Fyse 2s
+
+SGP. 42/59 51 -
+
+KOR-56 48 5.1
+
+Me
+
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+
+Deactivated Source Culture Neurons
+
+51 47 07
+
+Evaluation Culture VQA Subset
+
+(c) MAD
+
+Figure 13: Flip Rate heatmap for Qwen2.5-VL-7B after deactivating neurons identified by different methods,
+
+shown for all evaluated cultures.
+
+30
+
+25
+
+15
+
+-10
+
+175
+
+15.0
+
+12.5
+
+10.0
+
+75
+
+5.0
+
+25
+
+0.0
+
+21
+
+ora. a4¢ 03 33 (Bl o» Bl                2 [E62 (2a) ERY 20 [3B o> a8
+
+ocr J os os (aa)          zo [aa 32) 28) 10 (27 8] oo PEIETY|SA)B 02 20 10
+
+CHN-14 2.2                    eee 2.0 1.3 ERS   ~ mS     07 23 27
+Bal 20 a)
+
+vs oe
+
+29 19 0.0 20 13 os [29]   5] +°
+
+EGY-21 16
+
+eva {35} 1
+£70.28 11
+
+FRA-21 05
+
+IND- 22 0.0                  20 22 [BB] 26 20 20              00 23 18
+IDN- 21 05                  20 20 oe             20/27)
+IRL-21 05                   23)   00 20 13 19           07 20 18
+JPN 28 22 26         1 22 (28 BBs 19 19/30)                   21 18
+KEN- 2a 0.0            ES]
+
+MYS-0.7 05
+
+MNG- 21 16                                         19 07 21 09
+
+NGA!28) 05
+NOR 28 05
+Pak [35 0.0
+
+PHL-07 11
+
+ape 30] 22 2 18
+2 |» a2 2 GRR oe a» a a7
+Qa wo = E> > a = EDS 22
+
+12 00
+
+a
+e
+2
+S
+a
+
+Zz
+g
+3
+
+z
+3
+
+is)
+o
+QZ
+3
+3
+
+a
+
+7D
+
+g
+©
+
+ROU- 2.1 0.5                   25 10 BB
+
+rus FF os
+
+06
+RWA-14 16 19 a9 [Ea
+13 [B@) 17
+
+SGP-0.7 16
+
+kor: 14 27) 19 FF
+
+ESP-14 11 06
+
+23 21 os BB       13 @
+
+ee oe
+
+2924 12 20 22 25   13 0.0 20
+
+Slee «>                    Boj oo 19 21 24 18
+
+Ea    24 19 12                  om  0 |25 |
+LKA-14 11 06    47 44] 4a 5]     AJ 22 19 19 20 20           07 (26 |
+
+BRABGRCHNEGY ETA ETO FRA IND  2  IRL JPN KEN MYSMNGNGANOR o i) ie KOR ESP LKA
+
+17 19 o7 28)    09
+
+Evaluation Culture VQA Subset
+
+ora FER] 20 45 =m» = 34 32 29 25 39 36 (63) 36 20 13 [6B] 39 [FB] 20 34 FEB) oo (4a (6a)
+
+CHN- 35 32 A «           a3 37 (BB) 29 51 26 50 13 37 59 |fa) 20
+EGY 42 16 45 FER] 60       45 31 10 36 (BB) 58 40 47 46 (7B) 60
+
+ETA-21 38 26 59      x    29 37 29 44 38 38 20 20 37 39 46
+
+ETO-42 38         49 54 41 31 49[BB)57 51 20 47 56 29 40
+
+FRA-42 32 26 Li 37 PB) 42 33 25 39 29 44 58/60 27 19 39 53
+
+IRL-35 38 45 39 43 19 49 48  >= BB 5.1 44 38 40 33 37 29 46
+
+noe » ol Be                a7 Biss
+
+MYS.35 38     26 ve  33
+
+19
+MNG. 42 59 306 BB) 79) 47 (Ba) 42 0
+
+NGA-35 38 19 39 43 BM) 49 42 55
+
+NoR.42 32 06 49 [7] 47 54 36 29 37 49 44 44 32 10 B22 20 46
+PAK-49 27 32 59/43 47 49 36 43/61/59 36 38 45 50 33 FMB) a9 46
+PHL 49 12 26 [BB)/68 [65 44 50 55 55 68/15/70) 45 40 20 40 BR
+ROU-42 32 26/59 51 19 34 32 48 18 29 36 51 51 30 27 65 49
+RUS 56 43 26/68/60 28 49 41 43 43/68) 36 32 64 30 27 37 20 Fl
+RWA|S6 27 7/78) 43 47 49 42 34 43 49/66 19 38 10 20 37 39
+SGP-28 48 32/BB 43 56 39 50 52 49 49 3.6 [BB 32 40 40 [7l)|s9
+KOR-28 27 32 [OE] 43 47 49 42 57 43 58 36 25 26 30 40 19 39 53.50 34 19
+
+ESP. 42 32 26 39 51 (MB) 54 39 28 18 59 15 38 19 20 27 46 IBl7a) 10 24 20
+
+LKA5.6 38 13   26 47 49 47 33 31 49 44 25 26 30 13 09 29 46 20 25 57
+BRABGRCHNEGY ETA ETO FRA IND IDN IRL JPN KEN MYSMNGNGANOR PAK PHL ROURUSRWASGP KOR ESP LKA
+Evaluation Culture VQA Subset
+
+(d) CAS
+
+Deactivated Source Culture Neurons
+
+20.0
+
+175
+
+15.0
+
+12.5
+
+10.0
+
+75
+
+5.0
+
+0.0
+
+
+===== PAGE BREAK =====
+
+E Complete Unablated Results
+
+Model LLaVA-v1.6-Mistral-7B             Pangea-7B             Qwen2.5-VL-7B
+Culture                             Iden.       Eval.                   Iden.       Eval.       Iden.       Eval.
+Brazil-Portuguese             0.5352 0.5493                 0.5704 0.6338 | 0.6972 0.6901
+Bulgaria-Bulgarian          0.4324 0.4301               0.5189 0.4624 | 0.6000 0.5000
+China-Chinese                 0.5355 0.4679               0.5871 0.5641 | 0.7161 0.7308
+Egypt-Egyptian_Arabic 0.4851 0.4608               0.5446 0.5294 | 0.6634 0.5686
+Ethiopia-Amharic             0.5043 0.4957                 0.4701 0.4530 | 0.5470 0.4274
+Ethiopia-Oromo               0.4766 0.4486               0.3832 0.3551 | 0.4673 0.5794
+France-Breton                   0.3762 0.3202                0.3366 0.3202 | 0.4703 0.4039
+India-all                            0.5068 0.4773                 0.6021 0.5468 | 0.6808 0.6239
+Indonesia-all                   0.4594 0.3563               0.4801 0.4819 | 0.5250 0.5301
+Ireland-Irish                    0.6074 0.5890               0.5644 0.6319 | 0.6196 0.6196
+Japan-Japanese                 0.3069 0.3627                 0.2178 0.2255 | 0.3861 0.4216
+Kenya-Swahili                 0.4926 0.4599               0.4412 0.3577 | 0.5882 0.4818
+Malaysia-Malay                0.4268 0.4304                0.5605 0.4873 | 0.5860 0.5380
+Mongolia-Mongolian       0.4295 0.4295               0.3846 0.4167 | 0.4551 0.4679
+Nigeria-Igbo                     0.5600 0.4200                0.4700 0.4000 | 0.5200 0.4800
+Norway-Norwegian         0.5570 0.5133               0.5034 0.5133 | 0.5839 0.5800
+Pakistan-Urdu                 0.5741 0.5648               0.3796 0.6296 | 0.7315 0.7037
+Philippines-Filipino          0.5050 0.4804                0.5644 0.4804 | 0.5743 0.5882
+Romania-Romanian          0.4768 0.4570                0.6159 0.5563 | 0.6556 0.6556
+Russia-Russian                 0.3900 0.5500                0.5000 0.5500 | 0.5600 0.6400
+Rwanda-Kinyarwanda 0.4103 0.4492                0.3333 0.4322 | 0.4444 0.5254
+Singapore-Chinese           0.5849 0.5094               0.5377 0.6038 | 0.7170 0.7358
+South Korea-Korean     0.5793 0.5034         0.5310 0.5517 | 0.6207 0.5655
+all-Spanish                       0.4557 0.5034                0.4830 0.4995 | 0.5871 0.5703
+Sri_Lanka-Sinhala            0.3839 0.5310                0.3393 0.6195 | 0.6786 0.6726
+Avg.                               0.5345 0.5102               0.5938 0.5831 0.6522 0.6395
+
+Table 5: Culture-specific model performance. We report accuracy on the set of questions-answer pairs used for
+neuron identification and evaluation respectively.
+
+LLaVa-v1.6
+Qwen2.5-VL-7B       Pangea-7B       “Mistral-7B
+Mean of neuron-wise standard deviations across cultures       0.015284            0.017388           0.020062
+Std. dev. of neuron-wise standard deviations across cultures 0.012924            0.018586          0.016303
+Max neuron-wise standard deviation                                   0.170701              0.196799            0.160319
+Number of neurons where std >mean activation                   65101 (12.27%) 50772 (9.57%) 148 (0.03%)
+
+Table 6: Neuron-wise standard deviations across cultures for the three evaluated models. The preliminarily
+experiment on Qwen2.5-VL-7B and Pangea-7B yield high variances across cultures, which motivates us to develop
+CAS.
+
+22

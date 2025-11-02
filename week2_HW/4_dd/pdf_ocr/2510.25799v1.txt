@@ -1,0 +1,2223 @@
+2510.25799v1 [cs.CL] 29 Oct 2025
+
+arXiv
+
+LISTEN to Your Preferences:
+An LLM Framework for Multi-Objective Selection
+
+Adam S. Jovine*?           Tinghan Ye*?
+David B. Shmoys?
+'Cornell University
+
+Abstract
+
+Human experts often struggle to select the
+best option from a large set of items with
+multiple competing objectives, a process bot-
+tlenecked by the difficulty of formalizing com-
+plex, implicit preferences. To address this, we
+introduce LISTEN (LLM-based Iterative
+Selection with Trade-off Evaluation from
+Natural-language), a framework that lever-
+ages a Large Language Model (LLM) as
+a zero-shot preference oracle, guided only
+by an expert’s high-level priorities in nat-
+ural language. To operate within LLM
+constraints like context windows and infer-
+ence costs, we propose two iterative algo-
+rithms: LISTEN-U, which uses the LLM
+to refine a parametric utility function, and
+LISTEN-T, a non-parametric method that
+performs tournament-style selections over
+small batches of solutions. Evaluated on di-
+verse tasks including flight booking, shop-
+ping, and exam scheduling, our results show
+LISTEN-U excels when preferences are para-
+metrically aligned (a property we measure
+with a novel concordance metric), while
+LISTEN-T offers more robust performance.
+This work explores a promising direction for
+steering complex multi-objective decisions di-
+rectly with natural language, reducing the
+cognitive burden of traditional preference
+elicitation.
+
+1 Introduction
+
+We consider a human decision maker choosing among
+a large set of available items, such as airline flight
+itineraries or schedules assigning employees to shifts.
+
+“Equal contribution
+
+Francis Bahk?
+Peter I. Frazier!
+?Georgia Institute of Technology
+
+Jingjing Wang1
+
+The decision maker is aided by metrics describing the
+items (e.g., number of connections, price, total du-
+ration, departure time). Unfortunately, the decision
+maker lacks a precisely-defined utility function over
+the metrics that would support selecting the best item
+automatically. Instead, the decision maker must man-
+ually inspect many items to select the one they most
+prefer. This can lead to decision fatigue and poor de-
+cisions (Schwartz, 2015).
+
+This problem is common. Surveys across a vari-
+ety of engineering and science domains (Farzane and
+Alireza B, 2022; Sharma and Kumar, 2022; Gunantara,
+2018) argue that most real-world engineering design
+problems have multiple competing objectives. Indi-
+viduals also face many available options in day-to-day
+life, e.g., in online shopping, especially when combi-
+natorics causes bundles of interacting products to ex-
+plode in number (flight legs arranged into itineraries,
+computer components arranged into a server).
+
+Traditional solutions are often inadequate. Manually
+comparing all options is time-consuming and error-
+prone. Pareto plots showing one metric versus an-
+other do not scale beyond a few metrics. Multi-
+objective optimization algorithms (see, e.g., Knowles
+2006; Branke 2008) allow screening solutions off the
+Pareto frontier, but when there are many metrics
+the number of Pareto-optimal solutions can be large.
+Utility elicitation, preference learning and other al-
+gorithmic search methods that require the decision-
+maker to express pairwise preferences between solu-
+tions (Obayashi et al., 2007; Wang et al., 2022; Huber
+et al., 2025) or human-directed faceted search (Ozaki
+et al., 2024) can help, but still require significant hu-
+man effort. The core difficulty is that humans lack a
+time-efficient way to accurately articulate their prefer-
+ences.
+
+Large language models (LLMs) offer a new paradigm
+for tackling this challenge. With their ability to in-
+terpret text, LLMs present an opportunity for zero-
+shot preference modeling, where a decision-maker’s
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+goals can be understood directly from a verbal descrip-
+tion without the need for expressing pairwise prefer-
+ences. While recent research has begun integrating
+LLMs into preference learning, they are typically used
+as components within larger systems—for instance, to
+guide questioning (Lawless et al., 2023; Austin et al.,
+2024), extract preferences from reviews (Bang and
+Song, 2025), or simulate user behavior (Okeukwu-
+Ogbonnaya et al., 2025; Zhang et al., 2025). However,
+the question is understudied of how to best leverage
+the power of LLMs to accelerate human selections over
+large collection of items.
+
+1.1 Contributions
+
+To address this gap, we introduce LISTEN: LLM-
+based Iterative Selection with Trade-off Evaluation
+from Natural-language, a framework that uses an
+LLM as a preference oracle for selection of a human
+expert’s most preferred item from a list that is too
+long for the human to examine directly. In our frame-
+work, a human expert first describes their potentially
+complex priorities in natural language. Using itera-
+tive refinement the algorithm selects its estimate of
+the best item. Our approach must contend with limits
+on the LLM’s context window and the LLM’s ability
+to reason directly over large item lists, which prevent
+the LLM from directly selecting the best item in a sin-
+gle call. Our approach must also limit the number of
+calls to the LLM to save computational and financial
+costs.
+
+We introduce two novel algorithms in the LISTEN
+framework: LISTEN-U, which chooses according
+to parametric utility functions adaptively generated
+by the LLM; and LISTEN-T, which uses the LLM
+to compare solutions in a tournament-style selection
+mechanism.
+
+We find that both methods perform as well or bet-
+ter than baselines. LISTEN-U significantly outper-
+forms other methods when the held-out human rank-
+ings are in concordance with the parametric assump-
+tion of the utility function, as measured by a novel
+concordance metric developed in this work. When the
+human rankings are not in concordance, this method
+may underperform unless concordance is improved by
+modifying the prompts that better guide through the
+implicit utility or modifying the form of the utility
+function through adaptive refinements. LISTEN-T
+is not bound by parametric utility assumptions and
+provides robust performance across a range of prob-
+lems.
+
+1.2. Related Work
+
+Our work contributes to the rapidly expanding appli-
+cation of LLMs in optimization, yet we address a dis-
+tinct and often overlooked challenge. Much of the ex-
+isting research focuses on the pre-solving phase, from
+automatically formulating problems from natural lan-
+guage (Ramamonjison et al., 2023; AhmadiTeshnizi
+et al., 2023; Xiao et al., 2023; Huang et al., 2025), to
+configuring solver algorithms (Lawless et al., 2025) and
+even positioning the LLM as a direct, formulation-free
+optimizer (Yang et al., 2023). Complementing these
+efforts, other work evaluates the foundational knowl-
+edge of LLMs on core principles, such as primal-dual
+theory, which is crucial for reliable modeling and ed-
+ucation (Klamkin et al., 2025). In contrast to these
+approaches, our work addresses the post-solution chal-
+lenge by providing a method for users to efficiently
+filter and navigate the large set of trade-off solutions
+from a multi-objective optimization, thus complement-
+ing the existing pipeline.
+
+Our work is also related to research on how LLMs
+express preferences in pairwise comparisons, a con-
+cept foundational to Reinforcement Learning from Hu-
+man Feedback (RLHF) (Ouyang et al., 2022) and the
+“LLM-as-a-judge” paradigm (Zheng et al., 2023). Li
+et al. (2025) demonstrated that models differ substan-
+tially in their logical preference consistency, across
+dimensions such as transitivity, commutativity, and
+negation invariance, and that improving this consis-
+tency, for example through their REPAIR method,
+leads to more stable, reliable, and higher-performing
+systems in downstream ranking and evaluation tasks.
+At the same time, more recent work warns us of po-
+tential pitfalls when treating LLMs as evaluators. Gao
+et al. (2025) show that when used to simulate or
+replicate human behavior. Their results suggest that
+LLMs’ internal preference structures and responses are
+sensitive to extraneous artifacts (such as prompt fram-
+ing, role assignment, or safety filters) and diverge from
+human behavior in unpredictable ways. We extend
+these results to new multi-objective setting, investigat-
+ing whether these preference instabilities are amplified
+when navigating the complex trade-offs between com-
+peting objectives.
+
+2 Problem Description
+
+We consider the problem of selecting a single preferred
+item from a large collection of candidates. In many ap-
+plications, this collection represents the set of Pareto-
+optimal solutions generated by a multi-objective opti-
+mization algorithm. Formally, let S = {s1, s2,...,sn}
+be a set of N items. Each item s; € S is described
+by a tuple of d attributes, s; = (ai1,...,@ia). The
+
+
+===== PAGE BREAK =====
+
+Jovine, Ye, Bahk, Wang, Shmoys, Frazier
+
+LLM oracle
+
+CN           Prompt
+—|
+(natural language
+Decision        that describes the
+maker         implicit utility)
+
+a ©
+
+I
+
+W
+
+Compare solutions
+
+Output utility
+functions
+
+Pareto-optimal solutions
+
+O0O000
+
+OVU00O
+
+OO000—
+
+Most
+preferred
+solution
+
+#
+
+Figure 1: A schematic overview of the LISTEN framework. A human decision maker provides preferences in
+natural language. An iterative algorithm, either LISTEN-U or LISTEN-T, then uses an LLM as a preference
+oracle to progressively filter a large set of candidate items (e.g., the Pareto frontier) and identify the single most
+
+preferred solution.
+
+attributes can be of mixed types; each attribute aj;
+belongs to a domain D,; that can be numerical (e.g.,
+R for price), categorical (e.g., a set of airline names),
+or textual (e.g., a free-form product description). We
+are also given a natural language utterance, U, that
+articulates a human decision-maker’s preferences over
+these attributes.
+
+Our goal is to identify the item s* € S that best satis-
+fies the preferences described in U. We assume access
+to a pre-trained LLM, which acts as a preference ora-
+cle. The core challenge is to design an algorithm that
+finds s* while adhering to a limited budget of calls to
+the LLM. This setting is motivated by scenarios where
+N and/or d are large, making it impractical for a hu-
+man to exhaustively inspect all items and for an LLM
+to process the entire set in a single context window.
+
+3 Methodology
+
+To solve the selection problem defined in Section 2, we
+introduce LISTEN (LLM-based Iterative Selection
+with Trade-off Evaluation from Natural-language).
+LISTEN is an iterative framework that employs an
+LLM as a zero-shot preference oracle to identify a
+decision-maker’s most preferred item from a large can-
+didate set. The framework begins with a natural lan-
+guage utterance describing the user’s priorities and
+then progressively refines the set of candidates to find
+the single best option, as illustrated in Figure 1. This
+iterative design is crucial for navigating large solution
+spaces while respecting the LLM’s inherent context
+window and query budget limitations.
+
+3.1 Prompting the Preference Oracle
+
+At the core of our framework is the use of an LLM
+to simulate the decision-maker’s preferences in a zero-
+shot manner. We do not fine-tune the LLM; instead,
+all queries follow a structured prompt that encapsu-
+lates the decision context. Each prompt sent to the
+LLM consists of five key components:
+
+1. Persona Context: Assigns a role to the LLM
+(e.g., “You are a University registrar” ).
+
+2. Metric Definitions: Defines the attributes of
+the items (e.g., “Conflicts: students with two ex-
+ams at the same time”).
+
+3. User Priorities: The natural language utterance
+U describing the user’s goals (e.g., “prioritize min-
+imizing back-to-back exams”).
+
+4. Solutions: The candidate item(s) to be evalu-
+ated in the current step.
+
+5. Format Instructions: Specifies the desired out-
+put format (e.g., a JSON object).
+
+This consistent structure provides the LLM with all
+the necessary context to act as the preference oracle
+for a given algorithmic step, whether it is refining a
+utility function or selecting a champion from a batch.
+
+3.2. LISTEN-U: Iterative Utility Refinement
+
+Our first algorithm, LISTEN-Utility (LISTEN-U),
+
+is a parametric approach. It assumes a linear util-
+
+ity function, u(s) = w's™™, defined exclusively over
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+the numerical attributes of an item (denoted s™™).
+The non-numerical attributes provide context for the
+LLM’s reasoning but are not part of this scoring func-
+tion. The algorithm iteratively refines the weight vec-
+tor w to identify the best item, as detailed in Algo-
+rithm 1.
+
+Algorithm 1 LISTEN-U: Iterative Utility Refinement
+
+Require: Solution set S, max iterations T, LLM or-
+acle £, preference utterance U
+1: Initialization:
+2: Construct initial prompt p,; with U and definitions
+of all attributes
+3: Elicit initial weight vector w, for numerical at-
+tributes from L(p1)
+4: For each s; € S, let s7"™" be the vector of its nu-
+merical attributes
+5: Let s?"™ be the version of s?"™ with attributes
+normalized to [0, 1]
+s* { argmaxs,cs w] Seu"
+Iterative Refinement:
+for t+ 2 to T do
+Construct refinement prompt p; using U, wy_1,
+and all attributes (numerical and non-numerical)
+of the unnormalized solution s*
+10:     Elicit refined weight vector w; for the numeri-
+cal attributes from L(p;)
+11:       s* + argmax.,cs w/ smu
+12: end for
+13: return final weight vector wr and solution s*
+
+The algorithm operates in two phases. In the initial-
+ization phase (lines 2-6), the LLM is prompted to
+define an initial weight vector, w,, for the numerical
+attributes based on the user’s utterance. To score the
+items, the numerical attributes of every solution in S
+are first normalized to a common [0, 1] scale. The algo-
+rithm then computes the utility of each item by taking
+the dot product of the weights and the normalized nu-
+merical attribute vector, selecting the highest-scoring
+item as the initial best solution, s*.
+
+The iterative refinement phase (lines 8-12) then
+begins. In each iteration, the prompt for the LLM
+is constructed using the current weight vector wy—1
+alongside the complete, unnormalized description of
+the current best solution, s*, including both its numer-
+ical and non-numerical attributes. Presenting the true
+values and full context is crucial for the LLM to reason
+about real-world trade-offs (e.g., “the price is too high
+for this particular brand”). The LLM is asked to cri-
+tique this solution and propose a refined weight vector,
+w;,. After the LLM returns the updated weights, the
+algorithm once again scores the entire solution set us-
+ing the consistently normalized numerical attributes
+to select the new best solution.
+
+3.3. LISTEN-T: Tournament-Based Selection
+
+Our second algorithm,    LISTEN-Tournament
+(LISTEN-T), is a non-parametric method that
+emulates a tournament to efficiently search the
+solution space. It is designed for a budget of T > 3
+calls to the LLM, as detailed in Algorithm 2.
+
+Algorithm 2 LISTEN-T: Tournament-Based Selec-
+tion
+
+Require: Solution set S, batch size B, max iterations
+T > 3, LLM oracle L, utterance U
+Preliminary Rounds:
+m-—T-1       > Number of preliminary rounds
+Keo          > Initialize set of batch champions
+for 7 + 1 to m do
+C; « Sample(S, B) > Sample a batch of size B
+c; <- LLM-Choose(C;,U) > LLM selects batch
+champion
+end for
+Final Playoff:
+10: s* + LLM-Choose(K, U)
+champions
+11: return solution s*
+
+> Select winner from
+
+The algorithm proceeds in two stages using a total of
+T calls to the LLM. First, in the preliminary rounds
+(lines 2-6), the algorithm conducts m = T — 1 rounds.
+In each round, it samples a batch of B items uniformly
+at random from the full solution set S and prompts
+the LLM to select the single most preferred item from
+that batch. This winning item, or “batch champion,”
+is added to a set of champions, K.
+
+Second, in the final playoff (line 8), the LLM is pre-
+sented with the set of all m champions collected from
+the preliminary rounds and is asked to select the sin-
+gle overall winner. By requiring T' > 3, this structure
+ensures the final playoff is a meaningful comparison
+between at least two distinct batch champions, allow-
+ing the LLM to make a final, decisive trade-off.
+
+4 Experiments
+
+We conduct a series of experiments to evaluate the
+effectiveness of our LISTEN framework in identifying
+a user’s most preferred item from a large set of multi-
+attribute options. We ground our evaluation in three
+realistic decision-making domains: (i) selecting a flight
+itinerary from a commercial flight search engine, (ii)
+choosing a product from an e-commerce website, and
+(iii) scheduling university final exams from a set of
+Pareto-optimal solutions generated by an optimization
+solver.
+
+
+===== PAGE BREAK =====
+
+Jovine, Ye, Bahk, Wang, Shmoys, Frazier
+
+In the following sections, we detail our methodology
+for collecting real human preference data (Section 4.1),
+describe the experimental setup (Section 4.2), outline
+the baseline algorithms for comparison (Section 4.3),
+and define our evaluation metrics (Section 4.4), before
+presenting the main results in Section 4.5.
+
+4.1 Human Preference Data Collection
+
+To establish a ground truth for evaluating our algo-
+rithms, we created a human preference dataset for
+each of our three domains. The data was generated
+by an expert with significant experience in each re-
+spective task, following a two-step protocol. First,
+the expert articulated their decision-making criteria
+in natural language, framed as a detailed directive to
+an assistant. This text serves as the preference utter-
+ance, U, for each problem. Second, the expert meticu-
+lously ranked a subset of items from the full candidate
+set according to these same preferences. This process
+yields a paired dataset comprising a high-level nat-
+ural language goal (U) and a corresponding ground-
+truth ranked list of items. This ranking is designed
+to capture the nuanced, implicit trade-offs an expert
+would make in a real-world scenario, providing a realis-
+tic benchmark for evaluating an algorithm’s alignment
+with complex human preferences. The specifics of each
+dataset are detailed below.
+
+Flights Dataset. We generated a dataset of real-
+istic flight itineraries using the fast_flights Python
+package. For a given origin, destination, and travel
+date, the package returns a collection of available
+flights. Each itinerary is described by primary at-
+tributes such as airline, departure/arrival times, du-
+ration, number of layovers, and price. We augmented
+these with engineered features, such as the ground
+travel distance from the airport to a user’s specified
+final location. For our parametric algorithm (LISTEN-
+U) and relevant baselines requiring numerical inputs,
+categorical attributes like airline were one-hot en-
+coded; for all LLM prompts, these attributes were re-
+tained as their original text to provide full context.
+
+We designed three distinct experimental scenarios to
+test a range of preferences: Flights00: A student fly-
+ing from Chicago, IL to New York, NY; Flights01:
+A student flying from New York, NY to Chicago, IL;
+Flights02: A professor flying from Ithaca, NY to Re-
+ston, VA.
+
+For each scenario, we crafted a unique preference ut-
+terance (U) written in conversational English to emu-
+late a real-world directive. For instance, a preference
+might be articulated as: “If I fly in on Friday, I prefer
+to fly in early enough to get a good night of sleep... I
+prefer a direct flight. I have no preference for airline.”
+
+The full set of preference utterances is provided in the
+appendix.
+
+Shopping Dataset. Our second domain involves an
+e-commerce scenario where a college student is shop-
+ping for headphones. The preference utterance (U)
+for this task specifies a desire for a reliable pair of
+daily-use headphones that are over-ear, wireless, have
+active noise cancellation, a built-in microphone, and
+long battery life.
+
+To generate the dataset, we collected public prod-
+uct information for a range of headphones from Ama-
+zon.com using the Scrapingdog API. Each product is
+an item in our set S, characterized by a mix of at-
+tribute types. Numerical attributes include price,
+average rating, review count, battery life (hours), and
+weight. Categorical attributes include the head-
+phone type (e.g., “Over-ear”), connectivity, noise can-
+cellation mode, and the presence of a microphone. Ad-
+ditionally, each item contains textual fields such as
+the product name, brand, and full description, which
+provide rich context for the LLM’s evaluation.
+
+Final Exam Scheduling Dataset. Our third do-
+main addresses a large-scale university final exam
+scheduling problem. We generated a set S of 5,000
+diverse, Pareto-optimal schedules using the ParEGO
+multi-objective optimization algorithm (Knowles,
+2006), based on the mixed-integer programming meth-
+ods in Ye et al. (2024). The quality of each schedule is
+evaluated against a comprehensive set of metrics to be
+minimized, as detailed in Appendix. The primary met-
+ric is Direct Conflicts, counting students with over-
+lapping exams. A suite of metrics addresses Exam
+Overload by penalizing high-density patterns, such as
+five (Quints), four (Quads), or three (Triples) consec-
+utive exams, as well as near-consecutive patterns (e.g.,
+Four in Five Slots). General student fatigue is mea-
+sured by the total number of Back-to-Back exams,
+which are separated into Evening-to-Morning and all
+Other cases. Finally, the Schedule Spread is mea-
+sured by the Average Time of Last Exam. Together,
+these metrics capture the nuanced trade-offs between
+student workload, fairness, and logistical constraints.
+
+4.2 Experimental Setup
+
+Across all experiments, we use two llms as our pref-
+erence oracle: Llama-3.3-70B-Versatile (Meta AI,
+2024) and Gemini 2.5 Flash-Lite (Comanici et al.,
+2025). To ensure the robustness of our results, all al-
+gorithmic runs are replicated 50 times with different
+random seeds for generation while keeping the prompt
+consistent for each replication.
+
+The ground truth for evaluation is derived from human
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+Table 1: Dataset statistics and the Concordance metric. Concordance measures the alignment of human prefer-
+ences with random linear utilities (a lower value indicates a more difficult problem for linear methods). Values
+for the Concordance column are reported as mean + 2SE (approximating a 95% CI).
+
+Dataset           Concordance Total Items (NV) Ranked Items (m) Ranked Prop. (m/N)
+Exam Scheduling 0.001 + 0.002             4938                       100                          0.020
+Flights00                0.003 + 0.004               903                           20                             0.022
+Flights01                0.005 + 0.005               800                           17                             0.021
+Headphones            0.232 + 0.027                77                           15                             0.195
+Flights02                 0.326 + 0.030                216                            12                              0.056
+
+expert rankings. For each dataset, as it is impractical     m items ranked by a human expert (1,2,...,m). For
+
+to rank the entire set of N items, an expert manually
+ranked a subset of the most relevant items (m < N).
+This ranked list serves as the ground truth for measur-
+ing how well an algorithm’s selected item aligns with
+nuanced human preferences.
+
+4.3. Baseline Methods
+
+We compare the performance of our LISTEN algo-
+rithms against the following two baseline methods.
+
+Uniform Random Selection (baseline/random).
+This non-informative baseline selects an item uni-
+formly at random from the full candidate set S. It
+is used to establish a lower bound on performance and
+quantify the improvement gained by any guided selec-
+tion strategy.
+
+Normalized          Average          Score
+(baseline/z-score-avg). This method consid-
+ers only the numerical attributes of the items. For
+each numerical attribute, it first standardizes the
+values across the entire set S to have zero mean and
+unit variance (i.e., calculates the z-score). The scores
+for attributes that are to be minimized (e.g., price)
+are then negated. The algorithm selects the item
+with the highest average standardized score across
+all numerical attributes. This baseline represents
+a simple, non-learned linear utility function that
+weights all normalized metrics equally and ignores all
+categorical or textual information.
+
+4.4 Evaluation Metrics
+
+We evaluate algorithm performance primarily using
+the rank of the selected item within the human-
+generated ground-truth ranking. We also introduce
+a novel metric to characterize the intrinsic difficulty of
+each dataset for our utility-based method.
+
+Normalized Average Rank. For a given dataset
+with N total items, let the ground-truth list contain
+
+an item s* selected by an algorithm, its rank is de-
+termined as follows: If s* is within this top-m list, its
+rank is its position in that list. If s* is not in the list, it
+is considered unranked. All N —m unranked items are
+assigned a shared average rank of (m+1+ N)/2, rep-
+resenting the mean of the available ranks from m+ 1
+to N. To ensure a consistent scale across datasets
+of different sizes, we normalize this rank by dividing
+by the total number of items, N. The final metric is
+a value in (0, 1], where a lower score indicates better
+performance.
+
+Concordance Metric. To measure how well a
+problem’s preference structure aligns with the linear
+utility assumption of LISTEN-U, we introduce a con-
+cordance metric. This metric, computed for each
+dataset independently of any algorithm, quantifies the
+“difficulty” for a parametric approach. To compute
+it, we generate 1,000 random linear utility functions,
+u(s) =w!s™™, by sampling each weight w; indepen-
+dently from U/[—1, 1]. The concordance is the fraction
+of these random functions for which the optimal item,
+arg max, u(s), is identical to the human expert’s top-
+ranked item. A low concordance value, as seen for the
+exam scheduling dataset in Table 1, suggests that the
+human preference is complex and not easily approxi-
+mated by a simple linear model. Table 1 shows that
+our datasets span a wide range of concordance val-
+ues, indicating varying difficulty for linear preference
+models. This provides a robust testbed for compar-
+ing our parametric (LISTEN-U) and non-parametric
+(LISTEN-T) algorithms.
+
+4.5 Results & Discussions
+
+Our experimental results, presented in Figure 2, high-
+light the effectiveness of both proposed algorithms,
+particularly the surprising power of LISTEN-U’s it-
+erative refinement process even on complex, low-
+concordance problems.
+
+
+===== PAGE BREAK =====
+
+Jovine, Ye, Bahk, Wang, Shmoys, Frazier
+
+°
+a
+3
+
+°
+FS
+&
+
+—b LISTENT
+
+== LISTEN-U
+
+—t- baseline/random
+--£- baseline/zscore-avg
+
+°
+FS
+é
+
+Normalized Average Rank (mean +/- 2SE
+
+15
+Iteration
+
+(a) Exam Scheduling Dataset.
+
+—} LISTENT
+
+-}- LISTEN-U
+
++ baseline/random
++E baseline/zscore-avg
+
+°
+nN
+
+°
+
+Normalized Average Rank (mean +/- 2SE
+°
+w
+
+°
+°
+
+15
+Iteration
+
+(c) Flights02 Dataset.
+
+°
+a
+
+—}+ LUSTEN-T
+
+=. LISTEN-U
+
+—}- baseline/random
+--£- baseline/zscore-avg
+
+Normalized Average Rank (mean +/- 2SE
+°
+w
+
+Iteration
+
+(b) Headphones Dataset.
+
+—} LUSTENT
+
+-#- LUSTEN-U
+
++ baseline/random
+“$+ baseline/zscore-avg
+
+Normali:
+°
+i
+
+15                    20                    25
+Iteration
+
+(d) Flights00 Dataset.
+
+Figure 2: Performance of LISTEN algorithms and baselines on four datasets, showing the Normalized Average
+Rank (lower is better) over 25 iterations. The plots show results using the Llama model; similar results for the
+Gemini model are provided in the appendix. The results for the Flights01 dataset, which are similar to Flights00,
+
+are also in the appendix.
+
+LISTEN-U’s Refinement Excels on Complex
+Problems. The power of iterative refinement is most
+evident in the Exam Scheduling results (Figure 2a).
+Despite this dataset having the lowest concordance
+score, LISTEN-U starts with performance compara-
+ble to the random baseline but progressively refines
+its utility function to find dramatically better so-
+lutions, ultimately achieving the best performance
+of any method. It also performs exceptionally well
+on the high-concordance Headphones and Flights02
+datasets. The algorithm’s only failure is on the
+Flights00 dataset, indicating its performance can be
+context-dependent.
+
+LISTEN-T is a Consistently Strong Performer.
+Our non-parametric algorithm, LISTEN-T, is a robust
+method that consistently outperforms the random and
+z-score baselines across all tested scenarios. While it
+may not always exhibit the same dramatic learning
+curve as LISTEN-U, it reliably and quickly identifies
+high-quality solutions, making it a safe and effective
+choice regardless of the problem’s underlying prefer-
+ence structure.
+
+Discussion on Guided Utility Generation.
+The surprising success of LISTEN-U on the low-
+concordance Exam Scheduling task suggests that it-
+erative refinement can overcome a poor initial linear
+approximation. Even if a human’s preference is glob-
+
+ally non-linear, the LLM’s ability to critique a specific
+solution and suggest local improvements to the util-
+ity weights can effectively guide the search toward a
+high-quality outcome. This implies that the success
+of a parametric approach like LISTEN-U may depend
+not just on the problem’s concordance, but also on the
+ability of the natural language utterance to provide ac-
+tionable, iterative feedback to the LLM.
+
+4.6 Validating the Concordance Metric
+
+To directly test the relationship between preference
+complexity and our Concordance metric, we conducted
+a targeted experiment on the Headphones dataset.
+We created a more challenging version of the utter-
+ance, Headphones-Strict, by adding several hard
+constraints (e.g., a strict budget and required cate-
+gorical features) to the original Headphones-General
+prompt. This change intentionally introduced non-
+linearities into the preference structure, causing the
+Concordance score to drop sharply from 0.232 to
+0.053. This drop is expected, as linear utility func-
+tions struggle to model threshold-based requirements.
+
+As predicted by this change in concordance, Figure 3
+shows a significant degradation in performance for
+LISTEN-U on the Headphones-Strict version. In
+contrast, the non-parametric LISTEN-T maintained
+its robust performance across both prompts. This re-
+sult validates that our Concordance metric is an ef-
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+fective predictor for the performance of a parametric
+approach like LISTEN-U.
+
+;_ Headphones High Concordance:
+— > LISTEN-T
+
+Headphones High Concordance:
+
+72> LISTEN-U
+
+z,. Headphones Low Concordance:
+Po LISTEN-T
+
+;,, Headphones Low Concordance:
+LISTEN-U
+
+Normalized Average Rank (mean +/- 2SE)
+& 8
+ge
+FT
+oo
+S
+
+Iteration
+
+Figure 3: Performance of LISTEN-U and LISTEN-T
+on the Headphones-General prompt and the modified
+Headphones-Strict prompt, which has lower concor-
+dance.
+
+4.7 Ablation Study: Impact of the
+Preference Utterance
+
+To isolate the value of the user’s natural language pref-
+erence utterance (U), we conducted an ablation study
+comparing performance with a full, preference-guided
+prompt against a base prompt containing only the per-
+sona and metric definitions. The results in Figure 4
+show that the benefit of the detailed utterance depends
+on whether the preferences are intuitive or subjective.
+
+The contrast is most pronounced between the two
+datasets. For the Headphones task, where prefer-
+ences are highly subjective, the utterance provides a
+substantial performance improvement, particularly for
+LISTEN-U. Conversely, for the Exam Scheduling task,
+where the goals (e.g., minimizing conflicts) are largely
+implied by the metrics themselves, the utterance yields
+negligible benefit. Crucially, we found that includ-
+ing the preference utterance never degraded perfor-
+mance. This suggests that providing more specific,
+user-aligned context to the LLM is consistently bene-
+ficial or, at worst, neutral.
+
+5 Conclusion
+
+In this work, we introduced LISTEN, a framework
+that leverages large language models as zero-shot
+preference oracles for multi-objective selection prob-
+lems. We proposed two algorithms: a robust, non-
+parametric tournament method (LISTEN-T) and a
+parametric utility-refinement method (LISTEN-U).
+Our experiments demonstrate that LLMs can suc-
+cessfully translate high-level natural language goals
+into high-quality selections from large, complex sets
+of items. Furthermore, we introduced a novel concor-
+dance metric that effectively predicts when the para-
+
+—}- LISTEN-T
+—§- LISTEN-T@BASE
+—-- LISTEN-U
+++$+ LISTEN-U@BASE
+
+Normalized Average Rank (mean +/- 2SE
+&
+&
+
+Iteration
+
+(a) Exam Scheduling Ablations.
+
+= LISTEN-T
++ LISTEN-T@BASE
++= LISTEN-U
+«$+ LISTEN-U@BASE
+
+°
+
+Normalized Average Rank (mean +/- 2SE
+°
+w
+
+Iteration
+
+(b) Headphones Ablations.
+
+Figure 4: Ablation study evaluating the impact of pref-
+erence utterance. Performance using the preference-
+guided prompt is compared to a base prompt contain-
+ing only the persona and metric definitions. (Llama
+results; see Appendix for Gemini results).
+
+metric approach is likely to succeed or fail based on
+the problem’s preference structure.
+
+That said, our study has several limitations that
+present clear avenues for future work.
+
+Subjectivity of Human Rankings. The ground-
+truth rankings used in our evaluation reflect the pref-
+erences of a single expert for each domain and may not
+generalize broadly. Future work could explore meth-
+ods for aggregating preferences from multiple users.
+
+Generalization Across Domains. While we eval-
+uated LISTEN on three distinct domains, its perfor-
+mance on a wider range of problems, such as apart-
+ment hunting, healthcare scheduling, or logistics plan-
+ning, remains an open question. Expanding to more
+varied and larger-scale datasets would further validate
+our findings.
+
+Richer Utility Representations. The LISTEN-U
+algorithm’s reliance on a linear utility function is a key
+limitation for problems with highly non-linear prefer-
+ences. Future work should explore more expressive
+utility representations (e.g., non-linear or piecewise
+functions) and hybrid methods that combine LLM
+guidance with structured optimization.
+
+
+===== PAGE BREAK =====
+
+Jovine, Ye, Bahk, Wang, Shmoys, Frazier
+
+Acknowledgements
+
+This research is supported in part by Moebius Solu-
+tions, Inc.
+
+References
+
+AhmadiTeshnizi, A., Gao, W., and Udell, M.
+(2023). Optimus: Optimization modeling using mip
+solvers and large language models. arXiv preprint
+arXiv:2310.06116.
+
+Austin, D. E., Korikov, A., Toroghi, A., and Sanner,
+S. (2024). Bayesian optimization with llm-based ac-
+quisition functions for natural language preference
+elicitation. arXiv preprint arXiv:2405.00981.
+
+Bang, S. and Song, H. (2025). Llm-based user pro-
+file management for recommender system. arXiv
+preprint arXiv:2502. 14541.
+
+Branke, J. (2008). Multiobjective optimization: In-
+teractive and evolutionary approaches, volume 5252.
+Springer Science & Business Media.
+
+Comanici, G., Bieber, E., Schaekermann, M., Pasu-
+pat, I., Sachdeva, N., Dhillon, I., Blistein, M., Ram,
+O., Zhang, D., Rosen, E., Marris, L., Petulla, S.,
+Gaffney, C., Aharoni, A., Lintz, N., Pais, T. C., Ja-
+cobsson, H., Szpektor, I., Jiang, N.-J., Haridasan,
+K., and (and many authors), . (2025). Gemini 2.5:
+Pushing the frontier with advanced reasoning, mul-
+timodality, long context, and next generation agen-
+tic capabilities.
+
+Farzane, K. and Alireza B, D. (2022). A review and
+evaluation of multi and many-objective optimiza-
+tion: Methods and algorithms. Global Journal of
+Ecology, 7(2):104-119.
+
+Gao, T., Xu, R., Wang, W., and Chen, D. (2025). Take
+caution in using Ilms as human surrogates: Scylla ex
+machina. arXiv preprint arXiv:2410.19599.
+
+Gunantara, N. (2018). A review of multi-objective op-
+timization: Methods and its applications. Cogent
+Engineering, 5(1):1502242.
+
+Huang, C., Tang, Z., Hu, S., Jiang, R., Zheng, X.,
+Ge, D., Wang, B., and Wang, Z. (2025). Orlm: A
+customizable framework in training large models for
+automated optimization modeling. Operations Re-
+search.
+
+Huber, F., Gonzalez, S. R., and Astudillo, R. (2025).
+Bayesian preference elicitation for decision sup-
+port in multiobjective optimization. arXiv preprint
+arX1v:2507. 16999.
+
+Klamkin, M., Deza, A., Cheng, S., Zhao, H., and
+Van Hentenryck, P. (2025). Dualschool: How re-
+liable are llms for optimization education? arXiv
+preprint arXiv:2505.21775.
+
+Knowles, J. D. (2006). Parego: A hybrid algorithm
+with on-line landscape approximation for expensive
+multiobjective optimization problems. [EEE Trans-
+actions on Evolutionary Computation, 10(1):50-66.
+
+Lawless, C., Li, Y., Wikum, A., Udell, M., and Viter-
+cik, E. (2025). Llms for cold-start cutting plane sep-
+arator configuration. In International Conference
+on the Integration of Constraint Programming, Ar-
+tificial Intelligence, and Operations Research, pages
+51-69. Springer.
+
+Lawless, C., Schoeffer, J., Le, L., Rowan, K., Sen,
+S., Hill, C. S., Suh, J., and Sarrafzadeh, B.
+(2023). “I Want It That Way”: Enabling Interac-
+tive Decision Support Using Large Language Mod-
+els and Constraint Programming. arXiv preprint
+arXiv:2812.06908. Submitted December 12, 2023;
+revised October 1, 2024.
+
+Li, F. et al. (2025). Aligning with logic: Measuring,
+evaluating and improving logical preference consis-
+tency. In Proceedings of the 42nd International Con-
+ference on Machine Learning (ICML). Poster.
+
+Meta AI (2024). The llama 3 herd of models.
+
+Obayashi, S., Jeong, S., Chiba, K., and Morino, H.
+(2007). Multi-objective design exploration and its
+application to regional-jet wing design. Transactions
+of the Japan Society for Aeronautical and Space Sci-
+ences, 50(167):1-8.
+
+Okeukwu-Ogbonnaya, A., Amatapu, R., Bergtold, J.,
+and Amariucai, G. (2025). Llm-based community
+surveys for operational decision making in inter-
+connected utility infrastructures. arXiv preprint
+arX1v:2507.138577.
+
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wain-
+wright, C., Mishkin, P., Zhang, C., Agarwal, S.,
+Slama, K., Ray, A., et al. (2022). Training language
+models to follow instructions with human feedback.
+Advances in neural information processing systems,
+
+39:27730-27744.
+
+Ozaki, R., Ishikawa, K., Kanzaki, Y., Suzuki, S.,
+Takeno, S., Takeuchi, I, and Karasuyama, M.
+(2024). Multi-objective bayesian optimization with
+active preference learning. In Proceedings of the
+Thirty-Eighth AAAI Conference on Artificial In-
+telligence, pages 14490-14498, Vancouver, Canada.
+AAAT Press.
+
+Ramamonjison, R., Yu, T., Li, R., Li, H., Carenini,
+G., Ghaddar, B., He, S., Mostajabdaveh, M.,
+Banitalebi-Dehkordi, A., Zhou, Z., et al. (2023).
+Nl4opt competition: Formulating optimization
+problems based on their natural language descrip-
+tions. In NeurIPS 2022 competition track, pages
+189-203. PMLR.
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+Schwartz, B. (2015). The paradox of choice. Posi-
+tive psychology in practice: Promoting human flour-
+ishing in work, health, education, and everyday life,
+pages 121-138.
+
+Sharma, S. and Kumar, V. (2022). A comprehensive
+review on multi-objective optimization techniques:
+Past, present and future. Archives of Computational
+Methods in Engineering, 29(7):5605-5633.
+
+Wang, X., Jin, Y., Schmitt, S., and Olhofer, M. (2022).
+Recent advances in bayesian optimization. arXiv
+preprint arXiv:2206.03301.
+
+Xiao, Z., Zhang, D., Wu, Y., Xu, L., Wang, Y. J.,
+Han, X., Fu, X., Zhong, T., Zeng, J., Song, M., et al.
+(2023). Chain-of-experts: When Ilms meet complex
+operations research problems. In The twelfth inter-
+national conference on learning representations.
+
+Yang, C., Wang, X., Lu, Y., Liu, H., Le, Q. V., Zhou,
+D., and Chen, X. (2023). Large language models as
+optimizers. In The Twelfth International Conference
+on Learning Representations.
+
+Ye, T., Jovine, A., van Osselaer, W., Zhu, Q., and
+Shmoys, D. B. (2024). Cornell university uses inte-
+ger programming to optimize final exam scheduling.
+arXiv preprint arXiv:2409.04959.
+
+Zhang, H., Zhu, Q., and Dou, Z. (2025). Enhanc-
+ing reranking for recommendation with llms through
+user preference retrieval. Proceedings of the 31st In-
+ternational Conference on Computational Linguis-
+tics, pages 658-671.
+
+Zheng, L., Chiang, W.-L., Sheng, Y., Zhuang, S., Wu,
+Z., Zhuang, Y., Lin, Z., Li, Z., Li, D., Xing, E.,
+et al. (2023). Judging Ilm-as-a-judge with mt-bench
+and chatbot arena. Advances in neural information
+processing systems, 36:46595—46623.
+
+
+===== PAGE BREAK =====
+
+A Metrics
+
+This section details the metrics used across the three evaluation scenarios. The specific objectives for the final
+exam scheduling problem, the flight dataset, and the headphones dataset are documented in Table 2, Table 3,
+and Table 4, respectively.
+
+Table 2: Final Exam Scheduling Conflict Metrics
+
+Metric
+
+Description
+
+Conflicts
+
+Quints
+
+Quads
+
+Four in Five Slots
+Triple in 24h (no gaps)
+
+Triple in Same Day (no gaps)
+
+Triples
+Three in Four Slots
+
+Evening/Morning B2Bs
+Other B2Bs
+Back-to-backs
+
+Two in Three Slots
+
+Average Time of Last Exam
+
+Instances of a student having two or more exams in the same time
+slot.
+
+Instances of a student having five exams in consecutive time slots.
+Instances of a student having four exams in consecutive time slots.
+Instances of a student having four exams within five consecutive
+time slots.
+
+Instances of a student having three back-to-back exams in a 24-hour
+period.
+
+Instances of a student having three back-to-back exams on the same
+day.
+
+Triple in 24h (no gaps) + Triple in Same Day (no gaps).
+
+Instances of a student having three exams within four consecutive
+time slots.
+
+Instances of a student having an exam in the last slot of one day
+and the first slot of the next day.
+
+All other instances of a student having exams in adjacent time slots.
+Evening/Morning B2Bs + Other B2Bs.
+
+Instances of a student having two exams within three consecutive
+time slots.
+
+Average time slot in which students take their last exams.
+
+Table 3: Flights Metrics
+
+Metric               Description
+
+Name                Name of airline operating the flight.
+Origin                 Origin airport.
+
+Destination           Destination airport.
+
+Departure Time
+Arrival Time
+Duration
+
+Stops
+
+Price
+dis_from_origin
+
+Time of departure from origin airport.
+
+Time of arrival at destination airport.
+
+How long the flight is.
+
+Number of layover stops.
+
+Cost of the flight.
+
+Distance of origin airport from where the customer prefers (lower is
+
+better).
+
+dis_from_dest
+
+Distance of arrival airport from where the customer prfers (lower is
+
+better).
+
+departure_seconds
+arrival_seconds
+duration_min
+
+Time of departure since a fixed date in seconds.
+Time of arrival since a fixed date in seconds.
+Duration of total flight in minutes (lower is better).
+
+B- Evaluations Using Estimated Utility Functions
+
+In the main paper, we presented Normalized Average Rank, an evaluation methodology that used human rank-
+ings of items to assess the quality of LISTEN algorithms. This methodology is advantageous because it uses real
+human rankings and it does not make parametric assumptions about human preferences. It also has disadvan-
+tages, however. Not all items are ranked due to dataset size. Additionally, if an item at rank k is much better
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+Table 4: Headphones Metrics
+
+Metric              Description
+
+Product Name        Name of the headphone model.
+
+Brand               Manufacturer.
+
+Price                Cost in U.S. dollars.
+
+Type                Headphone design (e.g., over-ear, in-ear, on-ear).
+Connectivity         Connection type (wired vs. wireless).
+
+Noise Cancellation
+Battery Life
+Bluetooth Version
+Driver Size
+Weight
+
+Water Resistance
+
+Microphone
+Review Rating
+Review Count
+Description
+
+Noise reduction method (active vs. passive).
+
+Battery duration, measured in hours.
+
+Bluetooth version, with higher values indicating newer technology.
+Diameter of the audio driver, measured in millimeters.
+
+Physical weight of the headphones, measured in ounces.
+Protection against dust and water, described qualitatively and via
+the IPXX rating system (higher values indicate stronger resistance).
+Presence of built-in microphone.
+
+Average customer rating score.
+
+Total number of customer reviews.
+
+Marketing text describing the product.
+
+than the one at k+1, the algorithm should be rewarded more for choosing it. Yet the current methodology gives
+equal credit regardless of how large or small the quality gap is. Also, humans may make errors and rank one
+item over another despite preferring it less.
+
+To mitigate these disadvantages, we introduce a complementary methodology for evaluating the quality of a
+LISTEN algorithm. This methodology fits a linear utility function to the human rankings and credits each
+LISTEN algorithm with the utility of the item selected. Compared to Normalized Average Rank, this has the
+disadvantage of making parametric assumptions about the nature of the human’s preferences but the advantage
+of ranking all items, providing credit proportional to utility rather than rank, and providing robustness to
+occasional ranking errors.
+
+To explain this methodology, we first describe the algorithm for fitting the linear utility function from a human
+ranking (Section B.1), then explain how the utility function is used to compute a score for an algorithm called the
+Average Utility Score (Section B.2), and finally present results comparing the LISTEN algorithms and baselines
+using the Average Utility Score metric (Section B.3). In that section, we discuss similarities and differences to
+trends in Normalized Average Rank seen in the main paper.
+
+B.1 Algorithm for Learning the Utility Weights
+
+The goal of this procedure is to learn a utility function that assigns a numerical score to each item, reflecting its
+desirability according to human preferences. To achieve this, we fit a linear utility model u(s) = w's™™ to the
+human-provided rank data used to compute Normalized Average Rank, representing each item s with a vector
+of numerical attributes s"™"™ and letting W be a vector of weights to be fit. Non-numerical attributes (such as
+“brand” in the shopping dataset) are not included in s™"™. We use maximum likelihood estimation under the
+assumption that, for any pair of items s; and s,;, the probability that a human prefers s; over s; is given by
+P(s; > 8;) = Logistic(u(s;) — u(sj)). This approach allows us to learn the weight vector W in u such that the
+predicted pairwise preferences align as closely as possible with observed human rankings.
+
+We implement the following algorithm for non-exam datasets using the scikit-learn Python package. We
+randomly generate a total of N = 10,000 pairwise comparisons (s;,s;), split evenly into 5,000 ranked-vs-ranked
+comparisons (comparisons between two items that were both ranked by the human), where the item with the
+better human rank is chosen with probability gq = 0.95; and 5,000 ranked-vs-unranked comparisons, where the
+ranked item is always chosen.
+
+
+===== PAGE BREAK =====
+
+Jovine, Ye, Bahk, Wang, Shmoys, Frazier
+
+Algorithm 3 Learning Utility Weights via Logistic Regression
+
+Require: Ranked solution set S, number of simulations N, probability q
+1: Initialize empty lists X, y
+2: for i+ 1 to N/2 do                                                                    > Ranked-vs-ranked
+3:     Randomly select two items s4,sg € S uniformly with replacement
+
+Identify spetter <— lower-ranked item, Sworse <— higher-ranked item, breaking ties at random
+
+.  num _— gnum
+Xi — Shetter ~ Sworse
+
+4
+
+5
+
+6:     With probability q, set y; = 1; else y; = 0
+
+7:     Append x;,y; to X,y
+
+8: end for
+
+9: for i+ 1 to N/2 do                                                                 > Ranked-vs-unranked
+10:     Randomly select s4 € S and sg ¢ S, uniformly with replacement
+
+11:     x, — sym — sim
+
+12:     yi=l                                                                           > Ranked always preferred
+13:     Append x;,y; to X,y
+
+14: end for
+
+15: Fit logistic regression: P(y; = 1) = Logistic(a + w!x;)
+
+16: Return learned weights w
+
+The algorithm operates in two phases. In the pairwise simulation phase, we first generate comparisons
+between items. For ranked items, two solutions are randomly selected, and the one with the better human rank
+is labeled as Shetter. A binary label y; is set to indicate whether the “better” item is chosen, and a feature
+difference vector x; = spur, — Sworse is computed. Next, for ranked-versus-unranked comparisons, a ranked item
+s4 and an unranked item sg are randomly selected. The ranked item is always treated as “better,” and the
+corresponding x; vector is constructed with y; = 1. These simulations produce a large dataset of (x;,y;) pairs
+
+that reflect human preferences while introducing controlled stochasticity for ranked items.
+
+In the logistic regression phase, the algorithm fits a model to the simulated data. Specifically, the probability
+of choosing the “better” item is modeled as P(y; = 1) = Logistic(a + w'x;), where W is the vector of learned
+metric weights and a is the intercept, typically close to zero. Once trained, this weight vector w is used to
+compute the utility of each item in the dataset, including previously unranked items, as u(s) = w!s™"™. This
+allows all items to be ranked according to learned human preferences, providing a continuous, utility-based
+ordering that reflects the observed rankings.
+
+In all datasets except the exam dataset, the human-ranked items are strictly ordered. Thus, there are no ties
+in the pairwise simulation phase. In the exam dataset, however, due to its size and the effort required to rank
+items, the top K = 100 items are considered to have the same rank. Thus, in the exam dataset, the resulting
+utility function predicts the likelihood that a given item belongs to the top tier, rather than its relative position
+within the ranked set.
+
+B.2 Average Utility Score
+
+In the previous section, we trained a model to predict the probability that one item is preferred over another
+based on its features. This process yields a hidden weight vector, which we use to assign a utility score to every
+item. At each iteration of an algorithm, we compute the utility of the item it selects. We then average this across
+replications to obtain the Average Utility Score. This metric quantifies the quality of each algorithm, allowing us
+to distinguish between algorithms that select mediocre (unranked) items from those that select poor unranked
+items. It thus provides a continuous, utility-based ranking of algorithms.
+
+B.3 Utility Plots (Llama)
+
+This section discusses results presented in Figure 5 and their similarities and differences to results in the main
+paper’s Figure 2. Here, for brevity, we refer to Normalized Average Rank as NAR and Average Utility Score as
+AUS.
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+5.0
+3            1      /
+Ez                                                                         ~~ Hidden ground truth max                         = 4a    i         I   . rN                 |                 |        ~  Hidden ground truth max
+£0 sti Ly [EEE                       Bl ipberiaptyropetytirph: (ESS
+3-002 Ty  aa  MPT  I  f  ine                       Bac     !      |  cand   ik   \|
+:                                               o) |            |                |
+B -0.04                                                                                                                            338
+=                                                                         =
+=                                                                                                                                          X36
+0       5      10      15      20      25                                    0       5              15      20      25
+Iteration                                                                    Iteration
+(a) Exam Scheduling Dataset.                                          (b) Headphones Dataset.
+
+aq 02                                  sar                                 a °°                   .
+4                                 a   .  * * Ce oe et oe eo oe oe oe -
+H                                                                          H     RL                                  i
+é        _ Hidde ground tua                  é Hen ground mith ax
+5-02       |    |        | | | |        h           <i LISTEN-U                          3-04    |                                        Fe LSTEN-U
+5       | . |  EN | |  vininan     AA      —E- baseline/random                  5      4         | | |        |  | |    1]  —¥- baseline/random
+:                    |                 ri                                 :        ATT TI        I          1
+3                                        |                                 3
+2 -0.6                                                              |                                                       2 -0.8
+
+0               5              10                             20             25                                                                               0               5
+
+15                                                                                                                                                                                                                            15
+Iteration                                                                                                                                                    Iteration
+
+(c) Flights02 Dataset.                                            (d) Flights00 Dataset.
+
+°
+
+I
+°
+
+~~ Hidden ground truth max
+—}- LISTEN-T
+
+=&- LISTEN-U
+
+—}- baseline/random
+
+--$+ baseline/zscore-avg
+
+q
+N
+3
+
+1
+w
+6
+
+L
+ES
+6
+
+l
+wa
+3
+
+Hidden Ground Truth (mean + 2SE)
+
+1s
+Iteration
+
+(e) Flights01 Dataset.
+
+Figure 5: Performance of LISTEN algorithms and baselines on five datasets, showing the Average Utility Score
+(higher is better) over 25 iterations. The plots show results using the Llama model.
+
+High-Concordance Datasets. We first discuss results from Figure 5 for Flights02 and the Headphones
+dataset, which exhibited the highest concordance. These are the datasets for which human preferences align best
+with the linear utility model and where we most expect AUS and NAR to agree. In line with this expectation,
+the order and curves of the algorithms remain consistent when ranking performance by NAR versus AUS.
+
+Low-Concordance Datasets. In contrast to high-concordance datasets, Figure 5 focuses on the Exam,
+Flights00, and FlightsO1 datasets, which exhibit the lowest concordance. In these cases, human preferences
+do not align well with the linear utility assumption, and thus the AUS and NAR metrics are expected to deviate.
+In Figure 5, for the Exam dataset, LISTEN-U selects solutions that yield little improvement in utility, even
+though their ranks consistently decrease, as shown in Figure 2 (main text). Similarly, for Flights00, LISTEN-
+U attains higher average utility scores than LISTEN-T, but in the main paper, LISTEN-U repeatedly selects
+unranked solutions, only marginally outperforming the baselines and performing worse than LISTEN-T. The
+FlightsO1 dataset exhibits a similar pattern: LISTEN-U achieves the highest average utility but remains the
+lowest-performing algorithm according to human rankings. The differences between Figure 2 (main text) and
+Figure 5 arise from low concordance. When human preferences are poorly captured by linear utility models,
+performance metrics derived from these models may diverge from those based directly on human preferences. In
+this sense, the average utility score serves as a useful complementary metric for datasets with low concordance.
+
+
+===== PAGE BREAK =====
+
+Jovine, Ye, Bahk, Wang, Shmoys, Frazier
+
+C Additional Results on Flights01
+
+This section presents additional data, in Figure 6, assessing algorithm performance using Normalized Average
+Rank on an example problem, Flights01, that did not fit in the main paper. This example problem is similar to
+an example problem that did appear in the main paper, Flights00. Both Flights00 and Flights01 are single-leg
+flights and they share similar prompt structures with minor differences in preference.
+
+By comparing Figure 6 here and Figure 2d (main text), we see that the experimental results are similar. LISTEN-
+T outperforms the other algorithms in both problems. Also, LISTEN-T improves significantly at 25 iterations,
+whereas the other three algorithms hover around 0.5. One small difference between the results of Flights00 and
+Flights01 is that Flights00 in the main paper’s Figure 2d shows a slight difference between the performance of
+LISTEN-U and z-score average, but Flights 01 as shown in Figure 6 does not.
+
+I
+
++
+¥
+
+z
+
+°
+B
+,       5
+
+— LISTEN-T
+
+=F LISTEN-U
+
++ baseline/random
+«$+ baseline/zscore-avg
+
+°
+N
+
+°
+zp
+
+Normalized Average Rank (mean +/- 2SE
+°
+w
+
+0                  5                 10                 15                 20                25
+Iteration
+
+Figure 6: Performance of LISTEN algorithms and baselines on Flights01 dataset, showing the Normalized
+Average Rank (lower is better) over 25 iterations. The plots show results using the Llama model.
+
+D_ Additional Ablation Results
+
+We showed in Figure 4 (main text) that preference utterance never degraded performance in the headphones and
+exam datasets. In Figure 7 below, which shows ablations for all the flight datasets, we see that incorporating
+guidance through human preferences significantly improves the performance of LISTEN-T and marginally im-
+proves LISTEN-U. The difference in performance gains might be due to the fact that LISTEN-U already benefits
+from its built-in, iterative, utility refinement guidance. Nevertheless, Figure 7 shows that preference utterance
+always beneficial, or at worst, neutral, which agrees with the main paper.
+
+E Results from Gemini-2.5-flash-lite
+
+As mentioned in the main paper, experimental runs were also completed using Gemini 2.5 Flash-Lite. This
+sections details the results from those runs that were not included earlier.
+
+E.1 Human Rank Plots (Gemini)
+
+This section presents the plots obtained from the same experimental setup as Figure 2 (main text), but run using
+Gemini instead.
+
+The first plot of Figure 8 shows very similar results to the results in Figure 2a, with LISTEN-U outperforming
+the other methods significantly. Plot 8b also behaves similarly to Plot 2b, with LISTEN-U outperforming the
+rest of the methods. The other three algorithms also follow a similar trend to the ones run by Llama, with
+LISTEN-T outperforming both baseline algorithms. Plot 8c shows a very similar trend to Plot 2c, with the main
+difference being that the z-score average in Gemini outperforms LISTEN-U slightly, but LISTEN-U outperforms
+z-score average in the Llama runs. Plot 8d is also fairly similar to Plot 2d, with LISTEN-T outperforming the
+other algorithms; however, there is no difference in performance in z-score average and LISTEN-U when run
+by Gemini, but there is a difference when run by Llama (LISTEN-U is slightly more effective). It is worth
+pointing out that in the Gemini-runs, z-score average and LISTEN-U seemed to do equally poorly, whereas in
+the Llama-runs, LISTEN-U very slightly beat z-score average. This could be chalked up to differences in LLM,
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+°
+ES
+
+°
+w
+
+—} LISTENT
+— + LISTEN-T@BASE                           0.35
+p+ LISTEN-U
+--}- LISTEN-U@BASE                           0.30
+
+—} LISTENT
+—%- LISTEN-T@BASE
+—)- LISTEN-U
+«$+ LISTEN-U@BASE
+
+wi
+i= =
+eer
+Av
+°°
+yo
+Sou
+
+°
+
+°
+°
+
+Normalized Average Rank (mean +/- 2SE
+°
+nu
+
+20                     25
+
+15                                                                                                                                                                                                                             15
+Iteration                                                                                                                                                    Iteration
+
+(a) Flights02 Ablations.                                          (b) Flights00 Ablations.
+
+°
+a
+zt
+oe
+
+Ae
+er
+i ae
+Xt
+ae
+am
+
+|          — LISTENT
+—&- LISTEN-T@BASE
+p+ LISTEN-U
+«d+ LISTEN-U@BASE
+
+°
+nN
+
+°
+
+Normalized Average Rank (mean +/- 2SE
+°
+w
+
+0                        5                       10                      15                      20                      25
+Iteration
+
+(c) Flights01 Ablations.
+
+Figure 7: Ablation study evaluating the impact of preference utterance. Performance using the preference-guided
+prompt is compared to a base prompt containing only the persona and metric definitions. The plots show the
+Normalized Average Rank (lower is better) over 25 iterations, using the Llama model.
+
+but could also be a result of the Llama-based run being able to find just one ranked solution. Since the line stays
+flat, we know that other than one (or a small number) of ranked solutions, the algorithm was not able to find
+more solutions that were deemed “ideal” by the human. This suggests that Gemini and Llama result in very
+similar outcomes with the same prompt given. Lastly, the results in 8e are fairly similar to 8d, with LISTEN-T
+being the best performing algorithm.
+
+E.2 Utility Plots (Gemini)
+
+In this section, we describe similarities and differences between Gemini NAR in Figure 8 and Gemini AUS in
+Figure 9, showing that Gemini preserves the key observation (made with Llama in Section B.3) that ranking-
+based and utility-based performance tend to correspond only in high-concordance datasets. Then, we describe
+the similarities and differences between the utility plots made with Llama in Figure 5 and utility plots made
+with Gemini in Figure 9.
+
+First, we evaluate algorithm performance on high-concordance datasets, namely Flights02 and Headphones. In
+Figure 9, the order of algorithms based on their final iteration utility is LISTEN-U, LISTEN-T, followed by the
+two baselines—random and zscore-avg. This same ordering appears in Figure 8. As expected, high-concordance
+datasets preserve the ranking of algorithms, and the performance curves align closely across both figures for
+both datasets. Conversely, the ordering is not preserved for low-concordance datasets such as Exam, Flights00,
+and Flights01. For example, in Figure 8 for Exam, LISTEN-U outperforms LISTEN-T, whereas in Figure 9
+it performs worse. For both Flights00 and Flights01, LISTEN-T ranks highest according to human-preference
+evaluations but performs worse than the zscore-avg baseline when measured by utility. Moreover, the performance
+curves of the algorithms align less closely than in the high-concordance case.
+
+The utility plots generated with Llama in Figure 5 and with Gemini in Figure 9 are largely similar, with only
+two minor differences. First, for FlightsO1, LISTEN-U performs noticeably better with Llama than with Gemini.
+Second, in Flights00, LISTEN-U outperforms LISTEN-T when using Llama, but underperforms relative to
+LISTEN-T with Gemini.
+
+
+===== PAGE BREAK =====
+
+Jovine, Ye, Bahk, Wang, Shmoys, Frazier
+
+E.3 Ablation Plots (Gemini)
+
+This section includes ablation plots for the experiments run with Gemini.
+
+It is interesting to highlight that when using Gemini, despite the relative non-subjectivity of the exam scheduling
+metrics, LISTEN-U (with preferences) does perform better than both LISTEN-Ts and LISTEN-U@BASE (Figure
+10a). When run with Llama, the LISTEN-U@BASE performed similarly to LISTEN-U. In this case, LISTEN-
+U@BASE does not perform as well. This could be chalked up to the differences in the LLMs; however, this goes
+to show that our previous claim that preferences only help improve the results holds true. On the other hand,
+as seen in Figure 10b, the headphones data set performs quite similarly whether run with Gemini or Llama.
+Similar to the Llama results, LISTEN-U@BASE is the worst by far, and LISTEN-U slightly outperforms the
+other two algorithms. The prompts with subjective preferences do better with these preferences laid out in
+natural language. This further supports the idea that including preferences can only help improve the results
+and will not degrade them.
+
+Now, Figure 10c demonstrates a similar trend as Figure 7a, which was run on Llama. Figure 10d also shows a
+relatively similar trend to Figure 7b (run on Llama); however, the Gemini-based LISTEN-T (both BASE and
+non-BASE) performs slightly better than in Llama. From this run and previous results, we can see that there is
+often a slight difference between the effectiveness of different LLMs. Even when given the same prompt, Gemini
+seemed to performing slightly better than its Llama counterpart. Lastly, Figure 10e closely resembles Figure 7c
+as well, with LISTEN-T following the same trend as observed in Llama.
+
+w                                                                                                                          w
+un                                                                                                                          un
+.                                                                                                                                                   Sos
+$0.50                                                                                                                                                        Ps
+8                                                                                                                                                   5 0.5
+a                                                                                                                           a
+Eos                                                                                                                                                        E
+¢                                                                    <= LSTENT                               04                                                                  <= LSTENT
+2                                                     $+ LISTEN-U                        Fe                                                     <2. LISTEN-U
+0 24°                                                                            —}- baseline/random                             003                                                                             —}- baseline/random
+e                                                                            «$+ baseline/zscore-avg                         e                                                                            «G+ baseline/zscore-avg
+$ 0.35                                                                                                                                     $0.2
+<                                                                                                                          <
+ss                                                                                                                          ss
+S                                                                                                                                          Bot
+3 0.30                                                                                                                                              3
+E                                                                                                                                                   Eoo
+o                                                                                                                           o
+2     0            5                                      20           25                                                  2 0             5             0                         20            25
+Iteration                                                                                                                  Iteration
+(a) Exam Scheduling Dataset (Gemini).                                                       (b) Headphones Dataset (Gemini).
+uw                                                                                                                                                             wos
+Sas) EARLIER  LAAN ARP AN ALL LA        in                          |
+:            ry       ry    y       prt       V   Try TT                                                   +          pee Cen erenen ae renee
+&                                     I       |                                      gor   if  i         |]   \| iF
+£04                                                                                                                                  z         | J
+<                                      |              = LSTENT                               < 0.45     \                                     —— LusTENT
+803                                                              = b+ LISTEN-U                                                                                                <i LISTEN-U
+9                                                    —¥- baseline/random                   A             |                                       {+ baseline/random
+& 05                                                                  “-£-_baseline/zscore-avg                       F 0.40                                                                 “$+ baseline/zscore-avg
+Z                                                                                                                          :                                |
+i 01                                                                                                                                  3 0.35             |
+£                                                                                                                          3
+2 0             5                                       20            25                                                  2     0            5            10           15           20           25
+Iteration                                                                                                                   Iteration
+(c) Flights02 Dataset (Gemini).                                                                 (d) Flights00 Dataset (Gemini).
+
+W055
+
+N
+
+¥¢ 0.50
+
+c
+
+oC
+
+0.45
+
+—
+
+x
+Z 0.40
+
+— LISTEN-T
+
+=&- LISTEN-U
+
+—}- baseline/random
+«$+ baseline/zscore-avg
+
+je Ra
+°
+w
+&
+
+°
+iw
+cS)
+
+°
+N
+3
+
+Normalized Averag:
+°
+iN
+&
+
+0           5           10           1s           20           25
+Iteration
+
+(e) Flight01 Dataset (Gemini).
+
+Figure 8: Performance of LISTEN algorithms and baselines on five datasets, showing the Normalized Average
+Rank (lower is better) over 25 iterations. The plots show results for the Gemini model.
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+Hidden Ground Truth (mean + 2SE)
+
+~~ Hidden ground truth max
+—} LISTEN-T
+
+= LISTEN-U
+
+—t- baseline/random
+
+--$- baseline/zscore-avg
+
+h fF f FB BF
+co N BRB BD & ©
+
+Hidden Ground Truth (mean + 2SE)
+w
+Ey
+
+~~ Hidden ground truth max
+—b LISTENT
+
+LISTEN-U
+
+—t- baseline/random
+
+--$- baseline/zscore-avg
+
+w
+a
+
+15                   20
+Iteration
+
+(b) Headphones Dataset (Gemini).
+
+15
+Iteration
+
+(a) Exam Scheduling Dataset (Gemini).
+
+i” AY SSAA st    Hidden ground truth max “rer <RanSUARARABGREDGRA   Hidden ground truth max
+Pe) UL Ad, FESS         fs] |   Sol eee
+3-04] |;       :     ETT    \.                      Boe) Vi \| pe   ;   eh LENT TY  ne
+pe UTES TE ty                            pe Hernan  Y
+Bo                               |                            3 os
+(c) Flights02 Dataset (Gemini).                                (d) Flights00 Dataset (Gemini).
+20      NJ                                /
+a      h   KI i i    |  i      T       - Hidden ground truth max
+2   M | TTY NTT vans wf |  mnie    + baseline
+i.        MTT hyp
+
+1s
+Iteration
+
+(e) Flights01 Dataset (Gemini).
+
+Figure 9: Performance of LISTEN algorithms and baselines on five datasets, showing the Average Utility Score
+(higher is better) over 25 iterations. The plots show results using the Gemini model.
+
+F Prompts
+
+This section includes representative examples of the variation of prompts we utilized. As mentioned in Section
+3.1, each prompt consists of five parts (persona context, metric definitions, user priorities, solutions, and format
+instructions). The first three parts are different in each setting and we give examples below in figures (Figure
+11, Figure 12, and Figure 13). The fourth and fifth parts are relatively generic across settings. The fourth part
+(solutions) pulls the solution from the previous iteration, if any. The fifth part of the instructions, which covers
+output format, has different structures for LISTEN-U and LISTEN-T. For LISTEN-U, the task is to output the
+weights for numerical features in JSON format. For LISTEN-T, the task is to identify the single best solution
+from the options provided and return it using the exact format: FINAL A (B, C ...).
+
+F.1 Exam Scheduling
+
+Only the first three prompts vary significantly, so Figure 11 shows these parts of the prompt for the exam
+scheduling problem. The first line, “You are an expert university registrar...” provides the persona context. The
+next section details the metrics. Following the metric definitions in a bulleted list format, the user priorities are
+highlighted. In this case, the priority is to “minimize student stress and administrative burden by optimizing a
+specific set of metrics...”.
+
+
+===== PAGE BREAK =====
+
+Jovine, Ye, Bahk, Wang, Shmoys, Frazier
+
+°
+°
+w
+a
+
+°
+°
+
+wi                                                                                                              wi
+uw                                                                                                              uw
+N                                                                                                                                                   N06
+Foso                                                                                                                                                        +
+§                                                                                                                                                   § 0.5
+Eos                                                                                                                                                        E
+x                                                                                                                                                   x 0.4
+ro                                                           — LISTENT                        Fo                                                           —b LISTENT
+&                                                           —- LISTEN-T@BASE                   &                                                           —}- LISTEN-T@BASE
+0°40                                                                               + LISTEN-U                                 0°?                                                                                + LISTEN-U
+=                                               ~-- LISTEN-U@BASE               =                                               --£- LISTEN-U@BASE
+o                                                                                                                                                   00.2
+3035                                                                                                                                              Fi
+ao]                                                                                                              ao]
+Ay                                                                                                                                          got
+0.30                                                                                                                                              a
+E                                                                                                                                                   E oo
+i)                                                                                                              i)
+2     0            5                        15           20           25                                           2 0            5                        15           20           25
+Iteration                                                                                                       Iteration
+
+(a) Exam Scheduling Ablations (Gemini).                                              (b) Headphones Ablations (Gemini).
+a
+oa                                                                                                                              Leip eee my me ee ap td arte mes mes mesa
+¢                                                                                                                                                                0.50                              |                                      |
+<
+3                                                                                                                                        i            Fy          1}
+£03                                                                                                                          .     us |    At
+=                                                                                                                0.45                                     oA) LAA
+z                                                                       = LSTENT                                                        \     i      yay  |  4        \ Jp || usta
+&                                                         —i- LISTEN-T@BASE                                         + VOR,                     i       ~~ LISTEN-T@BASE
+go 2                                                              —- LISTEN-U                           0.40                      iN  A                                    + LISTEN-U
+&                                               --}. LISTEN-U@BASE                                   \                           «-}- LISTEN-U@BASE
+g
+ao]
+eo
+3
+&
+—
+E
+i)
+2
+
+Normalized Average Rank (mean +/- 2SE
+
+15                                                                                                                                                                                                                             15                     20                     25
+Iteration                                                                                                                                                    Iteration
+
+(c) Flights02 Ablations (Gemini).                                (d) Flights00 Ablations (Gemini).
+
+°
+a
+3
+
+°
+ES
+&
+
+°
+FS
+$
+
+— LUSTENT
+—%- LISTEN-T@BASE
+—p- LISTEN-U
+«$+ LISTEN-U@BASE
+
+°
+w
+a
+
+°
+w
+8
+
+eo
+NooN
+8 ob
+
+Normalized Average Rank (mean +/- 2SE
+
+0                       5                                                                        20                     25
+
+15
+Iteration
+
+(e) Flights01 Ablations (Gemini).
+
+Figure 10: Ablation study evaluating the impact of preference utterance. Performance using the preference-
+guided prompt is compared to a base prompt containing only the persona and metric definitions. The plots show
+the Normalized Average Rank (lower is better) over 25 iterations, using the Gemini model.
+
+F.2. Flights
+
+Similar to the exam scheduling prompt, in Figure 12, the persona context is provided in the first sentence.
+Following the persona context, the metrics are described. The next paragraph includes the user’s preferences in
+natural language (“I am looking for round-trip flight...”).
+
+F.3 Shopping
+
+Following the format of the other prompts, the first line in Section 13 details the persona context (“You are an
+audio equipment reviewer...”). The next section describes the metric definitions. Following these definitions, the
+next section details the user’s preferences in natural language. These are all “soft” preferences because they do
+not include any strict constraints.
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+Exam Scheduling Prompt
+
+You are an expert university registrar choosing the better final-exam schedule.
+Use these definitions (lower is better unless stated otherwise):
+- conflicts: students with overlapping exams (must be minimized)
+- quints: 5 exams in a row
+- quads: 4 in a row
+- four in five slots: 4 exams within 5 slots
+- triple in 24h (no gaps): 3 exams within 24 hours (strictly consecutive
+blocks)
+- triple in same day (no gaps): 3 exams within the same calendar day
+consecutively
+- three in four slots: 3 exams within 4 slots
+- evening/morning b2b: back-to-back from an evening into next-morning slot
+- other b2b: any other back-to-back pair
+- two in three slots: 2 exams within 3 slots
+- avg max: is the average slot of the last exam for each student. Students
+tend to want to leave as early as possible.
+
+Policy guidance: To generate an optimal final examination schedule that
+minimizes student stress and administrative burden by optimizing a specific
+set of metrics according to a tiered priority system.
+
+*Context:* There are three exam slots available per day.
+
+Solutions must have a conflicts value of 0 or 1.
+
+*Tier 1:* Minimize Mandatory Reschedules
+The highest priority is to minimize the metrics associated with intense
+exam clusters that require a mandatory reschedule. Please minimize the
+following metrics in the order listed:
+
+gquints (five exams in 24 hours)
+
+quads (four exams in 24 hours)
+
+four in five slots
+
+triple in 24h (no gaps)
+
+triple in same day (no gaps)
+
+*Tier 2:* Reduce Student Exam Fatigue
+Once Tier 1 objectives have been met, the primary tie-breaker is to
+minimize the total number of back-to-back exams. This objective is
+achieved by minimizing the sum of the following two metrics:
+evening/morning b2b
+other b2b
+
+*Tier 3:* Enhance Overall Schedule Quality
+As a final set of tie-breakers, prioritize schedules that improve the
+general student experience by optimizing these metrics in order of
+preference:
+Lower the avg_max (the average slot of a student’s final exam).
+Minimize two in three slots.
+Minimize three in four slots.
+
+Figure 11: An example prompt for the exam scheduling dataset.
+
+
+===== PAGE BREAK =====
+
+Jovine, Ye, Bahk, Wang, Shmoys, Frazier
+
+Flights Prompt
+
+You are an expert travel scheduling agent that specializes in air fare.
+The data set is only for a one-way flight. In this case, it is the first leg of a
+round trip.
+Use these definitions:
+name: name of airline operating the flight
+origin: origin airport
+destination: destination airport
+departure time: time of departure from origin airport
+arrival time: time of arrival at destination airport
+duration: how long the flight is
+stops: number of layover stops
+price: cost of the flight
+dis_from_origin: distance of origin airport from where the customer prefers
+(lower is better)
+e dis_from_dest: distance of arrival airport from where the customer prefers
+(lower is better)
+e departure_seconds: time of departure since a fixed date in seconds
+@ arrival_seconds: time of arrival since a fixed date in seconds
+e duration_min: duration of total flight in minutes (lower is better)
+
+Objective: I am looking for round-trip flight options for two adults from Chicago
+to New York City for the weekend of October 11, 2025. The priority is to maximize
+our time in NYC while respecting a key scheduling constraint on Friday.
+
+Primary Requirements (Must-Haves):
+- Route: Chicago (any airport) to New York City (JFK, LGA, or EWR).
+- Passengers: 2 adults.
+- Departure Window:
+- Must depart on either Friday, October 10, 2025, or Saturday,
+October 11, 2025.
+- If departing on Friday, the flight must be after 12:30 PM.
+- Return Date: Sunday, October 12, 2025.
+- Budget: The total price per ticket must not exceed $400.
+
+Secondary Preferences (Tie-Breakers) :
+- These should be used to select the best option among flights that meet the
+above requirements.
+- Departure Time (Friday): A departure after 3:30 PM is strongly preferred.
+The ideal arrival would be early enough to get a full night’s sleep or to catch
+an 11:00 PM train from the airport.
+- Departure Time (Saturday): If a Saturday departure is chosen, it should be
+the earliest possible flight to maximize time in the city.
+- Flight Type: Direct (non-stop) flights are highly preferred.
+- Cost: Among flights that meet all criteria, the cheapest option is best.
+- Destination Airport: There is a slight preference against Newark (EWR) due
+to longer ground transportation, but it is an acceptable option.
+- Airline: No airline preference.
+
+Figure 12: An example prompt for a flight itinerary preference, which utilizes the natural language description
+of the user’s priorities over objectives, but includes strong constraints.
+
+
+===== PAGE BREAK =====
+
+LISTEN to Your Preferences
+
+Shopping Prompt
+
+You are an audio equipment reviewer choosing the best headphones.
+
+Use these definitions:
+
+- product_name: name of the product (mon-metric, weight always 0).
+
+- brand: manufacturer reputaton (non-metric, weight always 0).
+
+- price: cost measured in dollars.
+
+- type: headphone design.
+
+- connectivity: wired vs wireless.
+
+- noise_cancellation: active vs passive.
+
+- battery_life: measured in hours.
+
+- bluetooth_version: higher versions are newer.
+
+- driver_size: measured in millimeters.
+
+- weight: measured in ounces.
+
+- water_resistance: measured subjectively and also through the ipXX rating system,
+which measures a device’s protection against solids (first digit)
+and liquids (second digit), with higher numbers indicating stronger resistance.
+
+- microphone: presence/quality of mic
+
+- review_rating: average customer rating
+
+- review_count: number of reviews
+
+- description: qualitative marketing text (non-metric, weight always 0)
+
+I am a college student who is looking for recommendations for new headphones. I
+prefer over-ear headphones rather than in-ear or on-ear, since they feel
+
+more comfortable for long hours and usually deliver better sound. I also prefer
+wireless headphones because I don’t want to deal with cables. I would like
+
+the headphones to have active noise cancellation, since I often study in
+places where there is background noise. A microphone is important to me because
+I sometimes use my headphones for calls. For battery life, I’d like
+
+headphones that can last a long time on a single charge.
+
+I usually don’t mind recharging overnight, but I don’t want headphones that
+
+run out of power quickly in the middle of the day.
+
+In terms of build, I actually prefer headphones that feel a bit heavier, since
+lightweight headphones sometimes feel cheap or less durable to me. When I look
+at reviews, I prefer headphones with both a high rating and a large number of
+reviews, since that gives me more confidence in the product. I would prefer
+headphones which have at least 5,000 reviews and a rating of at least 4.4.
+
+To clarify the relative importance of both rating and number of reviews, I would
+rather pick headphones with a 4.8 rating and 20,000 reviews than a 4.9 rating
+with 1000 reviews. Other metrics such as driver size, water resistance, and
+Bluetooth version do not matter at all to me. I’m not price-sensitive at all,
+so I’m willing to pay more if the headphones meet my preferences well.
+
+Figure 13: An example prompt for headphone preferences.

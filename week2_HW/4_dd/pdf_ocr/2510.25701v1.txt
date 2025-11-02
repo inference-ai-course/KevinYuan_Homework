@@ -1,0 +1,1225 @@
+2510.25701v1 [cs.CL] 29 Oct 2025
+
+arXiv
+
+Interpreting LLMs as Credit Risk Classifiers: Do Their Feature
+Explanations Align with Classical ML?
+
+Saeed AlMarri                             Kristof Juhasz                            Mathieu Ravaut
+Khalifa University                                            ADIA                                                     ADIA
+Abu Dhabi, United Arab Emirates         Abu Dhabi, United Arab Emirates         Abu Dhabi, United Arab Emirates
+100061460 @ku.ac.ae                         kristof.juhasz@adia.ae                      mathieu.ravaut@adia.ae
+Gautier Marti                        Hamdan Al Ahbabi                       Ibrahim Elfadel
+ADIA                                                Khalifa University                                      Khalifa University
+
+Abu Dhabi, United Arab Emirates
+gautier.marti@adia.ae
+
+Abstract
+
+Large Language Models (LLMs) are increasingly explored as flexible
+alternatives to classical machine learning models for classification
+tasks through zero-shot prompting. However, their suitability for
+structured tabular data remains underexplored, especially in high-
+stakes financial applications such as financial risk assessment. This
+study conducts a systematic comparison between zero-shot LLM-
+based classifiers and LightGBM, a state-of-the-art gradient-boosting
+model, on a real-world loan default prediction task. We evaluate
+their predictive performance, analyze feature attributions using
+SHAP, and assess the reliability of LLM-generated self-explanations.
+While LLMs are able to identify key financial risk indicators, their
+feature importance rankings diverge notably from LightGBM, and
+their self-explanations often fail to align with empirical SHAP at-
+tributions. These findings highlight the limitations of LLMs as
+standalone models for structured financial risk prediction and raise
+concerns about the trustworthiness of their self-generated expla-
+nations. Our results underscore the need for explainability audits,
+baseline comparisons with interpretable models, and human-in-
+the-loop oversight when deploying LLMs in risk-sensitive financial
+environments.
+
+CCS Concepts
+
+- Computing methodologies — Supervised learning by clas-
+sification.
+
+Keywords
+
+Large Language Models, Explainable AI, SHAP, Credit Risk Pre-
+diction, Responsible AI, Financial Machine Learning, Model Inter-
+pretability
+
+1 Introduction
+
+Large Language Models (LLMs), such as GPT-4, have demonstrated
+strong performance across a range of natural language processing
+(NLP) tasks, including classification and reasoning [2, 4, 32]. Their
+ability to function as classifiers without explicit training pipelines,
+relying solely on a few-shot or zero-shot prompting, has gained
+significant attention. This raises fundamental questions about the
+reliability and validity of LLM-based classification, particularly in
+
+Abu Dhabi, United Arab Emirates
+100061346@ku.ac.ae
+
+Abu Dhabi, United Arab Emirates
+ibrahim.elfadel@ku.ac.ae
+
+comparison to classical machine learning models such as gradient-
+boosting decision trees methods like XGBoost [9] or LightGBM
+[19].
+
+Traditional classification tasks require structured pipelines in-
+volving feature engineering, model training, validation, and hyper-
+parameter tuning. Fine-tuning models on tabular data, in particular,
+demands expertise in preprocessing, GPU management, and bal-
+ancing class distributions to prevent trivial solutions. In contrast,
+LLMs bypass fine-tuning entirely, requiring only natural language
+prompting. This reduces technical barriers, making them accessible
+to non-experts, but raises an important question: How do LLM-based
+classifiers arrive at their predictions, and do they rely on decision pat-
+terns similar to classical machine learning models?
+
+This question is especially critical in high-stakes financial do-
+mains, where algorithmic risk assessments directly affect credit
+access, interest rates, and regulatory compliance [11]. Financial
+institutions operate under strict governance frameworks such as
+Basel III [24] and GDPR [1], where opaque models can lead to regu-
+latory breaches, reputational damage, and unfair or discriminatory
+decisions. Unlike decision trees or gradient boosting models, LLMs
+are complex black-box models with billions of parameters, making
+interpretability a key challenge. This has led to growing interest in
+Explainable AI (XAI) techniques to analyze LLMs’ internal logic and
+assess their alignment with human-interpretable decision patterns.
+
+In this study, we conduct a systematic evaluation of zero-shot
+LLM classifiers for structured credit risk prediction, directly compar-
+ing them with a well-established interpretable baseline (LightGBM).
+Beyond performance comparison, our primary goal is to audit their
+explainability to determine whether their feature attributions and
+self-generated rationales align with dataset-driven reasoning or
+rely on external priors. We employ Shapley Additive Explanations
+(SHAP) [20] to analyze the faithfulness of their decision patterns.
+Leveraging a public loan default prediction dataset, we address the
+following research questions:
+
+Explainability: Do LLM-based classifiers prioritize the same
+features as classical models?
+
+Self-Explainability: Can LLMs provide self-generated ratio-
+nales that align with SHAP-derived feature attributions?
+
+e Performance: How do LLMs compare to classical machine learn-
+ing classifiers (ROC-AUC, PR-AUC)? Does ensembling both types
+of models improve performance?
+
+
+===== PAGE BREAK =====
+
+CIKM 2025 FinAl Workshop,
+
+Our work directly addresses the workshop call on AI safety,
+fairness, and explainability in high-stakes financial environments,
+and responsible deployment in fintech and banking, by auditing the
+faithfulness of LLM explanations against SHAP on a real credit-risk
+task. The remainder of this paper is structured as follows: Section 2
+reviews related work, Section 3 details the methodology, Section 4
+presents the experimental setup, Section 5 analyzes results, feature
+attribution and reasoning patterns, and Section 6 concludes with
+key findings and future directions.
+
+2 Related Work
+2.1 LLMs for Zero-Shot Classification
+
+LLMs have demonstrated strong classification capabilities, often
+achieving competitive performance without supervision. Brown
+et al. [4] introduced GPT-3, highlighting its few-shot and zero-
+shot classification potential. This paradigm removes the need for
+classical training pipelines, enabling non-experts to perform clas-
+sification via direct natural-language prompting and in-context
+learning. Subsequent work has explored structured prompting to
+enhance classification accuracy. Hao et al. [16] introduced Chain-
+of-Thought (CoT) prompting, showing that structured reasoning
+can improve LLM performance—relevant when adapting them to
+structured data.
+
+A recent line of work examines whether LLMs can function as
+regressors for numerical data. Vacareanu et al. [31] found that LLMs
+approximate regression functions with in-context examples, while
+Buckmann and Hill [5] proposed combining LLMs with logistic
+regression for low-data robustness. Song et al. [28] and Song and
+Bahri [27] further extend this research direction, demonstrating
+universal regression capabilities using decoding-based inference.
+
+Our Contribution. Unlike prior studies that evaluate LLM clas-
+sification in isolation, our work positions this comparison as a step
+toward responsible AI deployment in high-stakes financial contexts.
+By systematically comparing zero-shot LLM and LightGBM on the
+same dataset and auditing their decision patterns using SHAP-based
+explainability, we assess not only accuracy but also faithfulness
+and reliability of model reasoning critical elements for trustworthy,
+fair and transparent AI use in credit risk assessment.
+
+2.2 LLM Explainability
+
+Feature-attribution methods such as SHAP [20] are widely used
+to assess feature importance in machine-learning models. We use
+SHAP to compare LLM-based probabilistic classifiers with Light-
+GBM. A key question is whether LLMs’ self-explanations align
+with actual feature importance. Huang et al. [18] report that LLM
+rationales are often plausible but do not necessarily reflect inter-
+nal reasoning. Dehghanighobadi et al. [10] analyze counterfactual
+explanations and show that LLMs can struggle with causal de-
+pendencies. Sarkar [25] argues that LLMs lack self-explanatory
+capabilities due to opaque training dynamics, and Turpin et al. [30]
+show that CoT-generated explanations can be misleading.
+
+Our Contribution. Prior work predominantly studies LLM self-
+explanations in text tasks. To our knowledge, our study is the first
+to compute SHAP-based feature importance for LLMs prompted
+to output probabilistic predictions on structured financial data,
+
+AlMarri et al.
+
+enabling a direct faithfulness audit of self-explanations against
+empirical attributions.
+
+2.3. LLMs for Tabular Data
+
+Recent work explores whether LLMs can replace gradient-boosted
+models such as XGBoost, LightGBM, and AdaBoost for tabular clas-
+sification. Fang et al. [13] survey LLMs on tabular data and highlight
+adaptation challenges. Ghaffarzadeh-Esfahani et al. [15] benchmark
+LLMs against classical ML for COVID-19 mortality prediction, con-
+cluding that classical ML models outperform LLMs on structured
+data. Chen et al. [8] introduce ClinicalBench and similarly find XG-
+Boost superior for clinical prediction tasks. Hegselmann et al. [17]
+propose TabLLM, which reformulates tables as natural language
+for few-shot classification, while Shi et al. [26] introduce ZET-LLM,
+treating autoregressive LLMs as feature-embedding models for tab-
+ular prediction. While these studies highlight LLM potential, they
+generally do not evaluate explainability or faithfulness of rationales
+on tabular tasks.
+
+Our Contribution. We conduct a head-to-head comparison of
+LLMs and LightGBM on the same structured dataset and integrate
+SHAP-based explainability, offering a dual analysis of predictive
+performance and feature attribution to illuminate decision mecha-
+nisms.
+
+2.4 Classical ML, XAI, and LLMs for Financial
+AI
+
+Explainability is crucial in financial applications for risk assessment.
+Martins et al. [22] review XAI in finance, while Cernevitiené and
+Kabaéinskas [7], Misheva et al. [23], and Bussmann et al. [6] analyze
+explainability in credit-risk modeling. Several studies benchmark
+ML models for loan-default prediction: Madaan et al. [21] compare
+decision trees and random forests without an explainability analysis;
+Srinivasa Rao et al. [29] assess ML techniques for loan risk but do
+not explore LLMs; and Boughaci and Alkhawaldeh [3] study credit-
+scoring models without evaluating LLM-based predictions.
+
+Our Contribution. While prior work focuses on classical ML
+for loan prediction, we present the first comparative analysis of LLMs
+and LightGBM on structured loan data, integrating SHAP-based ex-
+plainability. Our findings extend beyond credit risk to broader finan-
+cial applications, including fraud detection, regulatory compliance,
+and algorithmic trading decision-making, where explainability is
+key to adoption.
+
+3 Methodology
+3.1 Inference Setup
+
+We systematically evaluate the predictive performance and explain-
+ability of LightGBM and zero-shot LLMs. We design the classifi-
+cation problem such that both LightGBM and LLMs receive the
+same set of input features and output probability estimates in-
+stead of discrete classes. Probability outputs offer three advantages:
+(i) fine-grained evaluation via discrimination metrics (ROC-AUC,
+PR-AUC); (ii) enhanced explainability, as SHAP feature attribution
+is generally more informative when applied to probability scores
+
+
+===== PAGE BREAK =====
+
+Interpreting LLMs as Credit Risk Classifiers: Do Their Feature Explanations Align with Classical ML?
+
+Comparative Explainable Al Framework: Classical ML vs. LLMs
+
+[ CLASSICAL ML PIPELINE
+
+Performance
+Comparison
+
+5]
+
+q
+
+Classical                     —
+Probability
+Prediction
+
+Classical ML
+
+_XALCOMPARISON |
+
+el
+
+SHAP for
+Dataset                                                  Classical ML
+(i)                                     >| SHAP for LLM
+LLM Probability         rT
+Prediction
+
+LLM                                                >| Self Explanation
+
+LLM PIPELINE
+
+Figure 1: Comparative Explainable AI Framework: Classical ML vs.
+LLMs. The dataset is processed through two paradigms: (i) a struc-
+tured LightGBM model and (ii) a zero-shot LLM using natural lan-
+guage prompts. Both generate probability predictions, analyzed in-
+dividually and in an ensemble. Explainability is assessed via SHAP
+(for both) and LLM self-explanations, evaluating their alignment.
+
+rather than hard labels; and (iii) a direct test of LLMs’ capability as
+probability regressors.
+
+3.2 Explainability
+
+We treat explainability as a model-auditing task focused on the
+faithfulness of the factors a model claims or appears to use. Our
+audit has two complementary components:
+
+e (A) SHAP as a model-agnostic audit baseline. We use SHAP
+[20] to assign contribution values to each feature for both Light-
+GBM and the LLM-based probabilistic classifier. SHAP values
+operationalize which features, and in what direction, are driving
+each model’s predictions.
+
+e (B) LLM self-explanations as unverified rationales. In ad-
+dition to SHAP, we prompt the LLM to provide instance-level
+rationales and feature-level directional judgments (positive/neg-
+ative/neutral). These self-explanations are treated as claims that
+must be checked against the SHAP audit checks.
+
+We compare (i) global feature importance patterns (via SHAP)
+across models; (ii) directional dependence for key features (e.g.,
+whether higher values increase or decrease repayment probabil-
+ity); and (iii) instance-level coherence between an LLM’s rationale
+and the corresponding SHAP attributions. Misalignment across
+these checks is interpreted as a faithfulness risk and a caution for
+deployment.
+
+3.2.1 Scaling Shapley-Value Inference for LLMs. To operationalize
+explainability as an audit of model decision logic, we estimate
+feature attributions for both LightGBM and the zero-shot LLM
+classifiers using SHAP. Faithful auditing requires identifying which
+features actually drive predictions, not just producing plausible
+explanations.
+
+CIKM 2025 FinAl Workshop,
+
+We use SHAP for post hoc explanations [20], specifically the
+model-agnostic PermutationExplainer. We adopt this efficient
+SHAP estimator because our prediction function is an LLM infer-
+ence, which is costly. To balance accuracy and runtime, we sample
+250 instances from each dataset for explanation. We construct the
+background (masker) via k-means clustering with C = 5 centroids
+(using shap.kmeans) and set the max_evals budget so that the
+explainer executes exactly T = 4 permutations in our experiments.
+
+Approximate cost (model calls). Let K be the number of in-
+stances explained, M the number of features, B the number of
+background draws per masked evaluation (here B = C = 5), and T
+the number of random permutations. The PermutationExplainer
+requires approximately:
+
+#ealls » KxXTx(M+1)xXB = O(KTMB)     (1)
+
+model evaluations. In SHAP’s implementation, T is governed by
+max_evals via the practical rule:
+
+max_evals
+|                         ()
+2M
+i.e, roughly 2M masked evaluations per permutation path. With
+max_evals = 200 and M = 21, this yields T = |200/(2 x 21)| = 4.
+Using B = 5, the per-instance cost is therefore  4x(21+1)x5 = 440
+model calls.
+
+Why is it more efficient than KernelExplainer? With a sum-
+marized background of C centroids, the dominant model-call com-
+plexity of KernelExplainer scales as:
+
+#ealls ~ KxCxM? = O(KCM?)        (3)
+
+due to sampling coalitions and fitting a kernel-weighted regres-
+sion. In our setting (C = 5, M = 21) this is 5 x 21? = 2205 eval-
+uations per instance. By contrast, PermutationExplainer scales
+linearly in M and avoids the regression solve, yielding an expected
+per-instance reduction of
+
+4            CM          2205      5x            (4)
+speedu    ~                    ~           ~~
+pecesP * T(M+1)B 440
+
+The fivefold decrease in model calls translates into substantially
+lower LLM inference time while maintaining faithful attributions,
+which is why we use PermutationExplainer with T = 4.
+
+3.2.2. LLM Self-Explanations. Motivated by the emerging reason-
+ing capabilities of large language models (LLMs) [33], we use the
+LLM as an explainability tool alongside SHAP. Specifically, for each
+input feature, we provide its description to the LLM and prompt it
+to predict whether the feature is likely to have a positive, negative,
+or no effect on the predicted outcome. The LLM also generates a
+brief textual justification for each directional prediction, which we
+refer to as its self-explanation.
+
+These LLM-generated self-explanations are treated as unveri-
+fied rationales and are not assumed to reflect the model’s actual
+internal reasoning. We compare them against SHAP-based feature
+attributions, which serve as a model-agnostic baseline. When LLM
+explanations diverge from SHAP attributions, we interpret this
+misalignment as a potential risk of explainability, an indication
+
+
+===== PAGE BREAK =====
+
+CIKM 2025 FinAl Workshop,
+
+that LLM may produce externally plausible but internally incon-
+sistent reasoning. While we do not perform formal risk scoring,
+highlighting such discrepancies can inform governance decisions
+in high-stakes financial applications, where model transparency is
+essential.
+
+Figure 1 illustrates the overall methodological framework. The
+dataset is processed through two parallel pipelines: (i) a structured
+LightGBM model and (ii) a zero-shot LLM using natural language
+prompts. Both produce probability estimates, which are then ana-
+lyzed for predictive performance and explainability through SHAP
+and LLM self-explanations, enabling a cross-comparison of their
+decision logic.
+
+4 Experiments
+4.1 Data
+
+4.1.1. Task Description. Loan default prediction is a critical chal-
+lenge in credit risk assessment, where lenders estimate the likeli-
+hood of borrowers failing to repay their loans. Accurate predictions
+enable financial institutions to make informed lending decisions,
+set appropriate interest rates, and manage credit risk effectively.
+Because loan defaults directly affect credit access, financial stability,
+and regulatory compliance, this task is widely regarded as a high-
+stakes benchmark for testing the safety and reliability of predictive
+models in finance.
+
+4.1.2. Dataset Description. We use LendingClub’s publicly avail-
+able loan records hosted by Kaggle ', which were disclosed as
+part of the company’s regulatory filings with the U.S. Securities
+and Exchange Commission (SEC). As a major peer-to-peer lend-
+ing platform, LendingClub was required to provide detailed loan
+issuance and performance data to comply with SEC regulations,
+making this dataset a widely used benchmark in credit risk mod-
+eling. The dataset includes loan applications issued between 2007
+and 2016, with approximately 396,000 loan records. Each loan is
+labeled with its repayment status, distinguishing between Fully
+Paid and Charged Off (defaulted) loans. It contains both numerical
+and categorical attributes describing borrower creditworthiness
+and loan characteristics, for a total of 26 financial and credit-related
+features.
+
+4.1.3 Preprocessing. We removed five features due to high cardi-
+nality, redundancy, or potential data leakage:
+
+e issue_d: Loan issue date (introduces temporal bias)
+
+e earliest_cr_line: Borrower’s earliest credit line (high cardi-
+nality)
+
+e address: High-cardinality feature (introduces geographic bias)
+
+e emp_title: High-cardinality categorical variable
+
+e title: High-cardinality; redundant with the purpose variable
+
+We also excluded categorical features with more than 40 unique
+categories to mitigate overfitting in LightGBM. This ensures a fair
+comparison between models, preventing disadvantages for Light-
+GBM (which lacks natural text processing) and restricting LLMs
+from exploiting external knowledge, such as macroeconomic trends
+from loan dates or geographic signals from addresses. These steps
+
+‘https://www.kaggle.com/datasets/sndpred/loan- data
+
+AlMarri et al.
+
+Table 1: Final Dataset Features.
+
+Feature Description
+
+Range
+
+Loan amount
+
+Term
+
+Interest rate
+Installment
+
+Grade
+
+Sub-grade
+Employment length
+
+Home ownership
+
+Annual income
+Verification status
+
+Purpose
+Debt-to-income (DTI)
+ratio
+
+Open credit accounts
+Public records
+Revolving balance
+Revolving utilization
+rate
+
+Total accounts
+Initial listing
+status
+
+Application type
+
+Mortgage accounts
+Public record
+
+[1600.0, 35000.0]
+
+categorical: {36 months, 60 months}
+[6.03, 25.29]
+
+(55.32, 1204.57]
+
+categorical: {A, B, C, D, E, F, G}
+categorical: {A1, A2, ..., G4, G5}
+categorical: {<1 year, 1 year, ..., 10+
+years}
+
+categorical: (MORTGAGE, NONE,
+OTHER, OWN, RENT}
+
+[19000.0, 250000.0]
+
+categorical: {Not Verified, Source
+Verified, Verified}
+
+categorical: 14 values (e.g., wedding)
+[1.6, 36.41]
+
+[6.0, 60.0]
+categorical: {f, w}
+
+categorical: {DIRECT PAY,
+INDIVIDUAL, JOINT}
+[0.0, 9.0]
+
+[0.0, 1.0]
+
+bankruptcies
+
+help control for potential bias and improve the fairness and au-
+ditability of the evaluation.
+
+4.1.4 Final Dataset. After preprocessing, the final dataset consists
+of 396,000 rows and 21 predictors (12 numerical and 9 categorical).
+The data was randomly split into training (80%) and testing (20%),
+with 79,200 instances used for LLM inference. This controlled setup
+ensures that both models operate on identical structured inputs
+without access to external priors, supporting a transparent and
+auditable comparison.
+
+In Table 1, we list all features. For numerical features, we report
+the interval bounded by the 1st and 99th percentiles. For categorical
+features, we report the values space (if it is not too large).
+
+4.2 Models
+
+4.2.1 LightGBM Training. We trained a LightGBM classifier using
+the gradient boosting decision tree (GBDT) algorithm with a binary
+objective and AUC as the primary evaluation metric. The model
+was trained with a learning rate of 0.01 and up to 10,000 estima-
+tors, applying early stopping after 100 rounds based on validation
+performance. To reduce overfitting, we applied a feature fraction
+of 0.8, bagging fraction of 0.8, and L1/L2 regularization (0.1 each).
+The num_leaves parameter was set to 63 and min_data_in_leaf
+to 50.
+
+
+===== PAGE BREAK =====
+
+Interpreting LLMs as Credit Risk Classifiers: Do Their Feature Explanations Align with Classical ML?
+
+Instance-Level Prompt Template
+
+Predict whether a loan application will be "Fully Paid" or "Charged
+Off" based on the borrower’s information. Use the features provided
+below to assess the likelihood of the loan being fully repaid.
+
+Loan Application Details:
+
+<feature_1 name>: <feature_1 value>
+
+<feature_N name>: <feature_N value>
+Provide your estimated probability of the loan being "Fully Paid". Also
+provide a brief explanation of this estimate based on the features. Your
+
+answer should only contain the probability estimate and the explanation
+in the following JSON format.
+
+{
+"Estimated Fully Paid Probability": <float value
+between Q and 1>,
+"Explanation": <string value>
+}
+
+Feature-Level Prompt Template
+
+You are working on predicting whether a loan application will be "Fully
+Paid" or "Charged Off" based on the borrower’s information. One of the
+features is the following:
+
+<feature name>
+
+Do you think that this feature will impact the application positively,
+negatively, or have no impact? Provide your answer as one of the three
+strings: positive | negative | neutral. Use the following JSON
+format:
+
+"Feature impact": <positive | negative | neutral>
+
+}
+
+We use LightGBM as a transparent and interpretable baseline,
+providing a benchmark for feature importance and prediction sta-
+bility against which the behavior of large language models (LLMs)
+can be audited.
+
+4.2.2 LLM Inference. We evaluated three recent open-source in-
+struction tuned LLMs of comparable size: LLaMA-3.1-8B-Instruct
+[12], Gemma-2-9B-Instruct [14], and Qwen-2.5-7B-Instruct
+[35]. These models were pre-trained on 15.6T, 8T, and 18T tokens,
+respectively. All experiments used their instruction-tuned versions.
+Model weights were downloaded from the Hugging Face Hub [34],
+and inference was run locally using VLLM? on four Nvidia A10G
+24GB GPUs.
+
+To reduce computation time, we randomly sampled 250 test
+instances for SHAP value estimation. We did not perform any fine-
+tuning and used strict zero-shot inference without any in-context
+learning. This design ensures the LLMs rely solely on the provided
+
+“https://github.com/vllm-project/vllm
+
+CIKM 2025 FinAl Workshop,
+
+Receiver Operating Characteristic (ROC) Curves
+
+Precision-Recall Curves
+
+‘rue Positive Rate
+
+Figure 2: ROC and Precision-Recall curves comparing the
+performance of zero-shot LLMs and LightGBM on the loan
+classification task. LightGBM consistently outperforms indi-
+vidual LLMs with Gemma-2-9b showing the most promising
+result out of the LLMs.
+
+structured features, preventing data contamination or leakage from
+pre-training.
+
+We used the same prompt templates for all LLMs. The instance-
+level prompt asked the model to jointly predict the probability that
+a loan would be fully repaid (a float between 0 and 1) and to provide
+a brief explanation. The feature-level prompt asked whether each
+feature would impact the prediction positively, negatively, or not
+at all.
+
+Unlike free-form textual descriptions, the structured dictionary
+format used for instance-level prompts is unlikely to have appeared
+in the LLMs’ pretraining corpus, which reduces the risk of data
+contamination.
+
+5 Analysis
+
+5.1 Performance Results
+
+Table 2 and Figure 2 compare the performance of zero-shot LLMs
+and LightGBM on the loan repayment prediction task. LightGBM
+achieved the highest ROC-AUC (0.73), outperforming all LLMs in
+the zero-shot setting. Among LLMs, Gemma-2-9B performed best
+(0.67), followed by LLaMA-3.1-8B (0.65) and Qwen-2.5-7B (0.61).
+These findings are consistent with prior evidence that gradient
+boosting often surpasses deep learning methods on structured tab-
+ular data. The LightGBM-Gemma-2-9B ensemble achieved 0.70
+ROC-AUC, indicating no diversification benefit over LightGBM
+alone.
+
+PR-AUC results follow a similar pattern. LightGBM obtained
+the highest PR-AUC (0.91), exceeding all LLMs. Gemma-2-9B again
+ranked highest among the LLMs (0.88), followed by LLaMA-3.1-8B
+(0.86) and Qwen-2.5-7B (0.85). The ensemble model reached 0.90,
+closely trailing LightGBM. All models outperformed the base-rate
+PR-AUC (0.80), confirming meaningful predictive signal.
+
+Overall, these results show that while zero-shot LLMs achieve
+reasonable predictive performance, they remain inferior to a well-
+tuned LightGBM model on structured financial data, underscoring
+the need for careful governance if deployed in high-stakes settings.
+
+
+===== PAGE BREAK =====
+
+CIKM 2025 FinAl Workshop,
+
+Table 2: Performance Metrics of Models for Loan Default
+Classification
+
+Model                                                 ROC-AUC PR-AUC
+LightGBM                                                 0.73           0.91
+Gemma-2-9B                                              0.67           0.88
+Llama-3.1-8B                                              0.65           0.86
+Qwen-2.5-7B                                              0.61           0.85
+Ensemble (LightGBM + Gemma-2-9B)               0.70           0.90
+Random Classifier (Baseline)                            0.50             -
+Base Rate for Fully Paid Label (Baseline)                -              0.80
+Table 3: Feature Importance Comparison
+Feature                    LGBM Gemma- Llama- Qwen-
+2-9B       3.1-8B = 2.5-7B
+Sub-grade                  0.062        0.046        0.038        0.004
+Annual income           0.026        0.031        0.037        0.014
+Term                          0.023        0.002        0.008        0.000
+Interest rate           0.022        0.019        0.048        0.005
+DTI                            0.019        0.019        0.027        0.006
+Open account             0.018        0.004        0.007        0.001
+Revolving util       0.018      0.044      0.021      0.005
+Loan amount               0.018        0.006        0.026        0.004
+Home ownership         0.015        0.012        0.031        0.003
+Grade                         0.013        0.079        0.065        0.025
+
+5.2 SHAP Feature Importance Comparison
+
+Figure 3 presents the SHAP feature importance rankings for Light-
+GBM and the three LLMs, providing insight into the key factors
+influencing loan classification decisions across models. The corre-
+sponding numerical values are reported in Table 3.
+
+A primary observation is the strong overlap in the top-ranked
+features across all models, despite the LLMs operating in a zero-shot
+setting. Features such as Sub-grade, Grade, Annual income, and
+Interest rate consistently emerge as dominant predictors. This
+suggests that LLMs, even without task-specific fine-tuning, are able
+to extract and prioritize meaningful financial attributes in a manner
+broadly consistent with classical ML models like LightGBM.
+
+However, notable differences emerge in feature weighting and
+rank order. LightGBM assigns greater relative importance to struc-
+tured numerical features such as Sub-grade, Annual income, and
+Loan amount, reflecting its reliance on directly interpretable numer-
+ical signals. In contrast, the LLMs particularly LLaMA-3.1-8B and
+Gemma-2-9B distribute their importance more evenly across cate-
+gorical and behavioral attributes such as Verification status,
+Purpose, and Home ownership. This indicates that LLMs may be
+leveraging latent semantic relationships within categorical features
+that are not explicitly modeled by LightGBM.
+
+5.3 SHAP Comparative Analysis
+
+To further investigate the decision mechanisms of the models, we
+compare the SHAP summary plots of LightGBM and the three LLMs.
+
+AlMarri et al.
+
+SHAP Feature Importances
+
+LLM: Llama-3.1-8B
+
+Grade                                         40.07
+
+Interest rate                               40.05
+
+Employment length                      40.05
+
+Purpose
+
+Sub-grade
+
+Annual income
+
+Verification status
+
+Home ownership               40.03
+
+bri                        +0.03
+
+Sum of 12 other features                                                          40.13
+
+0.02 0.04 0.06 0.08 010 012 0.14
+mean(|SHAP value])
+
+©
+8
+
+LLM: Gemma-2-9B
+
+Grade                                                                                 +0.08
+
+Sub-grade
+
+Revolving utilization rate
+
+Annual income                        +0.03
+
+Verification status
+
+40.02
+
+iS]
+a
+
+Interest rate
+
+Employment length
+
+Public record bankruptcies
+
+Sum of 12 other features
+
+0.00 0.01 0.02 0.03 0.04 0.05 0.06 0.07 0.08
+mean(|SHAP value|)
+LLM: Qwen-2.5-7B
+
+Grade                                                                                 +0.02
+
+Annual income
+
+Employment length
+
+7
+
+Verification status
+
+Q
+a
+
+Interest rate
+
+Revolving balance
+
+Revolving utilization rate
+
+Public record bankruptcies
+
+Sum of 12 other features                                                      +0.02
+
+0.000       0.005       0.010       0.015       0.020       0.025
+
+mean(|SHAP value|)
+
+LightGBM
+
+Sub-grade                                                                      +0.06
+
+Annual income
+
+Term
+
+Interest rate              40.02
+
+iS]
+a
+
+40.02
+
+Open credit account
+
+Revolving utilization rate
+
+Loan amount
+
+8 4
+
+Home ownership
+
+Sum of 12 other features                                                          40.07
+
+0.00 0.01 0.02 0.03 0.04 0.05 0.06 0.07
+
+mean(|SHAP value|)
+
+Figure 3: SHAP feature importance comparison between
+LightGBM and LLMs. Despite being in a zero-shot setting,
+LLMs identify a remarkably similar set of key financial fea-
+tures as LightGBM, though with differences in feature weight-
+ing and distribution.
+
+
+===== PAGE BREAK =====
+
+Interpreting LLMs as Credit Risk Classifiers: Do Their Feature Explanations Align with Classical ML?
+
+SHAP Summary Plots
+
+LLM: Llama-3.1-8B
+
+LLM: Gemma-2-9B
+
+Figure 4: SHAP summary plots comparing feature importance dis-
+tributions for LLMs and LightGBM. LightGBM shows a more struc-
+tured reliance on key financial indicators, while LLMs exhibit more
+dispersed and lower-magnitude SHAP values, indicating weaker fea-
+ture dependencies.
+
+In Figure 4, these plots illustrate how variations in feature values
+influence predicted loan repayment probabilities.
+
+Despite operating in a zero-shot setting, the LLMs successfully
+extract meaningful relationships from structured financial features.
+Core predictors such as Sub-grade, Interest rate, and Loan
+amount consistently emerge as important across all models, suggest-
+ing that the LLMs are able to capture many of the same risk-relevant
+factors identified by LightGBM. Notably, Gemma-2-9B assigns com-
+paratively higher SHAP values to these features, aligning with its
+superior classification performance among the evaluated LLMs.
+
+While the models converge on key features, their attribution
+patterns also reveal important differences. LightGBM places sub-
+stantial weight on well-established numerical predictors such as
+Sub-grade and Annual income, whereas the LLMs distribute im-
+portance more broadly across behavioral and categorical variables.
+This more diffuse attribution pattern implies that the LLMs may be
+leveraging latent feature interactions rather than relying solely on
+direct numerical signals. Such behavior could reflect their ability to
+encode semantic relationships across variables that classical models
+do not capture explicitly.
+
+A further notable observation is the reversal of SHAP relation-
+ships for certain features between the models. For example, in
+LightGBM, higher Interest rate values are associated with a
+greater predicted probability of being fully repaid (positive SHAP
+impact), whereas all three LLMs display the opposite trend. Simi-
+larly, DTI exhibits a different effect in Gemma-2-9B compared to the
+other LLMs and LightGBM. These discrepancies suggest that while
+the LLMs extract informative patterns, they may rely on internally
+learned representations that diverge from classical feature logic,
+which has implications for their reliability in regulated financial
+contexts.
+
+CIKM 2025 FinAl Workshop,
+
+SHAP and self-reported Partial Dependence plots for: DTI
+
+LLM: Llama-3.1-8B
+
+LLM elf reported dependence: negative
+
+LLM: Gemma-2-9B
+
+LLM: Qwen-2.5-7B                                         LGBM
+
+LLM self reported dependence: negative
+
+DTI
+
+Figure 5: SHAP Feature dependence plots and LLM self-
+explanations for the feature DTI.
+
+SHAP and self-reported Partial Dependence plots for: Sub-grade
+
+LLM: Llama-3.1-8B
+
+LLM self reported dependence: negative
+
+LLM: Gemma-2-9B
+
+LLM self reported dependence: negative
+oaoft
+
+Sub-grade
+Sub-grade
+
+Do
+Sub-grade
+
+LLM: Qwen-2.5-7B                                         LGBM
+
+LLM self reported dependence: negative
+
+Sub-grade
+Sub-grade
+
+Fa ey          oS
+Sub-grade           Sub-grade
+
+Figure 6: SHAP Feature dependence plots and LLM self-
+explanations for the feature Sub-grade.
+
+5.4 SHAP Feature Dependences and LLM
+Self-Explanation
+
+We compare classical model-centric explainability (SHAP depen-
+dence plots) with LLM self-reported explanations for two key fea-
+tures: DTI (Debt-to-Income ratio) and Sub-grade. LLM self-reported
+
+dependence is obtained by directly prompting the models on whether
+each feature exerts a positive, negative, or neutral effect on loan
+
+repayment likelihood, and is shown at the top of each chart.
+
+DTI (Debt-to-Income ratio). All three LLMs self-report a nega-
+tive relationship between DTI and loan repayment likelihood, align-
+ing with their SHAP dependence plots (Figure 5). LightGBM also
+shows a clear negative dependence. However, Gemma-2-9B displays
+
+
+===== PAGE BREAK =====
+
+CIKM 2025 FinAl Workshop,
+
+a notable inconsistency: its SHAP values suggest a positive contri-
+bution at higher DTI levels, contradicting its own self-explanation.
+
+Sub-grade. Both the LLM SHAP plots and self-reports consis-
+tently show Sub-grade as a feature negatively correlated with
+default risk (A1 being lowest risk and G5 highest) (Figure 6). Light-
+GBM exhibits a strong and nearly monotonic negative dependence,
+indicating heavy reliance on Sub-grade for risk discrimination.
+LLMs reproduce this general trend but with shallower slopes and
+greater local variability.
+
+Summary of alignment. While LLM self-explanations often
+align with their SHAP dependence patterns, there are notable di-
+vergences such as DTI, which was self-reported as negative but
+showed positive SHAP impact at higher values. Such mismatches
+suggest that LLM self-explanations, while often plausible, do not
+always reflect their internal decision-making mechanisms. Unlike
+LightGBM, which captures purely statistical relationships from the
+structured dataset, LLMs may incorporate latent financial priors
+beyond the data. These inconsistencies reinforce the need for inde-
+pendent audits before trusting LLM self-explanations in high-stakes
+financial workflows.
+
+6 Conclusion
+
+The growing adoption of large language models (LLMs) for struc-
+tured classification raises critical questions about their validity and
+safety in high-stakes financial decision-making. This study system-
+atically compared zero-shot LLM classifiers with LightGBM on a
+structured loan default prediction task, evaluating both predictive
+performance and explainability through SHAP-based audits.
+
+Our findings reveal that while LLMs can capture several key
+statistical patterns similar to LightGBM, they remain inferior in pre-
+dictive accuracy, with LightGBM achieving the highest ROC-AUC
+and PR-AUC scores. LLM-generated self-explanations occasionally
+align with SHAP feature attributions, but observed discrepancies in-
+dicate that these rationales may rely on external priors rather than
+purely dataset-driven reasoning. Moreover, ensembling LLMs with
+LightGBM did not yield meaningful performance gains, suggesting
+limited complementarity between the two paradigms.
+
+These results highlight that while LightGBM remains the more
+reliable choice when skilled data scientists are available, LLMs
+could serve as a practical fallback in small-data settings where
+fine-tuning is infeasible, provided their outputs are independently
+audited. Future research should explore fine-tuned LLMs for tabular
+modeling, hybrid approaches that better integrate structured and
+unstructured reasoning, and establish robust reliability and fairness
+assessments to ensure their responsible deployment in financial
+applications.
+
+References
+
+[1] 2016. Regulation (EU) 2016/679 of the European Parliament and of the Council of
+27 April 2016 on the protection of natural persons with regard to the processing
+of personal data and on the free movement of such data, and repealing Directive
+95/46/EC (General Data Protection Regulation). 88 pages. https://eur-lex.europa.
+eu/eli/reg/2016/679/oj/eng
+
+[2] Josh Achiam et al. 2023. GPT-4 Technical Report. arXiv:2303.08774 (2023).
+
+[3] Dalila Boughaci and Abdullah A. K. Alkhawaldeh. 2020. Appropriate Machine
+Learning Techniques for Credit Scoring and Bankruptcy Prediction in Banking
+and Finance: A Comparative Study. Risk and Decision Analysis 8, 1-2 (2020),
+15-24.
+
+10
+
+11
+
+12
+
+13
+
+14
+
+15
+
+16
+
+17
+
+18
+
+19
+
+20
+
+21
+
+22
+
+23
+
+24
+
+25
+
+26
+
+27
+
+28
+
+29
+
+30
+
+AlMarri et al.
+
+T. B. Brown et al. 2020. Language Models are Few-Shot Learners. In Advances in
+Neural Information Processing Systems (NeurIPS), Vol. 33. 1877-1901.
+
+Marcus Buckmann and Edward Hill. 2024. Logistic Regression makes small LLMs
+strong and explainable "tens-of-shot" classifiers. arXiv preprint arXiv:2408.03414
+(2024).
+
+Niklas Bussmann, Paolo Giudici, Dimitri Marinelli, and Jochen Papenbrock. 2021.
+Explainable Machine Learning in Credit Risk Management. Computational Eco-
+nomics 57, 1 (2021), 203-216.
+
+Jurgita Cernevitiené and Audrius Kabaginskas. 2024. Explainable Artificial Intel-
+ligence (XAI) in Finance: A Systematic Literature Review. Artificial Intelligence
+Review 57, 8 (2024), 216.
+
+Canyu Chen et al. 2024. ClinicalBench: Can LLMs Beat Traditional ML Models
+in Clinical Prediction? arXiv preprint arXiv:2411.06469 (2024).
+
+Tianqi Chen and Carlos Guestrin. 2016. XGBoost: A Scalable Tree Boosting
+System. In Proceedings of the 22nd ACM SIGKDD International Conference on
+Knowledge Discovery and Data Mining. 785-794.
+
+Zahra Dehghanighobadi, Asja Fischer, and Muhammad Bilal Zafar. 2025. Can
+LLMs Explain Themselves Counterfactually? arXiv preprint arXiv:2502. 18156
+(2025).
+
+F. Doshi-Velez and B. Kim. 2017. Towards a Rigorous Science of Interpretable
+Machine Learning. arXiv preprint arXiv:1702.08608 (2017).
+
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, et al. 2024. The LLaMA 3
+Herd of Models. arXiv preprint arXiv:2407.21783 (2024).
+
+Xi Fang et al. 2024. Large Language Models (LLMs) on Tabular Data: Predic-
+tion, Generation, and Understanding—A Survey. arXiv preprint arXiv:2402. 17944
+(2024).
+
+Gemma Team et al. 2024. Gemma 2: Improving Open Language Models at a
+Practical Size. arXiv preprint arXiv:2408.00118 (2024).
+
+Mohammadreza Ghaffarzadeh-Esfahani et al. 2024. Large Language Models ver-
+sus Classical Machine Learning: Performance in COVID-19 Mortality Prediction
+Using High-Dimensional Tabular Data. arXiv preprint arXiv:2409.02136 (2024).
+Y. Hao, L. Dong, F. Wei, and K. Xu. 2020. Self-Attention Attribution: Interpreting
+Information Interactions Inside Transformer. (2020). https://paperswithcode.
+com/paper/self-attention-attribution-interpreting
+
+Stefan Hegselmann, Alejandro Buendia, Hunter Lang, Monica Agrawal, Xiaoyi
+Jiang, and David Sontag. 2023. TabLLM: Few-Shot Classification of Tabular Data
+with Large Language Models. In Proceedings of the 40th International Conference
+on Machine Learning (ICML).
+
+Shiyuan Huang, Siddarth Mamidanna, Shreedhar Jangam, Yilun Zhou, and
+Leilani H. Gilpin. 2023. Can Large Language Models Explain Themselves? A Study
+of LLM-Generated Self-Explanations. arXiv preprint arXiv:2310.11207 (2023).
+Guolin Ke, Qi Meng, Thomas Finley, Taifeng Wang, Wei Chen, Weidong Ma,
+Qiwei Ye, and Tie-Yan Liu. 2017. LightGBM: A Highly Efficient Gradient Boosting
+Decision Tree. Advances in Neural Information Processing Systems 30 (2017).
+Scott M. Lundberg and Su-In Lee. 2017. A Unified Approach to Interpreting Model
+Predictions. In Advances in Neural Information Processing Systems (NeurIPS). 4765-
+4774.
+
+Mehul Madaan, Aniket Kumar, Chirag Keshri, Rachna Jain, and Preeti Nagrath.
+2021. Loan Default Prediction Using Decision Trees and Random Forest: A
+Comparative Study. In IOP Conference Series: Materials Science and Engineering,
+Vol. 1022. IOP Publishing, 012042.
+
+Tiago Martins, Ana Maria De Almeida, Elsa Cardoso, and Luis Nunes. 2023.
+Explainable Artificial Intelligence (XAI): A Systematic Literature Review on
+Taxonomies and Applications in Finance. IEEE Access 12 (2023), 618-629.
+Branka Hadji Misheva, Joerg Osterrieder, Ali Hirsa, Onkar Kulkarni, and
+Stephen Fung Lin. 2021. Explainable AI in Credit Risk Management. arXiv
+preprint arXiv:2103.00949 (2021).
+
+Basel Committee on Banking Supervision and Bank for International Settlements.
+2017. Basel III: Finalising post-crisis reforms. https://www.bis.org/bcbs/publ/
+d424.htm
+
+Advait Sarkar. 2024. Large Language Models Cannot Explain Themselves. arXiv
+preprint arXiv:2405.04382 (2024).
+
+Zhiyi Shi, Junsik Kim, Davin Jeong, and Hanspeter Pfister. 2024. Surprisingly
+Simple: Large Language Models are Zero-Shot Feature Extractors for Tabular
+and Text Data. arXiv preprint arXiv:2409.00079 (2024).
+
+Xingyou Song and Dara Bahri. 2025. Decoding-based Regression. arXiv preprint
+arXiv:2501.19383 (2025).
+
+Xingyou Song, Oscar Li, Chansoo Lee, Bangding Yang, Daiyi Peng, Sagi Perel,
+and Yutian Chen. 2024. Omnipred: Language models as universal regressors.
+arXiv preprint arXiv:2402.14547 (2024).
+
+M. Srinivasa Rao, Ch. Sekhar, and Debnath Bhattacharyya. 2021. Compara-
+tive Analysis of Machine Learning Models on Loan Risk Analysis. In Machine
+Intelligence and Soft Computing: Proceedings of ICMISC 2020. Springer, 81-90.
+Miles Turpin, Julian Michael, Ethan Perez, and Samuel Bowman. 2023. Language
+Models Don’t Always Say What They Think: Unfaithful Explanations in Chain-
+of-Thought Prompting. Advances in Neural Information Processing Systems 36
+(2023), 74952-74965.
+
+
+===== PAGE BREAK =====
+
+Interpreting LLMs as Credit Risk Classifiers: Do Their Feature Explanations Align with Classical ML?                                                 CIKM 2025 FinAl Workshop,
+
+[31] R. Vacareanu, V.-A. Negru, V. Suciu, and M. Surdeanu. 2024. From Words to
+Numbers: Your Large Language Model Is Secretly A Capable Regressor When
+Given In-Context Examples. COLM (2024).
+
+[32] A. Vaswani et al. 2017. Attention is All You Need. In Advances in Neural Informa-
+tion Processing Systems (NeurIPS), Vol. 30. 5998-6008.
+
+[33] Jason Wei et al. 2022. Chain-of-thought prompting elicits reasoning in large
+language models. Advances in Neural Information Processing Systems 35 (2022),
+
+24824-24837.
+
+[34] Thomas Wolf et al. 2020. Transformers: State-of-the-Art Natural Language
+Processing. In Proceedings of the 2020 Conference on Empirical Methods in Natural
+Language Processing: System Demonstrations. 38-45.
+
+[35] An Yang et al. 2024. Qwen2.5 Technical Report. arXiv:2412.15115 (2024).

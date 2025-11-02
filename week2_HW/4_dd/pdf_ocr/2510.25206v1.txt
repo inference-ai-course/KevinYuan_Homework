@@ -1,0 +1,1412 @@
+arX1v:2510.25206v1 [cs.AI] 29 Oct 2025
+
+RAVR: REFERENCE-ANSWER-GUIDED VARIATIONAL
+REASONING FOR LARGE LANGUAGE MODELS
+
+Tiangianjin Lin', Xi Zhao”, Xingyao Zhang”, Rujiao Long”, Yi Xu’,
+Zhuoren Jiang!, Wenbo Su’, Bo Zheng”*
+
+‘Zhejiang University Alibaba Group
+
+ABSTRACT
+
+Reinforcement learning (RL) can refine the reasoning abilities of large language models (LLMs),
+but critically depends on a key prerequisite: the LLM can already generate high-utility reasoning
+paths with reasonable probability. For tasks beyond the LLM’s current competence, such reasoning
+path can be hard to sample, and learning risks reinforcing familiar but suboptimal reasoning. We are
+motivated by the insight from cognitive science that Why is this the answer is often an easier question
+than What is the answer, as it avoids the heavy cognitive load of open-ended exploration, opting
+instead for explanatory reconstruction—systematically retracing the reasoning that links a question to
+its answer. We show that LLMs can similarly leverage answers to derive high-quality reasoning paths.
+We formalize this phenomenon and prove that conditioning on answer provably increases the expected
+utility of sampled reasoning paths, thereby transforming intractable problems into learnable ones.
+Building on this insight, we introduce RAVR (Reference-Answer-guided Variational Reasoning),
+an end-to-end framework that uses answer-conditioned reasoning as a variational surrogate for
+question-only reasoning. Experiments in both general and math domains demonstrate consistent
+improvements over strong baselines. We further analyze the reasoning behavior and find that
+RAVR reduces hesitation, strengthens conclusion consolidation, and promotes problem-specific
+strategies in reasoning.
+
+1 Introduction
+
+Large language models (LLMs) can solve increasingly complex problems when guided by reinforcement learning
+(RL) (               ;         ).  In this realm, a trajectory isa completion consisting of a reasoning path followed by a final
+response (                                                                                 ). The objective is straightforward:
+to sample completions from the model’s current distribution and then shift probability mass toward those with higher
+advantage, such as ones that produce a correct answer. This process is more like redistributing probabilities among
+
+sampleable completions, rather than generating entirely new ones (            ;       ). This indicates a critical prerequisite
+for effective optimization—the model must already be able to sample useful completions with non-negligible probability.
+In recently popular relative-advantage approaches such as GRPO (             ;       ), this prerequisite becomes even
+
+stricter, since the advantage of each completion is defined relative to others—meaning that even weak completions
+can be reinforced as long as it is better than the rest. Unfortunately, tasks beyond the model's competence or outside
+its preferences make high-utility completions difficult to obtain (                                  ;        ). As a result,
+training collapses into reinforcing a narrow set of familiar but suboptimal completions,  while promising ones remain
+unexplored.
+
+To address this issue, we advance a simple thesis: utilizing the reference answer can help derive good reasoning paths.
+While the reference answer is available in the training data, current methods use it only to compute reward; we argue its
+potential can be more fully exploited. In cognitive science, Why is this the answer is often an easier question than what
+is the answer because it relieves the learner from the high cognitive load of open-ended exploration based solely on the
+
+“The work was done during the author’s internship at the Future Life Lab, Alibaba Group.
+‘Corresponding author.
+
+
+===== PAGE BREAK =====
+
+question. Instead, it allows the learner to concentrate on explanatory reconstruction—tracing the logic that connects the
+question to the reference answer (            ;        ). For example, access to the answer can help learners detect errors
+to keep exploration, avoid overthinking when they are correct, and even engage in backward reasoning to obtain the
+preconditions leading to the answer. LLM is possibly to simulate this human behavior. We validate this intuition with a
+motivation experiment as shown in Figure |: for many hard questions where the LLM fails to sample a valid reasoning
+to solve the problem correctly after multiple attempts, providing the answer enables it to generate rational reasoning.
+
+Building on this insight, we propose using the reference         WHAT IS THE ANSWER?             WHY IS THIS THE ANSWER?
+The problem is "..." and the answer is "...". Can you
+
+answer as a guide to better explore high-quality reasoning.          WEP a EMSS aE             derive the reasoning from the problem to the answer?
+We formalize this effect and provide a proof in Section 2.2.
+Conditioning on the answer increases the likelihood of
+sampling sound reasoning and reduces the likelihood
+of sampling flawed reasoning, thereby improving the
+overall expected quality of reasoning over the sampling
+
+. oe    .                                                         Forward-Only                     Forward-Backward — PRO
+distribution.                                                         Open-Ended    Pans                Explanator       T0 bes
+P            OSoly;                    P'     y       So’
+Exploration           >               Reconstruction          REFERENCE
+
+While this is conceptually clean, this reasoning genera-                                                             ee
+
+tion pipeline does not align with the real need at inference
+stage—the LLM can only observes the question at infer-
+
+~ ot.            .                           ;         PS me ee
+ence and need to generate the reasoning instantly in the                                       yy            \
+:    :                             sas                             :                                        Qwen3-1.7B
+thinking tags. We address this issue from the perspective            unable to find valid reasoning       “en        {ry to derive valid reasoning
+and solve the problem correctly                               with reference answer guidance
+of variational inference (                                       ),
+_                                 <think> using both problem                   rigorously assess
+viewing the derived reasoning conditioned on the refer.        Gh       > <thinke using both picblem __  GS eer ere           ,
+ence answer as a variational surrogate for the reasoning     50 hard problems     derived reasoning here...          GPT-5_ derived reasoning     28/50 passed
+
+inside the thinking tags when question-only. We optimize   Figure 1: We sampled 50 hard questions from CrossThink-
+
+rmanimnizin : cxpected reasonin   utility over the answer   QA (              ’       ) on which Qwen3-1.7B, with think-
+mizing expected        ming      ms        .               ing mode enabled, failed to obtain the correct answer across
+conditioned distribution while reducing the discrepancy   8 attempts. For each question, we provided the answer in
+between the answer-conditioned reasoning distribution   the prompt and asked the LLM to derive the reasoning. A
+(hereafter referred to as Posterior) and the question-only   GPT-5 judge, using strict criteria, evaluated whether the
+pasnine ee i KL) diverecnce (letivatien non via   derived reasoning was logically coherent without indicating
+&                                  access to answer. In over 50% of the unlearnable questions,
+
+ton 2.3). To further stabilize training, we introduce the   the LLM was able to produce correct reasoning. See Ap-
+following designs. First, the language style can be dif-    endix A.2 for detailed prompts and cases
+ferent in the two distributions. The derived reasoning   P        :              Promp            :
+
+generated after the thinking tags can be concise and direct, but the internal reasoning under prior is usually exploratory
+and reflective. To bridge this gap, we leverage a role-play style prompt (                   ;       ), asking the LLM to
+produce a first-person think-aloud monologue as if solving the problem from scratch. The monologue is allowed
+to include any classical reasoning behavior such as reflection and backtracking. This setup encourages the derived
+reasoning to mirror the behavior expected inside the thinking tags. Second, we introduce a utility baseline for estimating
+reasoning utility under the posterior, which is the expected reasoning utility under the prior. This provides a more
+informative reward signal by measuring how much the reasoning from the posterior improves over that from the prior.
+Third, we reweight samples in the KL estimation using the utility reward, with the goal of aligning the prior to a
+distribution whose expected utility is as large as possible. With the proposed variational objective and the designed
+strategies, we can finally end-to-end train a single LLM that learns to reason effectively from scratch at inference.
+
+We name this framework as RAVR, for Reference-Answer-guided Variational Reasoning. We evaluated RAVR under
+two training settings—math data and general data. Results on standard benchmarks for both general and math
+reasoning show that RAVR substantially enhances reasoning capabilities and outperforms state-of-the-art methods. For
+example, when we use RAVR to train Qwen3-1.7B on the CrossThink-QA (               ;        ) dataset, it achieves a
+GPQA-Diamond score of 40.91, outperforming DAPO (          ;        ) by 5.56 points. Additionally, we analyze the
+reasoning behavior of the LLM trained with RAVR and find that RAVR can reduce hesitation, strengthens conclusion
+consolidation, and promotes problem-specific strategies in the reasoning.
+
+Overall, this paper makes the following contributions: (1) We formalize the intuition that reference answers can guide
+reasoning. We prove that conditioning on the answer provably amplifies the probability of high-utility reasoning paths;
+(2) We propose RAVR, the first end-to-end framework that operationalizes this insight and also the first to leverage the
+reasoning ability of the LLM the use the refernce answe. RAVR alleviate the exploration difficulty in RL for LLM;
+(3) We demonstrate the effectiveness of RAVR through extensive experiments on both general and math domains and
+
+
+===== PAGE BREAK =====
+
+the in-depth analysis of the reasoning behavior of the LLM trained with RAVR. We share our code to facilitate future
+research.
+
+2 RAVR: Reference-Answer guided Variational Reasoning
+
+In this section, we introduce the backgroud of RL for LLM, explain the motivation of RAVR and then describe the
+proposed objective and strategies to realize the motivation.
+
+2.1 Preliminaries and the Sampling Challenge
+
+In this work, we consider training a LLM, denoted by 7, to be a Large Reasoning Model (LRM). Given a sample
+(x, y*) from a dataset D, the model is supposed to produce an intermediate reasoning path z before giving a final
+answer y for each problem x. This can be factorized as:
+
+m9(z,y |) = mo(z | x) mo(y | x, 2).                         (1)
+
+In general setting, a reward function is designed, which provides a scalar reward R(y) € R to judge the consistency of
+the reference answer y* and the generated answer y. The standard objective is to maximize the expected reward:
+
+FT (8) = Exxny (le) Eyrro(-lx,z) [R(y)].                                      (2)
+
+To align with the comparative nature of reward models, rencent popular RL algorithms for LLM usually normalize the
+reward of each completion in a group-relative manner to obtain the advantage of each completion. Taking GRPO (
+
+;       ) as an example, it first generate multiple completions for a problem 7, i.e., z and y, and calculates the
+
+advantage of i-th completion as A; =      coe where mean and std represent the average and standard deviation
+
+of the rewards. This indicates a critical prerequisite for effective optimization—the model must already be able to
+sample good completions with non-negligible probability, because even weak completion can be reinforced as long
+as it is better than the rest and obtain a postive advantage. When few good completions are sampled, training risks
+collapsing into reinforcing familiar but suboptimal completions. Recent work also proposes to normalize the reward at
+batch-level (           ;       ). This alleviate the challenge at problem level, yet still face the challenge at dataset level. If
+R(-) is defined as binarized correctness, which is common in current applications, this challenge can be more severe
+when no correct completion is generated since all the advantages become zero, making no optimzation signal.
+
+2.2 Motivation: Conditioning on reference answer amplifies good reasoning
+
+The reasoning path z dominate the final quality of the entire completion since it causally influence the generation of the
+final answer y. Therefore, we propose to mitigate the sampling challenge of high-utility reasoning paths to alleviate
+the sampling challenge of the overall completion. In this section, we formally define the utility of a reasoning path,
+and prove our motivation that conditoning on reference answer can amplify the sampling probability of high-utility
+reasoning paths.
+
+If R(-) denotes binarized correctness, optimizing reasoning path z aims to maximize the expectation it yields the
+reference answer. Hence, a natural alternative is to take the LLM’s likelihood of the reference-answer as reward on z
+and the LLM can be optimized by maximizing the expected reward:
+
+Tprob(9) =  Vewmg(-|x) [ Rprob (z) iF   where Rprob(Z)  =  Toy" | x, z).                     (3)
+
+This objective is not fully match the original setting, for example, the reference answer y* is usually a single word or
+phrase such as an option “A” of a multiple-choice question, but the prediction y can be a paragraph that includes steps
+
+to reach the answer. Yet, recent works have shown its acceptable effectiveness (                                             ),
+especially in open-ended domain (                                ;        ). Therefore, Rprob provides ; a reliable operational
+measure of the utility of a reasoning path 2 z.  Let’: s formally define the utility score as:
+
+s(z) = mo(y" | @, 2) € [0,1].                        (4)
+
+Then we can define the ability of the LLM as the expected utility over its reasoning distribution:
+boi=   emo (-|2) [s(z)]                                                         (5)
+
+Note that this equals to 79(y* | x) because of the law of total probability. We can define the r-good set as Z, = {z:
+s(z) > 7}, where t > 4 emphasizes above-average reasoning paths.
+
+
+
+===== PAGE BREAK =====
+
+The current challenge lies in efficiently sampling reasoning paths with higher s(z). Given that the reference answer y*
+is often correlated with the question or its underlying reasoning process, a natural question arises: can it be leveraged to
+guide the learning of z rather than merely serving as a reference for reward computation (          ;         )? In what
+follows, we show that conditioning on y* indeed increases the sampling probability of reasoning paths with higher s(z).
+
+To begin with, for a specific reasoning path z, by the law of total probability and Bayes’ rule, we have
+
+*      2) __ Toy” |,z)mo(z| 2) _ sz
+
+Lew ma(-|a,y*)MO( 2/2, Y ,C) = T(z | vy ) =    wy  |    2)   (  | =  ( ) T(z | zr),           (6)
+mo(y* | a)               lu
+
+where the first expression describes that the LLM thinking through the problem and reference answer jointly before
+
+producing the reasoning. It shows that observing y* induces a size-biased reweighting of m9(z | x) by s(z): high-s(z)
+
+paths gain probability mass, low-s(z) paths lose it.
+
+For any subset of reasoning paths Z, the probability of sampling one reasoning path belonging to Z can be formulated
+as follows
+
+2 aly" | 2)                         i
+
+See Appendix A.3 for detailed derivation. Consequently, we have
+
+Pr(Z | a,y*) > Pr(Z|2) — Efs(z)|2z€Z, a] > wu.                   (8)
+
+For t-good set Z, = {z: s(z) > 7}, we have
+
+Pr(Z, | x, y*                 .       Le          .
+aaa )  20   with strict increase if T > p.                            (9)
+Therefore, conditioning on reference answer y* amplifies above-average reasoning paths. Beyond sets, the posterior
+raises the expected utility over the distribution, because given equation 6 and E [s(z)?] =E [s(z)]? + Var(s(z)), we
+can derive
+1                                Var(s(z))
+tewmo(-lay*)19(2)] = 7 Eewmo(-lal8(2))] = + ——— 2                         (10)
+
+LL          LL
+
+In summary, approximate 7(z | x, y*) acts as a principled target for exploring high-utility reasoning paths and thus it
+can be properly used to help the learning of z9(z | x).
+
+Given theQ&A,
+your task is to...
+
+generate |
+
+apply instruction          ‘7
+
+Q: How does the acceleration
+of free fall change?
+
+               extract and create
+             inference behavior
+token probability              1
+
+                 ‘
+
+does the acceleration of
+free fall change?
+
+<think> Okay, to solve the problem,
+I need to... </think>
+
+Figure 2: The framework of RAVR. According to Section 2.2, seeing the reference answer can amplify the sampling
+probability of good reasoning paths. Hence, we use this answer-conditioned posterior to help the learning of the
+question-only prior. The LLM is instructed to derive reasoning path from the question to the answer with thinking mode
+enabled. RAVR regard the reference-answer probability as the reward for the generated reasoning and maximize it
+to enhance the ability of the LLM to think why is this the answer. Meanwhile, RAVR minimize the KL divergence
+between the posterior and the question-only prior to help the model better think what is the answer and in turn, the prior
+also regularizes the behavior of the posterior. See Section 2.3 for details.
+
+
+===== PAGE BREAK =====
+
+2.3 Reference-Answer-Conditioned Variational Optimization Objective
+
+Building on the above insight, we propose a noval variational objective, introducing an amortized posterior 79(z | x, y*)
+to aid the learning of the prior 7(z | x). We start from log-transformation of the raw objective, which maximize the
+utility score over the reasoning distribution:
+
+log 7 (0) = log  lewro(z|x) [mo (y" | x, z)].                                   (11)
+
+By introducing the amortized posterior 79(z | x, y*) and applying Jensen’s inequality, we can derive the Evidence
+Lower Bound (ELBO) of the objective as follows:
+
+log J (9) = Ezvne(zla,y*) [ log mo (y* | x, z)| — Dxx [7o(z|2, y*)|| 79 (z|x)] -               (12)
+
+See Appendix A.4 for the derivation. The second term in equation 12 is the Kullback-Leibler (KL) divergence between
+the amortized posterior and the prior and we estimate it via the approximator introduced by               (       ). The first
+term encourage reasoning paths that make y* more likely. The KL term pulls the prior toward the posterior and also
+regularizes the posterior to prevent it from collapsing onto out-of-distribution reasoning path for the prior.
+
+To further stabilize training, we innovatively introduce a utility baseline for estimating reasoning utility under the
+answer-conditioned posterior: the expected utility under the question-only prior. This provides a more informative
+reward signal by measuring how much the reasoning under the posterior improves over that under the question-only
+prior.
+
+Rimpr(Z) = max(0, log 79(y*|x, z) — Ez vno(.Ja) log to(y"* |x, 2')).                      (13)
+We clip the minimum reward to zero to stabilize training. In practice, we replace the likelihood with length-normalized
+sequence likelihood. This avoids the issue where longer reference answers receive smaller rewards, which would make
+reference answer of different lengths incomparable. Moreover, unlike existing probability-reward-based methods (
+
+;                          ;          ) that directly append the answer at the end to compute its probability, we append the
+reference answer after inserting a cue, namely “The answer is y*”. This simple modification yields a more accurate
+estimate of the probability of the answer, as it better aligns with natural language usage and prompts the model to enter
+a state conducive to answer generation.
+
+Moreover, once the model has mastered high-quality reasoning for a given problem, it no longer needs external guidance
+and should learn only from paths with higher utility than its own. Accordingly, we apply reward-based weighting to
+samples when estimating the KL.
+
+Dux [mo(z|2,y")||t9(z|x)] = Rimpr(2) - Dex [mo(2|2, y*)I|0(212)]                      (14)
+
+Therefore, the final variational objective is given as:
+
+Travr(9) =  Lewme(zlayy") [Rimpr(2)] _ Det [mo(z|a, y")\|79(z|x)| .                     (15)
+
+We utilize GRPO (            ;       ) to optimize the first term. In practice, we jointly optimize this objective and
+Equation 11. To realize the two distribution 7(-|x) and z(-|x, y*) within one LLM, we adjust the user prompt. Details
+of the template are as follows.
+
+Prompt Template for Question-only
+
+<lim_startl>system
+
+A conversation between user and assistant. The user asks a question, and the assistant solves it. The assistant first thinks about the reasoning process in the mind
+and then provides the user with the answer. The reasoning process is enclosed within <think></think>tags, i.e., <think>This is my reasoning. </think>This is my
+answer.<lim_endl>
+
+<lim_startl>user
+
+{ {question } }<lim_endl>
+
+<lim_startl>assistant
+
+Prompt Template for Conditioning on both Question and Reference Answer
+
+# same system prompt.
+
+<lim_startl>user
+
+Given the following question and its reference answer, your task is to produce a step-by-step explanation that logically leads to the reference answer, written in
+the style of a first-person think-aloud monologue. You are encouraged to draw on the reference answer for internal guidance to help structure and support your
+reasoning, but the final monologue must read as a genuine, first-encounter, real-time discovery, without mentioning or implying any prior access to the reference
+answer.
+
+
+
+===== PAGE BREAK =====
+
+Question: { {question} }
+
+Reference Answer: { { ground_truth}}
+
+OUTPUT REQUIREMENTS:
+
+1. Output ONLY the first-person, think-aloud monologue. Do not include any preface, summary, or restatement of these instructions.
+
+2. Maintain the tone of a focused individual thinking to themself. Avoid meta-commentary like “for the first time,” and any phrasing that reveals simulation.
+3. Do not mention, imply, or hint at prior access to the Reference Answer in the monologue. Avoid phrases like “according to the answer...” or “to get to that
+answer...”, and any euphemism that signals foreknowledge.
+
+4. Do not merely restate the final answer in the monologue; articulate the reasoning pathway with sufficient intermediate steps, rationale, decision points,
+verification, and any necessary error-correction or backtracking.
+
+<lim_endl>
+
+<lim_startl>assistant
+
+3 Experiments
+
+In this section, we evaluate the effectiveness of RAVR on both general-domain and math domain. Additionally, we also
+analyze the learning dynamics of the method and efficacy of different components and the reasoning behavior of the
+model optimized by RAVR.
+
+Table 1: Experiments on Qwen3-1.7B. General task represents average of GPQA-D and MMLU-Pro, and Math
+reasoning represents average of AIME24, AIME25, AMC23 and Minerva.
+
+GPQA-D MMLU-Pro AIME 24 AIME 25 AMC 23 Minerva General Math
+
+Training Set           Model                                                                                                                                         Average
+Avg@4    Avg@4 Avg@16 Avg@16 Avg@16 Avg@16 Task Reasoning
+Qwen3-1.7B       21.46         53.48         20.00       23.30       55.00 50.00 37.47       37.08       37.21
+In-domain                          Out-of-domain
+
++ GRPO         34.97         55.18         25.63       23.54       64.53 56.92 45.08       42.65       43.46
+
+.                + DAPO         35.35         54.75         23.33       21.88       62.50 56.80 45.05       41.13       42.44
+CrossThink-QA            .
+
++ VeriFree        28.60         53.32         23.54       20.83       62.19 55.79 40.96       40.59       40.71
+
++ RLPR         30.93         53.82         24.83       22.92       62.81      56.34 42.38       41.73       41.94
+
++ RAVR (Ours) 40.91         55.88         27.92       23.75       62.03 58.00 48.39       42.92       44.75
+
+Out-of-domain                          In-domain
+
++ GRPO         33.21         54.55         26.67       21.46       67.03 56.99 43.88       43.04       43.32
+
++ DAPO         34.84         55.25         26.67       23.33       67.50 57.97 45.05       43.87       44.26
+DeepMath                .
+
++ VeriFree        30.30         52.90         26.88       21.88       62.34 55.01 41.60       41.53       41.55
+
++ RLPR         31.31         54.27         26.04       22.50       62.19 55.51 42.79       41.56       41.97
+
++ RAVR (Ours) 34.60        55.50         29.17       22.71      69.69 58.43 45.05       45.00       45.02
+
+3.1 Performance of RAVR
+
+We conducted experiments with Qwen3-1.7B (             ;       ). To validate the generalizability of RAVR across
+different domains, we train the LLM on two different datasets, CrossThink-QA (              ;       ) and DeepMath-
+103K (           ;        ;             ;        ). The former is constructed for general purpose reasoning, it inlcudes STEM
+fields, Economics,  Social Sciences, and more. The latter is a math dataset designed with a focus on challenging math
+problems. We also evaluate the model on datasets from different domain, i.e., general and math benchmarks. For
+general tasks, we include GPQA-Diamond (           ;      ) and MMLU-Pro (            ;      ); for math, we
+include AIME24, AIME25, AMC23 and Minerva (                     ;       ). This also make it possible to analyze the
+effectiveness on in-domian and out-of-domain performance. As for baselines, our selection spans two axes: reward
+type (verifiable reward vs. reference-answer-probability reward) and the presence or absence of implicit curriculum
+learning to improve stability when learning with challenging samples. The reference-answer-probability reward is
+technically related to RAVR, while implicit curriculum learning is related in terms of our objective of learning from
+challenging samples. Specifically, we include GRPO (             ;       ), DAPO (          ;        ), VeriFree (
+
+) and RLPR (           ;         ). GRPO and DAPO are widely-acknowledged methods with verifiable reward and
+DAPO introduces dynamic sampling trick to filter hard examples to achieve curriculum learning. VeriFree and RLPR
+are up-to-date methods with reference-answer-probability reward and RLPR introduces a reward standard deviation
+filtering trick to introduce an adaptive curriculum learning. See Appendix A.5 for more implementation details.
+
+
+===== PAGE BREAK =====
+
+The experimental results, summarized in Table 1, demonstrate the superior performance and generalization capabilities
+of RAVR. When trained on the general-purpose CrossThink-QA dataset. Here, RAVR achieves the highest overall
+average with 44.75. It establishes a significant lead on in-domain general tasks with a score of 48.39, outperforming
+DAPO by a large margin. Crucially, it also demonstrates the best out-of-domain performance on math reasoning tasks
+(42.92), showcasing its robust ability to transfer learned reasoning skills across domains. Similarly, when trained on the
+DeepMath dataset, RAVR also achieves the highest overall average score of 45.02 and shows strong generalization to
+out-of-domain general tasks, achieving a leading score of 45.05. RAVR consistently delivers state-of-the-art results
+across both training settings and evaluation benchmarks, validating its effectiveness and robustness.
+
+3.2 Reasoning Behavior of RAVR
+
+We compare the internal-thinking style of
+the model trained with RAVR and GRPO
+using frequencies of discourse markers as               41.4e
+proxies  for cognitive moves (
+
+;      ). The key fea-
+tures of RAVR are observed as follows: (/)            13.02
+Fewer wait. RAVR produces fewer hesitation                a
+cues, indicating reduced dithering; this is con-
+sistent with stronger problem-solving com-          &     RZ
+petence and with answer-conditioned paths                        x)
+that tend to terminate once the reference an-                                     ZS
+Swer Is reached, avoiding unnecessary Over-              (a) Trained on CrossThink-QA; Tested on GPQA-Diamond.
+thinking. (2) More therefore. This suggests
+firmer result consolidation: the model more                        34.07
+actively reviews preceding steps and commits
+to a conclusion. (3) More recall in knowl-
+edge QA. This evidences targeted retrieval
+aligned with task requirements rather than
+jumping straight to an answer. (4) More al-                          253
+ternatively and I need in math. These mark-
+ers reflect greater divergent exploration and            RY
+explicit planning before committing to a solu-                               e        RS                                       we
+tion path—desirable for multi-step problem                                   ®
+solving like math problem. (5) Task-adaptive                        (b) Trained on DeepMath; Tested on AMC23.
+
+contrast. In English discourse, but and how- __                    .                 .           .       .     Lo,
+ever both serve as contrastive markers, yet Figure 3: Comparison of reasoning behaviors wihin thinking tags.
+
+they differ in usage. But is more casual and Words on the x-axis are those frequently used during thinking, and
+often signals a local correction or small-scale the y-axis represents their average frequency per response. See Ap-
+turn within a sentence, whereas however is morP¢@¢itah and @y PROAA¥SHkRs a global contrast or structured shift across
+sentences. Multiple-choice task exhibits more however (global comparison across options), while math shows more but
+(incremental corrections within derivations), suggesting an adjustment of contrast granularity to task demands rather
+than a fixed stylistic habit. The reasoning behavior shifts indicate a more interpretable, problem-adaptive reasoning
+process that RAVR achieves.
+
+uw
+oO
+S
+Pal
+Ny
+x
+
+Mmm =RAVR(Ours)           GRPO
+
+Ww
+o Oo
+
+Frequency
+N
+fo}
+a
+a
+io
+2
+&
+&
+
+14.80
+
+B
+oO
+
+o
+
+L057                          Mam =RAVR(Ours)           GRPO
+
+w
+oO
+
+Frequency
+N
+fo}
+i
+a
+S
+
+BH
+oO
+a
+io
+°
+
+Oo
+%
+YW
+w
+PS
+2
+°
+a
+3
+°
+g
+3
+*
+3S
+3
+=
+i
+gs
+
+3.3 Learning Dynamics of RAVR
+
+To further investigate how introducing answers enhances sampling efficiency, we compare our model against GRPO
+with larger rollout group sizes. Figure 4 presents the results on GPQA-Diamond and MMLU-Pro benchmarks, which
+demonstrates the superior sampling efficiency of our method. The primary observation is that while the performance
+of GRPO scales with a larger group size (from 8 to 24), RAVR achieves a better or comparable performance with a
+significantly smaller group size of only 8. This finding provides strong evidence that RAVR markedly enhances the
+sampling efficiency of high-quality reasoning paths. Furthermore, the smoother learning curve for RAVR indicates
+improved learning stability.
+
+Moreover, we observe that the KL divergence between 79(z|x, y*) and 7(z|z) first fluctuates but then gradually
+decreases. This indicates that the capability of producing high-utility reasoning paths under the posterior is transferred
+to the question-only setting as expected, and that the language style of the generated reasoning increasingly aligns with
+that of reasoning when question-only. Additionally, it’s observed that while the prior reasoning utility becomes better,
+the posterior keep a stable utility gain, which ensure the continual learning.
+
+
+===== PAGE BREAK =====
+
+GRPO (Group=8)                                                                        56.04       GRPO (Group=8)
+38.07 —e— GRPO (Group=16)                                                       =®=— GRPO (Group=16)
+—®- GRPO (Group=24)                                                         —®— GRPO (Group=24)
+36.0 7 —e— RAVR (Group=8)                                               55-5 7 _e— Rave (Group=8)
+o 34.0                                                           a         a
+34                                                                       3 55.0
+5                                                                           5
+32.0
+s}                                                             9 54.5
+t 30.0                                                         <
+54.0
+28.0
+26.0                                                                         53.5
+250      500      750     1000     1250     1500     1750                    250      500      750     1000     1250     1500     1750
+Steps                                                                      Steps
+(a) GPQA-Diamond.                                                        (b) MMLU-Pro
+
+Figure 4: Comparison with GRPO across different rollout group sizes. When using a rollout group size of 8,
+RAVR attains or exceeds the performance of GRPO with a rollout group size of 24. This observation suggests that
+our approach markedly enhances the sampling efficiency of high-quality reasoning paths, thereby improves learning
+stability and efficiency.
+
+1.50 4
+.                        —— Utility Gain   — Posterior Utility   —— Prior Utility
+0.45 4                                          — Testing           1.00 |  n
+— Training                         NN nN rp
+g 0.40 4                                                                       © 0.504
+©
+oO
+D 0.35 4                                                                                  © 0.004
+Do.
+©                                                                                        Fay
+2 9304                                                       050
+3                                                                                                    -1.00 4
+< 0.25
+-1.50 4
+0.20
+0            200          400          600          800          1000                  0            200          400          600          800          1000
+Steps                                                                                   Steps
+(a) Posterior-Prior KL during Training                                  (b) Reward of the Posterior: Utility Gain
+
+Figure 5: Learning Dynamics. Training on CrossThink-QA, testing on GPQA and MMLU-pro.
+
+3.4 Ablation Study of RAVR
+
+(i) Main variational reasoning objective. Maximizing the utility of answer-conditioned reasoning is critical: removing
+this objective makes RAVR consistently underperform GRPO across both datasets. Without this “utility anchor,” the
+KL term can pull the question-only prior toward a diffused posterior, hindering effective prior learning. Removing the
+posterior—prior KL term reduces training to an auxiliary reasoning task—producing reasoning given both question and
+answer. On the math dataset, we even observe slight gains, likely because answers add little beyond flagging errors
+and avoiding overthinking, making posterior and prior reasoning largely similar. (ii) Utility baseline and posterior
+instruction. Both strategies are important. Without the prior-based utility baseline, posterior reasoning need not
+surpass prior reasoning, and training drifts toward “least bad” patterns rather than genuinely informative ones. With the
+baseline, any posterior trace whose induced answer likelihood fails to exceed that of the prior gets zero reward, ensuring
+updates focus on reasoning that truly improves the prior. Omitting explicit instructions for first-person, “think-aloud”
+monologues often destabilizes training—likely because the language-style shift disrupts original reasoning patterns.
+(iii) KL sample weighting and answer prefix. These stability-oriented strategies play distinct roles. KL reweighting
+has minimal effect on peak accuracy, but removing it causes higher variance. The answer prefix—absent from prior
+probability-reward methods—helps stabilize early training, enabling faster, more consistent convergence. (iv) Prior
+objective. Retaining the question-only reasoning objective is vital—especially for math—since mismatches between
+training (posterior) and inference (prior) can degrade a probabilistic model’s performance if ignored. Overall, these
+ablations validate our full design of RAVR, achieving both superior stability and higher performance.
+
+4 Related works
+
+Reinforcement learning has been applied to improve the reasoning abilities of large language models, but it still faces
+inherent challenges in exploration. Several works have shown that revealing the correct answer to the model can
+significantly help in generating a useful chain-of-thought, which can then be used for supervised fine-tuning. For
+
+
+===== PAGE BREAK =====
+
+40 CrossThink-QA (Train) — GPQA-Diamond (Test)               DeepMath (Train) — AMC23 (Test)
+
+70.0 4
+> 35.0                                                                              > 68.0 4
+12)                                                                           12)
+® 359                                              © 66.0 |
+Fs                                                   D 64.04
+< 25.0                                               2 62.04
+60.0 4
+20.07                58.0,         :
+250 500 750 1000 1250 1500 1750                    200 400 600 800 1000 1200 1400
+Steps                                                                     Steps
+w/o Posterior-Prior KL        —e— w/o Posterior Utility       —e w/o Utility Baseline
+—e w/o Posterior Instruction    —e— w/o KL Sample Weight    —e— w/o Answer Prefix
+w/o Prior               —=t— GRPO                —t— Full RAVR
+Figure 6: Ablation Study.
+instance,                     (       ) introduced STaR, a bootstrapping loop that first let the model attempt each problem on
+its own, and if it fails, then provides the ground-truth and asks the model to solve again. Recently,               (        )
+expands STaR into the RL setting, which use STaR to generate postive samples for preference optimization, such as
+DPO (                 ;       ). While these methods demonstrated the power of using answers to obtain high-quality
+
+reasoning paths; however, they are not end-to-end — it requires interlaced stages of generation and fine-tuning. Moreover,
+they judge generated chain-of-thoughts purely by whether they end in the correct answer, which may not capture other
+important qualities of an effective reasoning chain. Another related work comes from the teacher-student distillation
+paradigm.                (       ) trains a teacher model, which requires a complete step-by-step solution of a problem as
+input and instantly outputs an explanation, without engaging in any reasoning. This yields very detailed and instructive
+explanations that can be used to distill stronger students. However, this work ignores the capacity of LLMs for reasoning
+in explanation derivation and it adopts an elaborate two-model, two-phase setup, making it a complex approach.
+
+In contrast to these approaches, RAVR incorporates the reference answer into an end-to-end training framework to
+directly improve the LLM’s own problem-solving and reasoning abilities. Notably, RAVR does not require the reference
+answer to be a complete solution—even a single word or phrase can suffice—since it fully exploits the LLM’s inherent
+reasoning capability.
+
+5 Conclusion
+
+This work presents RAVR, an end-to-end framework that makes the LLM to think why is this the answer to help its
+learning of what is the answer with a novel variational reinforcement learning objective. This is the first work that
+leverages the reasoning ability of LLMs to utilize the reference answer to derive high-quality reasonng paths. We
+further innovatively propose simple but effective strategies, i.e., the reasoning reward baseline, the reward based sample
+weight in KL calculation and the answer prefix trick, to enhance the training stability and performance. In the future,
+we will explore the open-ended tasks, where the reference answers offer richer information and it is typically more
+difficult for LLMs to obtain high-quality reasoning solely through their inherent capabilities.
+
+Ethics Statement
+
+This work does not involve human subjects, sensitive personal data, or biased decision-making. The main potential
+negative impact is the carbon footprint associated with the computational resources used in model training and inference.
+We have taken measures to reduce environmental impact, e.g., using efficient training and inference techniques.
+
+Reproducibility Statement
+
+We have undertaken several measures to ensure the reproducibility of our work. The implementation code of RAVR is
+provided in the supplementary materials with the environment requirements, and detailed descriptions of the experimen-
+tal settings, including hyperparameter configurations, are given in Appendix A.5. All training and test datasets used in
+our experiments are publicly available, with their sources clearly cited in the main text. Furthermore, all mathematical
+
+
+===== PAGE BREAK =====
+
+results in this paper are accompanied by precise definitions and complete derivations, which can be found in sections
+such as Section 2.2, as well as in Appendix A.3 and Appendix A.4.
+
+References
+
+Sandhini Agarwal, Lama Ahmad, Jason Ai, Sam Altman, Andy Applebaum, Edwin Arbus, Rahul K Arora, Yu Bai,
+Bowen Baker, Haiming Bao, et al. gpt-oss-120b & gpt-oss-20b model card. arXiv preprint arXiv:2508.10925, 2025.
+
+Syeda Nahida Akter, Shrimai Prabhumoye, Matvei Novikov, Seungju Han, Ying Lin, Evelina Bakhturina, Eric Nyberg,
+Yejin Choi, Mostofa Patwary, Mohammad Shoeybi, et al. Nemotron-crossthink: Scaling self-learning beyond math
+reasoning. arXiv preprint arXiv:2504. 13941, 2025.
+
+Paul C Bogdan, Uzay Macar, Neel Nanda, and Arthur Conmy. Thought anchors: Which Ilm reasoning steps matter?
+arXiv preprint arXiv:2506.19143, 2025.
+
+Edoardo Cetin, Tianyu Zhao, and Yujin Tang. Reinforcement learning teachers of test time scaling. arXiv preprint
+arXiv:2506.08388, 2025.
+
+Michelene TH Chi, Miriam Bassok, Matthew W Lewis, Peter Reimann, and Robert Glaser. Self-explanations: How
+students study and use examples in learning to solve problems. Cognitive science, 13(2):145-182, 1989.
+
+Samuel Gershman and Noah Goodman. Amortized inference in probabilistic reasoning. In Proceedings of the annual
+meeting of the cognitive science society, volume 36, 2014.
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma, Peiyi Wang,
+Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in IIms via reinforcement learning. arXiv preprint
+arXiv:2501.12948, 2025.
+
+Zhiwei He, Tian Liang, Jiahao Xu, Qiuzhi Liu, Xingyu Chen, Yue Wang, Linfeng Song, Dian Yu, Zhenwen Liang,
+Wenxuan Wang, et al. Deepmath-103k: A large-scale, challenging, decontaminated, and verifiable mathematical
+dataset for advancing reasoning. arXiv preprint arXiv:2504.11456, 2025.
+
+Jian Hu, Jason Klein Liu, Haotian Xu, and Wei Shen. Reinforce++: An efficient rlhf algorithm with robustness to both
+prompt and reward models. arXiv preprint arXiv:2501.03262, 2025.
+
+Aaron Jaech, Adam Kalai, Adam Lerer, Adam Richardson, Ahmed El-Kishky, Aiden Low, Alec Helyar, Aleksander
+Madry, Alex Beutel, Alex Carney, et al. Openai o1 system card. arXiv preprint arXiv:2412.16720, 2024.
+
+Diederik P Kingma and Max Welling. Auto-encoding variational bayes. arXiv preprint arXiv: 1312.6114, 2013.
+
+Aitor Lewkowycz, Anders Andreassen, David Dohan, Ethan Dyer, Henryk Michalewski, Vinay Ramasesh, Ambrose
+Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, et al. Solving quantitative reasoning problems with language
+models. Advances in neural information processing systems, 35:3843-3857, 2022.
+
+Yang Li, Jiale Ma, Yebin Yang, Qitian Wu, Hongyuan Zha, and Junchi Yan. Generative modeling reinvents supervised
+learning: Label repurposing with predictive consistency learning. In Forty-second International Conference on
+Machine Learning, 2025a.
+
+Zongxia Li, Yapei Chang, Yuhang Zhou, Xiyang Wu, Zichao Liang, Yoo Yeon Sung, and Jordan Lee Boyd-Graber.
+Semantically-aware rewards for open-ended rl training in free-form generation. arXiv preprint arXiv:2506. 15068,
+2025b.
+
+Zihe Liu, Jiashun Liu, Yancheng He, Weixun Wang, Jiaheng Liu, Ling Pan, Xinyu Hu, Shaopan Xiong, Ju Huang, Jian
+Hu, et al. Part i: Tricks or traps? a deep dive into rl for Ilm reasoning. arXiv preprint arXiv:2508.08221, 2025.
+
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea Finn. Direct
+preference optimization: Your language model is secretly a reward model. Advances in neural information processing
+systems, 36:53728-53741, 2023.
+
+David Rein, Betty Li Hou, Asa Cooper Stickland, Jackson Petty, Richard Yuanzhe Pang, Julien Dirani, Julian Michael,
+and Samuel R Bowman. Gpqa: A graduate-level google-proof q&a benchmark. In First Conference on Language
+Modeling, 2024.
+
+John Schulman. Approximating kl divergence, 2020. URL https://joschu.net/blog/kl-approx.html.
+
+Murray Shanahan, Kyle McDonell, and Laria Reynolds. Role play with large language models. Nature, 623(7987):
+493-498, 2023.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li,
+Yang Wu, et al. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv
+preprint arXiv:2402.03300, 2024.
+
+Chenlong Wang, Yuanning Feng, Dongping Chen, Zhaoyang Chu, Ranjay Krishna, and Tianyi Zhou. Wait, we don’t
+need to" wait"! removing thinking tokens improves reasoning efficiency. arXiv preprint arXiv:2506.08343, 2025a.
+
+Haozhe Wang, Haoran Que, Qixin Xu, Minghao Liu, Wangchunshu Zhou, Jiazhan Feng, Wanjun Zhong, Wei Ye,
+Tong Yang, Wenhao Huang, et al. Reverse-engineered reasoning for open-ended generation. arXiv preprint
+arXiv:2509.06160, 2025b.
+
+Yubo Wang, Xueguang Ma, Ge Zhang, Yuansheng Ni, Abhranil Chandra, Shiguang Guo, Weiming Ren, Aaran Arulraj,
+Xuan He, Ziyan Jiang, et al. Mmlu-pro: A more robust and challenging multi-task language understanding benchmark.
+
+10
+
+
+===== PAGE BREAK =====
+
+Advances in Neural Information Processing Systems, 37:95266—95290, 2024.
+
+Yifei Xu, Tusher Chakraborty, Srinagesh Sharma, Leonardo Nunes, Emre Kiciman, Songwu Lu, and Ranveer Chandra.
+Direct reasoning optimization: Llms can reward and refine their own reasoning for open-ended tasks. arXiv preprint
+arXiv:2506.13351, 2025.
+
+An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang,
+Chenxu Ly, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388, 2025.
+
+Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong
+Liu, Lingjun Liu, et al. Dapo: An open-source Ilm reinforcement learning system at scale. arXiv preprint
+arXiv:2503.14476, 2025a.
+
+Tianyu Yu, Bo Ji, Shouli Wang, Shu Yao, Zefan Wang, Ganqu Cui, Lifan Yuan, Ning Ding, Yuan Yao, Zhiyuan Liu,
+et al. Rlpr: Extrapolating rlvr to general domains without verifiers. arXiv preprint arXiv:2506. 18254, 2025b.
+
+Yang Yue, Zhiqi Chen, Rui Lu, Andrew Zhao, Zhaokai Wang, Shiji Song, and Gao Huang. Does reinforcement learning
+really incentivize reasoning capacity in Ilms beyond the base model? arXiv preprint arXiv:2504.13837, 2025.
+
+Eric Zelikman, Yuhuai Wu, Jesse Mu, and Noah Goodman. Star: Bootstrapping reasoning with reasoning. Advances in
+Neural Information Processing Systems, 35:15476—15488, 2022.
+
+Kaiyan Zhang, Yuxin Zuo, Bingxiang He, Youbang Sun, Runze Liu, Che Jiang, Yuchen Fan, Kai Tian, Guoli Jia,
+Pengfei Li, et al. A survey of reinforcement learning for large reasoning models. arXiv preprint arXiv:2509.08827,
+2025a.
+
+Kaiyi Zhang, Ang Lv, Jinpeng Li, Yongbo Wang, Feng Wang, Haoyuan Hu, and Rui Yan. Stephint: Multi-level stepwise
+hints enhance reinforcement learning to reason. arXiv preprint arXiv:2507.02841, 2025b.
+
+Ruiyang Zhou, Shuozhe Li, Amy Zhang, and Liu Leqi. Expo: Unlocking hard reasoning with self-explanation-guided
+reinforcement learning. arXiv preprint arXiv:2507.02834, 2025a.
+
+Xiangxin Zhou, Zichen Liu, Anya Sims, Haonan Wang, Tianyu Pang, Chongxuan Li, Liang Wang, Min Lin, and Chao
+Du. Reinforcing general reasoning without verifiers. arXiv preprint arXiv:2505.21493, 2025b.
+
+A Appendix
+
+A.1_ The Use of Large Language Models (LLMs)
+In the course of this work, Large Language Models (LLMs) were employed as auxiliary tools in the following ways:
+
+1. Figure generation — The model Gemini-2.5-Pro (with Nano Banana) was used to assist in the creation of Figure 1.
+
+2. Text editing — GPT-5 was utilized for grammar checking, paraphrasing, and shortening of sections of the manuscript.
+
+3. Code assistance — VSCode Copilot powered by GPT-5 was used to aid in code implementation, particularly for
+visualization-related scripts.
+
+A.2 Motivation Experiments
+
+We used Qwen3-1.7B with thinking mode enabled and ran inference using the officially recommended settings:
+Temperature=0.6, TopP=0.95, TopK=20; the maximum completion tokens were set to 8192.
+
+One experimental case is as follows. The question asked: Which renewable energy source has the highest capacity
+factor, making it the most reliable for consistent power generation? The correct answer is geothermal energy. When
+only the question was provided, the model predicted hydroelectric energy, overestimating hydro’s capacity factor by
+assuming that water is always flowing and overlooking its dependence on water availability—some plants are used for
+peak power, so actual average can be lower. It also failed to analyze geothermal in depth after deeming hydropower the
+correct answer and arrived at an incorrect, intuition-driven estimate of geothermal’s capacity factor.
+
+When the reference answer was provided, the model noted that hydroelectric output can vary with location and season,
+and it carefully reasoned that geothermal plants can operate continuously as long as there is a viable geothermal
+resource; once the plant is running, it can produce steady power. It also gave more accurate estimates of the capacity
+factors of hydroelectric and geothermal sources. As a result, GPT-5 evaluated the derived reasoning as: It correctly
+defines capacity factor, compares sources, and concludes geothermal has the highest capacity factor and reliability;
+minor oversimplifications (e.g., biomass) do not affect the correct conclusion. The reasoning is self-contained, does not
+reference the provided answer, and shows no signs of relying on it.
+
+Overall, when given the reference answer, the model did not collapse into answer-conforming shortcuts. On the contrary,
+the presence of the answer promoted a more detailed discussion of both the initially uncertain (incorrect) option and
+the correct one.
+
+11
+
+
+===== PAGE BREAK =====
+
+Case Study of Motivation Experiment
+
+A. Question; Reference Answer of This Question is D.
+
+Which of the following renewable energy sources has the highest capacity factor, making it the most reliable for consistent power generation?
+A: Solar photovoltaic (PV) energy
+
+B: Wind energy
+
+C: Hydroelectric energy
+
+D: Geothermal energy
+
+E: Biomass energy
+
+F: Tidal energy
+
+G: Wave energy
+
+H: Solar thermal energy
+
+I: Biofuels
+
+J: Hydrogen fuel cells
+
+Please think step by step and output the final answer within \boxed{}.
+
+B. Reasoning and Final Response When Question-only; Using Prompt in Section 2.3.
+
+Okay, let’s try to figure out which renewable energy source has the highest capacity factor. First, I need to remember what capacity factor is. From what I recall,
+capacity factor is the ratio of actual output over the maximum possible output. So, it’s like how much of the potential energy a power plant can produce in a given
+time. A higher capacity factor means the energy source is more reliable because it produces more consistently.
+
+Now, looking at the options: A to J. Let me go through each one.
+
+Starting with Solar photovoltaic (PV) energy. I think solar PV depends on sunlight, which is variable. Even on cloudy days, it might not produce as much. So
+maybe its capacity factor is lower compared to others. But I’m not sure. I remember that solar panels have a capacity factor around 15-20% for PV, depending on
+location and weather. Maybe that’s not the highest.
+
+Wind energy. Wind power is also variable because wind doesn’t blow all the time. The capacity factor for wind is around 30-40% in some places, but it can vary.
+For example, in areas with consistent wind, like coastal regions, it might be higher. But I think wind’s capacity factor is lower than hydroelectric. Wait, but
+maybe in some places it’s higher?
+
+Hydroelectric energy. Hydroelectric plants have a high capacity factor because they use the water flow from rivers, which is more consistent. They can generate
+electricity 24/7 as long as there’s water flow. I think hydroelectric has a capacity factor around 80-90% in many places. That seems really high. But wait, does
+that apply to all hydroelectric plants? Maybe some are more efficient, but generally, hydro is pretty reliable.
+
+Geothermal energy. Geothermal plants can be pretty reliable because they use the Earth’s internal heat. But their capacity factor depends on the location. For
+example, in places with consistent geothermal activity, like Iceland or the US, they might have a high capacity factor. But I think it’s around 50-60% maybe? Not
+sure. Maybe lower than hydro.
+
+Biomass energy. Biomass is from organic materials. It’s variable because it depends on the availability of biomass. For example, if there’s a lot of crops or waste,
+it can be more reliable. But the capacity factor for biomass is usually lower than hydro. Maybe around 20-30%?
+
+Tidal energy. Tidal energy depends on the tides, which are predictable. So maybe it has a higher capacity factor? But I think it’s lower than hydro because tides
+are less consistent than river flows. But I’m not sure. Tidal energy’s capacity factor might be around 50-60%, maybe?
+
+Wave energy. Similar to tidal, but wave energy is more variable. The capacity factor for wave energy is probably lower than tidal. Maybe around 20-30%?
+Solar thermal energy. Solar thermal uses sunlight to generate heat, which then produces electricity. But it’s similar to solar PV in that it depends on sunlight. So
+maybe similar capacity factor as PV, around 15-20%.
+
+Biofuels. Biofuels are made from organic matter, but they can be less reliable because they depend on agricultural inputs. Their capacity factor might be lower
+than hydro. Maybe around 20-30%?
+
+Hydrogen fuel cells. Hydrogen is produced via electrolysis, which is usually from renewable sources. But hydrogen fuel cells themselves are not a power source.
+Wait, the question is about renewable energy sources. So hydrogen fuel cells are not a source of energy but a method of storing energy. So maybe not part of the
+options here. Wait, the options include “Hydrogen fuel cells” as an option. But the question is about renewable energy sources, so maybe hydrogen is considered
+a renewable source, but the fuel cell is the storage. So maybe the answer is not here. But the question says “renewable energy sources”, so hydrogen fuel cells are
+not a source, but a method. So maybe not part of the options. Wait, but the options are all renewable energy sources. Wait, the options are: A to J. So maybe
+hydrogen fuel cells are considered a renewable energy source? Or is it not? Hmm. Maybe not. So perhaps the answer is hydroelectric.
+
+So, going back. Hydroelectric has the highest capacity factor, like 80-90% in some places. Wind is around 30-40%, solar PV 15-20%, geothermal 50-60%,
+tidal 50-60%, wave 20-30%, biomass 20-30%, biofuels 20-30%, hydrogen fuel cells... not sure. So the highest is hydroelectric. So the answer would be C:
+Hydroelectric energy.
+
+But wait, I need to check if there’s any other sources with higher capacity factors. For example, in some regions, wind might have higher capacity factors. But
+globally, hydroelectric is the highest. Also, the question says “the most reliable for consistent power generation”. Hydroelectric is the most reliable because it’s
+based on water flow, which is more consistent than wind or solar. So yes, I think the answer is C.
+
+</think>
+
+To determine which renewable energy source has the highest capacity factor, we must first understand what capacity factor means. It is defined as the ratio of
+actual energy output over the maximum possible output of a power plant, typically expressed as a percentage. A higher capacity factor indicates that a power
+source is more reliable and consistent in producing energy over time.
+
+Key Renewable Energy Sources and Their Capacity Factors
+
+Let’s evaluate each option:
+
+- A: Solar photovoltaic (PV) energy
+
+- Capacity factor: Typically 15-20%
+
+- Variability: Dependent on sunlight, which is limited by weather and time of day.
+
+- B: Wind energy
+
+- Capacity factor: 30-40% in some locations, but can drop significantly in low-wind areas.
+
+- Variability: Wind is unpredictable, so capacity factor is lower than hydroelectric.
+
+- C: Hydroelectric energy
+
+- Capacity factor: 80-90% in many regions, especially where there is consistent water flow (e.g., rivers, dams).
+
+- Reliability: Water flow is predictable and consistent, making it one of the most reliable sources.
+
+- D: Geothermal energy
+
+- Capacity factor: 50-60% in regions with stable geothermal activity.
+
+- Variability: Relatively stable but not as consistent as hydroelectric.
+
+- E: Biomass energy
+
+- Capacity factor: 20-30%.
+
+- Variability: Relies on biomass availability, which can be limited.
+
+- F: Tidal energy
+
+- Capacity factor: 50-60%.
+
+12
+
+
+===== PAGE BREAK =====
+
+- Variability: Tides are predictable but less consistent than river flows.
+
+- G: Wave energy
+
+- Capacity factor: 20-30%.
+
+- Variability: Less predictable and more variable than tidal or hydroelectric.
+
+- H: Solar thermal energy
+
+- Capacity factor: 15-20%.
+
+- Similar to solar PV in terms of variability.
+
+- I: Biofuels
+
+- Capacity factor: 20-30%.
+
+- Variability: Dependent on agricultural inputs.
+
+- J: Hydrogen fuel cells
+
+- Not a source of energy but a form of energy storage.
+
+- Not considered a renewable energy source in this context.
+
+Conclusion
+
+Among all the listed options, hydroelectric energy stands out as the most reliable and consistent source of power due to its predictable and stable energy output.
+It has the highest capacity factor, typically 80-90%, and is not subject to the same variability as solar or wind energy.
+Final Answer
+
+\boxed{C}
+
+C. Deriving Valid Reasoning with Reference Answer; Using Prompt in Section 2.3.
+
+Okay, let’s tackle this question. The user is asking which renewable energy source has the highest capacity factor, making it the most reliable for consistent
+power generation. The options are from A to J, and the reference answer is D, which is geothermal energy. But I need to figure this out step by step without
+referencing the answer.
+
+First, I need to recall what capacity factor means. Capacity factor is the ratio of actual output to the maximum possible output over a given period. A higher
+capacity factor means the energy source can produce more consistent power. So, the question is about which source can produce the most energy on average,
+even if it’s not always producing at maximum capacity.
+
+Let me go through each option one by one. Starting with solar PV. I know that solar energy depends on sunlight, which is intermittent. It’s not always sunny, so
+the capacity factor is lower. For example, solar PV might have a capacity factor around 20-30% depending on location and weather.
+
+Next, wind energy. Wind is also intermittent. The capacity factor for wind varies, but it’s usually around 30-40% in some regions. However, wind turbines can be
+more variable because wind speeds fluctuate. But I remember that in some areas, wind farms have higher capacity factors. But I need to check if that’s the case.
+Hydroelectric energy. This is more reliable. Hydropower plants can generate electricity when there’s water flow, which is typically consistent. However, the
+capacity factor for hydro is around 40-60% depending on the location and the season. But wait, some hydro plants have higher capacity factors because they can
+store water and release it when needed. But I need to confirm if that’s accurate.
+
+Geothermal energy. This is a bit more unique. Geothermal plants can operate continuously as long as there’s geothermal activity. The capacity factor for
+geothermal is usually high, maybe around 60-70%? Because once the plant is running, it can produce consistently. But I’m not sure about the exact numbers.
+
+Biomass energy. This is a bit tricky. Biomass can be intermittent because it depends on agricultural waste or organic materials. The capacity factor might be
+lower compared to others. Also, biomass can be more variable depending on the feedstock and availability.
+
+Tidal energy. Tidal energy is predictable because tides are regular. But the capacity factor might be lower than hydro because the energy is tied to the tides,
+which are not as consistent as the river flow. However, some tidal plants have high capacity factors.
+
+Wave energy. Similar to tidal, but wave energy is more variable. The capacity factor might be lower than tidal, but I’m not sure.
+
+Solar thermal energy. This is a type of solar power that uses concentrated sunlight. It’s similar to solar PV but can have higher efficiency. However, the capacity
+factor might be similar to solar PV because it’s still dependent on sunlight availability.
+
+Biofuels. These are derived from organic matter. They can be intermittent if the feedstock is not available, but in some cases, they can be more consistent.
+However, the capacity factor might be lower than others.
+
+Hydrogen fuel cells. These are a type of energy storage, not a power generation source. So they might not have a high capacity factor because they are used for
+storage, not generation. Wait, but the question is about renewable energy sources for power generation. Hydrogen fuel cells are more about storage, so maybe
+they are not considered here. So maybe they are not in the options. Wait, the options include J: Hydrogen fuel cells. But the question is about renewable energy
+sources for power generation. So hydrogen fuel cells might be considered as a source of energy, but their capacity factor is lower because they require storage.
+So maybe they are not the best answer.
+
+So, going back. The options are A to J. The reference answer is D: geothermal. But I need to figure out why.
+
+Hydroelectric is a good candidate because it’s consistent. But geothermal is even better because it’s a continuous source. However, I need to check if geothermal
+is the highest capacity factor.
+
+Another point: geothermal plants can operate 24/7, but they require specific geological conditions. So their capacity factor is high. For example, in some regions,
+geothermal plants have a capacity factor over 80-90%? Wait, that seems high. But I think that’s correct. Because once the plant is running, it can produce
+consistently. So geothermal has a very high capacity factor.
+
+So the reasoning would be: solar PV is intermittent, wind has variable output, hydro is consistent but maybe not as high as geothermal. Geothermal is the most
+reliable because it’s continuous. So the answer is D.
+
+But I need to make sure there’s no other option with a higher capacity factor. Let me check again.
+
+Tidal energy is predictable but maybe not as high as geothermal. Wave energy is similar. Solar thermal is similar to solar PV. Biofuels and hydrogen are less
+reliable. So geothermal is the best.
+
+Therefore, the answer is D.
+
+</think>
+
+I begin by defining the term “capacity factor” as the ratio of actual energy output to the maximum possible output over a given period. This metric is crucial for
+assessing the reliability of a renewable energy source. My goal is to determine which option provides the highest capacity factor, ensuring consistent power
+generation.
+
+Starting with solar photovoltaic (PV) energy, I recognize that its output depends on sunlight availability, which is intermittent. This leads to a lower capacity
+factor, typically around 20-30%, depending on geographic and meteorological conditions. I note that solar PV is not a constant source, making it less reliable for
+consistent power generation.
+
+Next, wind energy. While wind is a viable option, its capacity factor is influenced by variable wind speeds. In regions with consistent wind patterns, the capacity
+factor can reach 30-40%, but this is still less than hydroelectric sources. I consider that wind’s variability limits its reliability compared to more stable energy
+sources.
+
+Hydroelectric energy stands out due to its dependence on water flow, which is influenced by seasonal and climatic factors. However, hydroelectric plants often
+have higher capacity factors, typically ranging from 40-60%, especially in regions with consistent river flow. I acknowledge that while hydro is reliable, its
+capacity factor is lower than geothermal.
+
+Geothermal energy is unique in that it operates continuously as long as there is geothermal activity. This ensures a high capacity factor, often exceeding 60-70%,
+depending on the site. The consistency of geothermal energy is unmatched by other sources, making it a strong candidate for reliability.
+
+13
+
+
+
+===== PAGE BREAK =====
+
+Biomass energy and hydrogen fuel cells are less reliable due to their dependence on feedstock availability and storage. Biomass is intermittent, and hydrogen
+fuel cells require storage infrastructure, which complicates their capacity factor. These options are not as consistent as geothermal.
+
+Tidal and wave energy are predictable but have lower capacity factors compared to hydroelectric. Tidal energy, for example, is limited by the periodicity of tides,
+which results in a lower capacity factor than hydroelectric.
+
+I reassess the options, considering the variability of each energy source. While hydroelectric and geothermal both have high capacity factors, geothermal’s
+continuous operation and stable output make it the most reliable. I verify that geothermal’s capacity factor is indeed the highest among the listed options, ensuring
+
+that my reasoning is comprehensive and accurate.
+Thus, the most reliable renewable energy source for consistent power generation is geothermal energy.
+
+D. GPT-5 Judgement.
+
+Prompt
+
+Please evaluate the following reasoning process on two aspects:
+
+Question: { {question} }
+
+Reasoning Process: { {derived reasoning process } }
+
+Reference Answer: { {reference answer} }
+
+Please evaluate separately:
+
+1. Correctness Assessment: Does this reasoning process correctly lead to the answer?
+- Judge whether the reasoning logic is correct
+
+- Judge whether each step is reasonable and coherent
+
+- Judge whether the final conclusion is correct
+
+2. Independence Assessment: Does this reasoning process not rely on the reference answer?
+- Judge whether there are obvious traces of using the reference answer
+
+- Judge whether there are statements like “I know the answer is X”
+
+Please answer in the following format strictly:
+
+Correctness Assessment: Yes/No
+
+Correctness Explanation: one or two concise sentences
+
+Independence Assessment: Yes/No
+
+Independence Explanation: one or two concise sentences
+
+Judgement
+Correctness Assessment: Correctness Assessment: Yes
+
+oversimplifications (e.g., biomass) do not affect the correct conclusion.
+
+Independence Assessment: Yes
+Independence Explanation: The reasoning is self-contained, does not reference the provided answer, and shows no signs of relying on it.
+
+XN
+
+Correctness Explanation: It correctly defines capacity factor, compares sources, and concludes geothermal has the highest capacity factor and reliability; minor
+
+A.3 Decomposition and Rewriting of Pr(Z | x, y*)
+
+x denotes the input problem and y* the reference answer. Z is the (countable) set of all reasoning paths; Z C Z is
+a subset of reasoning paths. 79(z | «) is the model’s distribution over reasoning paths given x; m9(y* | x, z) is the
+
+conditional distribution over reference answer given (x, z). Define
+
+s(z) = mo(y" | 2,2), w= To(y" | 2).
+
+The posterior over paths given (x, y*) induces a probability on the event Z, i.e., sampling a reasoning path that belongs
+
+to Z:
+ZELZ
+Apply Bayes’ rule, for each z € Z, Bayes’ rule gives
+mo(y* | #2) to(z |) _ s(z) mo(2 | #)
+mo(y* | x)             lu
+Substituting equation 17 into equation 16 yields
+
+zZEZ         M            H ZEZL
+
+to(z|z,y*) =                                            (assuming js > 0).
+
+Meanwhile, for a discrete space, the conditional expectation of s(z) given z € Z (under 79(- | x)) is
+
+_           To(z | @)
+‘[s(z) | 2z€ Z, 2] = 29 Pr(Z] 2)   (defined when Pr(Z | x) > 0),
+
+where by definition,
+
+Pr(Z | x) = S> 76(z| 2).
+
+ZEZL
+
+14
+
+(16)
+
+(17)
+
+(18)
+
+(19)
+
+(20)
+
+
+===== PAGE BREAK =====
+
+Multiplying both sides of equation 19 by Pr(Z | x) gives
+S > s(2) mo(z | 2) = Pr(Z | x) -Els(z) | 2 € Z, a].                             (21)
+
+ZEZL
+
+Substituting equation 21 into equation 18 yields the desired factorization:
+
+y              Z
+
+Pr(Z | ay") = Pr(Z |x) PSL 4 a)                  (22)
+[
+
+A.4_ ELBO Derivation with the Amortized Answer-conditioned Posterior
+mo(z | x) is the prior over reasoning paths given x, and 79(y* | x, z) is the likelihood of the reference answer y* under
+path z. The original optimization objective is maximizing the utility under the reasoning distribution as
+
+log J (8) = log  bewme (z|x) [70 (y"  | x, z)| .                                        (23)
+
+Now we introduce an amortized posterior 79(z | x, y*) to aid learning of 79(z | x). Starting from equation 23, multiply
+and divide inside the expectation by 7(z | x, y*), and change the sampling distribution, we have:
+
+;               ‘         mo(z | ,y")
+log J(@) = log  “z~T9(z|2) roy  | z, z) , me)
+Ta (z | vy )
+;          mo(y* | x, 2) to(z | x)
+= l    “z~o(zlx.y*                         .                         24
+og E,  selow) |   mol | a.y")                    (24)
+Applying Jensen’s inequality to the concavity of natural logarithm function log(-),
+log J(9) = Ezvny(z|a,y*) [log to(y" | x, z) + log mo(z | x) — log m6(z | x, y*)]               (25)
+log m9(z | x)
+= Eng (z|a,y* log  * XL, Z)\ + Eng (z\a,y* Fesaeea         (26)
+o(z|a,y yI  gtoe(y™ |    )I  -   o(z|x,y*)  log mo(z | 2, y*)
+forms a —KL term
+=  lene (z|a,y*) [ log mo (y* | x, 2) ~~ Dxx[7(z | r,y") I T(z | x)| :               (27)
+Equation equation 27 is the Evidence Lower Bound (ELBO) on log 7 (0) with the amortized answer-conditioned
+posterior 79(z|x, y*). The KL estimator introduced by              (      ) is as follows:
+Dacr, [mo (zl, y*)|| 79 (z|a)] &     mo (2 | bee)       log —Tolze | * 2<t)       1.            (28)
+0 (0i,t | ZY 2; Z<t)       To (Zt | x,y 2, Z<t)
+
+A.5 Implementation Details
+
+Each experiment is trained on 32 NVIDIA H100 GPUS. For RAVR, GRPO and DAPO, the learning rate for the policy
+model is le-6. In each rollout step, we sample eight responses per prompt for a batch of 32 prompts using a temperature
+of 1, and subsequently perform 2 policy updates on the collected responses with a batch size of 128. We adopt the
+clip-higher strategy and set the clip threshold as 0.8 and 1.27. For VeriFree and RLPR, we use the default setting in their
+official code. During evaluation, we follow the official recommended setting of Qwen3-1.7B, i.e., set Temperature=0.6,
+TopP=0.95 and TopK=20. In the evaluation, we use GPT-4.1-mini for correctness judgement. To reduce the evaluation
+variance, we report the final Avg4 for general reasoning multiple-choice tasks and Avg4 for math reasoning tasks.
+The max generation length for training and evaluation is 8192. For DeepMath-103K, we randomly selected 5,000
+samples for the training set. For MMLU-pro, we used the subset of the original data containing 1,000 randomly sampled
+samples (         ;        ).
+
+A.6 Supplementary Learning Dynamics
+
+We continuously monitor whether the model’s responses contain explicit mentions of the phrase “reference answer” We
+find that, as training progresses, reasoning paths generated under reference-answer conditioning reveal the reference
+answer less frequently. Meanwhile, in the question-only setting, the model consistently maintains normal output
+behavior and never produces phrases such as “reference answer.”
+
+A.7 More Reasoning Behavior Results
+
+The reasoning behavior statistics on other datasets are as follws.
+
+15
+
+
+===== PAGE BREAK =====
+
+CrossThink-QA (Train) — GPQA-Diamond,MMLU-Pro (Test)
+
+& 0.95 5
+g
+5 0.90 4
+co)
+— 0.854
+OD
+= 0.804
+Ww
+& 0.75 4
+iS) 0.704              4 Testing Prior     —— Testing Posterior
+* Training Prior §=&—— Training Posterior
+0.65 5
+0         200        400        600        800        1000
+Steps
+Figure 7: No Reference Answer Leakage
+Trained on CrossThink-QA; Tested on MMLU-Pro.
+30       _—             mmm RAVR(Ours) ©) GRPO
+>
+= 20
+co)
+a
+3        10.32
+10     8.
+0
+
+z
+
+RW                    x                     x
+\              S)              e              S
+a                °                a               S                                                        s
+ss             eS              ‘             XS               &             &
+.        &                                          s
+ww
+®
+
+Figure 8: Reasoning Behavior on MMLU
+
+Trained on DeepMath; Tested on AIME24.
+
+50                                             Mmm RAVR(Ours)    ' ~GRPO
+>                                                                       38.48
+2 40                                                                                   34.21
+Y 30
+fom
+2 20
+10                                             6.16      5.81 7:01
+1.89       2.17
+0                                         iB      | eel
+NS        >        Ne        @
+ee      &      na       ss
+bS        N         oO       &
+nS
+
+Figure 9: Reasoning Behavior on AIME24
+
+16
+
+
+===== PAGE BREAK =====
+
+a
+fo}
+
+Frequency
+a
+oO
+
+N
+oO
+
+Frequency
+rF FP N N
+oO    u    oO    u
+
+o uw
+
+Trained on DeepMath; Tested on AIME25.
+
+56.59
+9.90              Mmm =RAVR(Ours)  ' GRPO
+40.85
+6.35
+24.82
+19.89
+15.46 14.47
+a      8.25            6.89       5.44 6.72
+1.21    2.12
+x    x               \
+2    rs    2    eS    od    &    £    &
+*          2    Ss     ©    &    os    O
+ss    S     ‘    \     ¢    &
+    &                    ~~
+x
+Ko)
+
+Figure 10: Reasoning Behavior on AIME25
+
+Trained on DeepMath; Tested on Minerva.
+
+24.94
+Mmm RAVR(Ours)    ‘> GRPO
+19.72
+10.4011.13
+7.73
+5.55      3.04          6.39
+2.45 3.59   3.45 Loy   106 1.09  | i   .   3.42
+Se ee          | i
+&       ¥       &       PS)       S       &       om       &
+RY       ne)       RS)      A        Cc       @        (Z       sO
+we Ss       &      Ss       x
+xo      &                                SS
+NS
+®
+
+Figure 11: Reasoning Behavior on Minerva
+
+17

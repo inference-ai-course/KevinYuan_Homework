@@ -1,0 +1,1813 @@
+2510.25064v1 [cs.CL] 29 Oct 2025
+
+arXiv
+
+Can LLMs Estimate Cognitive Complexity
+of Reading Comprehension Items?
+
+Seonjeong Hwang!, Hyounghun Kim!?, Gary Geunbae Lee”
+‘Graduate School of Artificial Intelligence, POSTECH, Republic of Korea
+2Department of Computer Science and Engineering, POSTECH, Republic of Korea
+{seonjeongh, h.kim, gblee}@postech.ac.kr
+
+Abstract
+
+Estimating the cognitive complexity of read-
+ing comprehension (RC) items is crucial for
+assessing item difficulty before it is adminis-
+tered to learners. Unlike syntactic and semantic
+features, such as passage length or semantic
+similarity between options, cognitive features
+that arise during answer reasoning are not read-
+ily extractable using existing NLP tools and
+have traditionally relied on human annotation.
+In this study, we examine whether large lan-
+guage models (LLMs) can estimate the cogni-
+tive complexity of RC items by focusing on
+two dimensions—Evidence Scope and Trans-
+formation Level—that indicate the degree of
+cognitive burden involved in reasoning about
+the answer. Our experimental results demon-
+strate that LLMs can approximate the cognitive
+complexity of items, indicating their potential
+as tools for prior difficulty analysis. Further
+analysis reveals a gap between LLMs’ reason-
+ing ability and their metacognitive awareness:
+even when they produce correct answers, they
+sometimes fail to correctly identify the features
+underlying their own reasoning process.
+
+1 Introduction
+
+Estimating the difficulty of reading comprehension
+(RC) items! is essential for delivering appropriate
+learning materials and constructing balanced test
+forms. Traditionally, difficulty has been derived
+from student responses using frameworks such as
+classical test theory (CTT) or item response theory
+(IRT) (Lord, 1980; Hambleton and Jones, 1993).
+However, these approaches are only applicable af-
+ter test administration and thus cannot support prior
+difficulty prediction during item development. Ex-
+pert judgment remains the common alternative, but
+it is costly, time-consuming, and subject to rater
+variability (AlKhuzaey et al., 2024).
+
+"An RC item typically consists of a passage, a ques-
+tion stem, and sometimes answer options (in the case of the
+
+multiple-choice format). In this paper, we use the term “item”
+interchangeably with “question.”
+
+Passage
+
+(1) Mia loved baking and often spent her weekends experimenting with new recipes.
+
+(2) Her specialty was a chocolate cake that her family couldn't get enough of.
+
+(3) Every Sunday afternoon, the smell of cocoa and vanilla would fill the house.
+
+(4) Her younger brother, Sam, always asked for a second slice.
+
+(5) One weekend, Mia decided to enter the local baking competition.
+
+(6) She worked hard all week preparing the perfect version of her cake.
+
+(7) The judges praised the moist texture and rich flavor, and Mia won first place.
+
+(8) After the win, she was invited to share her recipe in the local newspaper.
+
+(9) Although she was nervous, she accepted the invitation and was excited to see her
+name in print.
+
+(10) Mia started thinking about attending a culinary school in the future.
+
+Evidence Scope
+
+Statement                                                   & Transformation Level
+
+Single-sentence evidence (s1)
+Word Matching
+
+Mia's house would be filled with the smell of      Single-sentence evidence (s3)
+cocoa and vanilla every Sunday afternoon.           Transformed Word Matching
+
+Mia's specialty was a chocolate cake.
+
+Single-sentence evidence (s9)
+Paraphrasing
+
+Despite feeling nervous, Mia was thrilled to
+have her name published.
+
+Mia received an invitation to publish her recipe Single-sentence evidence (s8)
+
+in the newspaper following her victory.                Transformed Paraphrasing
+Mia’s cake was better than the other contestants’ Single-sentence evidence (s7)
+cakes.                                                                 Inference
+
+Multi-sentence evidence (s1&s7)
+Word Matching
+
+Multi-sentence evidence (s1&s5)
+Paraphrasing
+
+Mia loved baking and won first place.
+
+Mia regularly tried new recipes on weekends
+and chose to join a baking contest.
+
+Mia’s success in the contest encouraged her to Multi-sentence evidence (s7&s10)
+consider becoming a professional baker.              Inference
+
+Sam wanted to learn baking from her.                 Insufficient evidence
+
+Figure 1: Examples of RC items that require determin-
+ing the factuality of a statement. Each item is annotated
+along two cognitively grounded dimensions (Evidence
+Scope and Transformation Level) with corresponding
+supporting sentences highlighted from the passage.
+
+To address this limitation, prior work has ex-
+plored item features correlated with difficulty and
+employed them for prediction (Pandarova et al.,
+2019; Choi and Moon, 2020; Benedetto et al.,
+2021). These include syntactic, semantic, and psy-
+cholinguistic variables (e.g., sentence length, se-
+mantic similarity between options, and word fa-
+miliarity), which can be extracted using NLP tools
+such as Coh-Metrix (McNamara et al., 2014) or
+embedding models like BERT (Devlin et al., 2019).
+Yet such surface-level features provide limited in-
+sight into the reasoning processes that largely gov-
+ern difficulty.
+
+Educational psychology research has shown that
+cognitive factors involved in the answer decision
+
+
+===== PAGE BREAK =====
+
+process are more strongly associated with diffi-
+culty (Embretson and Wetzel, 1987). Examples
+include the amount of text that must be referenced
+to determine the correct answer and the degree of
+transformation between passage evidence and the
+answer (Bormuth et al., 1970; Anderson, 1972).
+However, these cognitive features cannot be auto-
+matically extracted with existing NLP tools, and
+prior studies have relied exclusively on human
+raters (Hutzler et al., 2014; Lai et al., 2017). This
+raises a key challenge: How can we estimate the
+cognitive complexity of RC items in a scalable way?
+
+We believe that large language models (LLMs),
+with their powerful reasoning and instruction-
+following capabilities, may offer a promising ap-
+proach to this problem. Recent studies have at-
+tempted to leverage LLMs for estimating question
+difficulty. However, many of these efforts have fo-
+cused on tasks solvable solely through a model’s
+internal knowledge—such as mathematics and cod-
+ing (Rogoz and Ionescu, 2024; Park et al., 2024;
+Ko et al., 2024; Xu et al., 2024)—or have directly
+prompted LLMs to predict the difficulty of RC
+items (Raina and Gales, 2024). Whether LLMs
+can meaningfully analyze the cognitive complexity
+involved in solving RC items, however, remains
+largely unexplored.
+
+Motivated by this gap, we investigate LLMs’
+capability to measure the complexity of two cogni-
+tive variables: Evidence Scope and Transforma-
+tion Level. Evidence Scope reflects the amount
+of text required to verify an answer—categorized
+as single-sentence, multi-sentence, or insufficient—
+while Transformation Level captures the degree
+of lexical and structural transformation between
+an option and its supporting evidence in the pas-
+sage, ranging from word matching to inference.
+To support empirical evaluation, we constructed a
+benchmark dataset, RECO, which comprises 776
+RC items annotated along these two cognitive di-
+mensions (see Figure 1). Of the whole dataset, 498
+items are allocated to the test set, with the remain-
+der reserved for prompting demonstrations.
+
+In our experiments, we evaluate eight LLMs,
+spanning both proprietary and open-source variants.
+The results show that LLMs can approximate cog-
+nitive complexity, with the best-performing models
+achieving F1 scores of 75.5 (Evidence Scope) and
+83.2 (3-level Transformation Level) in the cogni-
+tive complexity classification tasks. Notably, open-
+source models such as Qwen?2.5 (32B) and Mistral-
+Small (24B) performed comparably to—or even
+
+surpassed—GPT-40. However, we also found that
+LLMs often struggle to explicitly recognize key fea-
+tures in their reasoning traces—for example, iden-
+tifying phrase reordering or the evidence sentences
+they referenced—highlighting a gap between rea-
+soning ability and metacognitive awareness.
+Our contributions can be summarized as follows:
+¢ We construct an expert-annotated dataset of
+RC items along two cognitively grounded di-
+mensions, which are important factors for an-
+alyzing item difficulty.
+¢ We conduct an evaluation of eight instruction-
+tuned LLMs, demonstrating their potential
+utility in estimating the cognitive complexity
+of RC items.
+We probe LLMs on fine-grained cognitive fea-
+tures and observe that, even when they suc-
+cessfully solve items, they do not fully recog-
+nize the cognitive processes underlying their
+problem solving.
+
+2 Related Work
+
+2.1 Difficulty Factors and Taxonomies
+
+Research in educational psychology has long exam-
+ined the factors influencing RC item difficulty (Bor-
+muth et al., 1970; Anderson, 1972; Freedle and
+Kostin, 1991; Park, 2004; Rafatbakhsh and Ah-
+madi, 2023). Researchers have sought to identify
+correlations between item-based attributes—such
+as surface-level linguistic features (e.g., sentence
+complexity, vocabulary difficulty) and cognitive
+burden factors (e.g., plausibility of distractors, op-
+tion—text mapping )—and item difficulty, often mea-
+sured using CTT or IRT (Hsu et al., 2018; Pan-
+darova et al., 2019; Choi and Moon, 2020; Zhou
+and Tao, 2020; Benedetto et al., 2021). More re-
+cently, tools such as Coh-Metrix (McNamara et al.,
+2014), NLTK (Loper and Bird, 2002), and em-
+bedding models like Word2Vec (Mikolov et al.,
+2013) or BERT (Devlin et al., 2019) enable the
+automatic extraction of syntactic and semantic fea-
+tures. These features have been used as inputs to
+supervised models such as linear regression for
+difficulty prediction.
+
+Several taxonomies have been proposed to sys-
+tematically classify the complexity of RC items.
+Bloom’s taxonomy, for instance, organizes learning
+objectives by levels of cognitive demand (Bloom
+et al., 1956). Lai et al. (2017) employed a five-
+
+>The dataset, prompt templates, and evaluation codes are
+available at https: //github. com/SeonjeongHwang/ReCo
+
+
+===== PAGE BREAK =====
+
+level taxonomy to characterize reasoning across
+RC items, which is a simplified combination of
+the two dimensions adopted in our study. While
+previous taxonomies have been used to categorize
+different types of RC items—such as main idea,
+author’s intent, fill-in-the-blank, and detail informa-
+tion questions—our study focuses on distinguish-
+ing variations in cognitive complexity, even within
+items of the same type.
+
+2.2 LLM-based Difficulty Estimation
+
+Recently, various approaches have been proposed
+to leverage LLMs for predicting item difficulty.
+Some studies directly prompted LLMs to estimate
+difficulty (Xu et al., 2024), while others inferred
+difficulty from model-generated outcomes such as
+answering accuracy or confidence scores (Rogoz
+and Ionescu, 2024; Park et al., 2024; Lu and Wang,
+2024; Jain et al., 2025). However, much of this
+prior work has focused on domains such as math-
+ematics, medicine, or coding, where models rely
+solely on their internal knowledge to solve the prob-
+lems. This differs from RC, where the model must
+reference the information provided in the passage
+while applying its own reasoning ability.
+
+Several studies have explored LLMs for pre-
+dicting RC item difficulty. Raina and Gales
+(2024) found that comparative prompting—asking
+an LLM to compare the relative difficulty of two
+items—aligned better with human judgments than
+absolute prompting, where the model assigns a
+difficulty score to a single item. Dutulescu et al.
+(2024) predicted item difficulty using indicators
+derived from LLMs’ question answering (QA)
+loss. Kapoor et al. (2025) showed that combining
+item text features, LLM embeddings, and contex-
+tual information (e.g., grade level, year) improved
+prediction performance, underscoring the impor-
+tance of item-feature-based analyses. Instead of
+directly predicting item difficulty, this paper inves-
+tigates whether LLMs can estimate two cognitively
+grounded features that influence difficulty.
+
+2.3 Datasets
+
+While QA datasets such as SQUAD (Rajpurkar
+et al., 2016) and BoolQ (Clark et al., 2019) are
+widely used, they lack per-item difficulty annota-
+tions, limiting their usefulness for difficulty anal-
+ysis. RACE++ (Lai et al., 2017; Liang et al.,
+2019) contains RC items spanning middle school
+through college levels and has been used with
+grade level as a proxy for difficulty (Raina and
+
+Gales, 2024; Liusie et al., 2023), but this approach
+does not capture fine-grained variation within a
+single learner group. Multi-hop QA datasets such
+as HotpotQA (Yang et al., 2018) assess complex-
+ity through multi-hop reasoning across documents,
+yet this setup differs from standard RC formats in
+educational assessment, which typically involve a
+single reading passage.
+
+Huang et al. (2017) predicted item difficulty us-
+ing student error rates on English reading problems
+in China, but the full dataset was not released. Mul-
+looly et al. (2023) released the CMCQRD dataset,
+which contains 289 RC items labeled with CEFR
+levels and IRT-based difficulty scores derived from
+pretesting, providing holistic estimates of item dif-
+ficulty. Dutulescu et al. (2024) annotated Fairy-
+taleQA (Xu et al., 2022) along two dimensions:
+explicit vs. implicit and local vs. summary. This
+dataset is the closest to our ours, but the two dimen-
+sions considered in this work capture more fine-
+grained cognitive features involved in the answer
+decision process of RC items.
+
+3 Data Construction
+
+To construct our dataset, we used True/False/Not
+Given (TFNG) items, where the task is to assess
+the factuality of a statement given a passage. Each
+item comprises a reading passage and a declarative
+statement, as illustrated in Figure 1. This format is
+particularly suitable for our study, as it spans a wide
+range of cognitive complexity—from direct span
+matching to multi-sentence inference—and is com-
+monly featured in the RC sections of standardized
+proficiency exams.
+
+3.1 Dimensions of Cognitive Complexity
+
+Evidence Scope. Items that can be solved by ref-
+erencing a single sentence in the passage are gen-
+erally easier than those requiring integration of in-
+formation scattered across multiple sentences (Bor-
+muth et al., 1970; Park, 2004). In this study, Ev-
+idence Scope refers to the span of text required
+to determine the truth value of a statement, and is
+categorized into three levels:
+¢ Single-sentence evidence: All necessary in-
+formation to evaluate the statement is con-
+tained within a single sentence in the passage.
+¢ Multi-sentence evidence: The required infor-
+mation is distributed across multiple sentences
+(i.e., inter-sentence comprehension).
+¢ Insufficient evidence: The passage lacks ad-
+
+
+===== PAGE BREAK =====
+
+equate information to definitively confirm or
+refute the statement. In such cases, learners
+are required to examine the entire passage be-
+fore concluding that the passage provides no
+supporting evidence.
+A special case arises when the supporting evidence
+includes anaphoric expressions. While Bormuth
+et al. (1970) treated such items as a separate cate-
+gory, they found little difference in difficulty com-
+pared to single-sentence evidence. Accordingly,
+we apply the following rules: 1) If the anaphora
+clearly refers to a frequently mentioned and easily
+identifiable entity in the prior sentences, the item is
+classified as single-sentence evidence. 2) However,
+if resolving the anaphora requires referring back
+to a prior sentence, we label it as multi-sentence
+evidence. This approach reflects that many read-
+ing passages in RC assessments employ anaphoric
+references, and accounting for such subtleties is
+essential for accurate difficulty prediction.
+
+Transformation Level. When the degree of
+transformation between a statement and its support-
+ing evidence is higher, identifying the correspond-
+ing passage text and assessing the statement’s truth
+value imposes greater cognitive demands (Bormuth
+et al., 1970; Anderson, 1972). We adopt a 5-level
+taxonomy inspired by previous work, which cap-
+tures the type of transformation required to derive
+a statement from the evidence:
+¢ Word Matching: The content words in the
+statement appear verbatim in the evidence,
+and the phrase order is preserved.
+¢ Transformed Word Matching: The content
+words are still present in the evidence but have
+been rearranged.
+¢ Paraphrasing: The statement rephrases the
+content words without changing the order of
+the words.
+¢ Transformed Paraphrasing: The content
+words are rephrased and the phrase order is
+altered, combining lexical and structural trans-
+formation.
+¢ Inference: The statement cannot be directly
+derived from any surface form in the passage,
+even through paraphrasing or reordering; in-
+stead, it requires inference.
+In contrast to the single-sentence evidence cases,
+phrase reordering is either trivial or pervasive in
+multi-sentence cases; therefore, we label these
+items using a simplified 3-level taxonomy: word
+matching, paraphrasing, and inference. In addition,
+
+anaphora resolution, identifying the antecedent of
+an anaphor within a text, is not considered para-
+phrasing unless additional lexical transformation is
+involved.
+
+3.2. Data Annotation
+
+We collected TENG items from multiple-choice
+True/False questions in the RACE++ dataset (Lai
+et al., 2017; Liang et al., 2019), which comprises
+English RC exams administered at the middle
+school, high school, and college levels in China.
+Each item consists of a passage, a statement, and
+its binary factuality label (True or Not True).
+
+To ensure reliable annotation, we recruited three
+experts via Upwork’, each with prior experience tu-
+toring for standardized English exams or authoring
+RC items. The annotators independently identified
+the evidence sentences in the passage, and labeled
+each item along the two cognitive dimensions. For
+statements identified as False within the Not True
+cases, they produced minimally revised True state-
+ments to enable annotation of transformation level.
+We retained only items where at least two annota-
+tors agreed on the same label; in cases of partial
+agreement, discrepancies were resolved through au-
+thor adjudication. The resulting annotated dataset,
+which we refer to as RECO, is released for non-
+commercial research purposes under the RACE
+license. Further details on the annotation process
+and inter-annotator agreement are provided in Ap-
+pendix A.
+
+3.3 Data Statistics
+
+Table 1 summarizes the distribution of items across
+labels. For Evidence Scope, 50% items are labeled
+as single-sentence evidence, while insufficient evi-
+dence items account for the lowest proportion. For
+Transformation Level, items requiring inference
+are the most frequent, whereas transformed word
+matching items are the least common. In the 3-
+level scheme, which includes multi-sentence com-
+prehension items, inference items remain dominant.
+These statistics reveal an imbalanced label distri-
+bution in our dataset. This imbalance is expected,
+since the items originate from real exams, and the
+distributions may vary across tests designed for
+different proficiency levels or languages. Further
+analysis of our dataset can be found in Appendix B.
+
+3https ://www.upwork.com
+
+
+===== PAGE BREAK =====
+
+Evidence Scope
+
+Single-sentence Evidence                                            388
+Multi-sentence Evidence                                              243
+Insufficient Evidence                                                   145
+
+Transformation Level
+
+5-level                                    3-level
+Word Matching                       73                        :
+Transformed Word Matching 36     Word Matching 123
+Paraphrasing                                                  :
+Transformed Paraphrasing          78       Paraphrasing          189
+Inference                                              146 | Inference                   319
+
+Table 1: Distribution of examples in the RECO dataset
+across Evidence Scope and Transformation Level. For
+the Transformation Level dimension, items labeled as in-
+sufficient evidence are excluded, and the 5-level scheme
+applies only to single-sentence comprehension items.
+
+4 Experimental Setup
+
+We formulate the measurement of cognitive com-
+plexity as a classification task. In the Evidence
+Scope (ES) classification, the model receives an
+instruction, a passage, a statement, and its factu-
+ality label (True or Not True), and predicts one of
+three evidence types: single, multi, or insufficient.
+In the Transformation Level (TL) classification,
+applied to items with True statements, the model
+estimates the degree of transformation using the
+task definition, passage, and statement. We report
+performance using both the 5-level taxonomy—
+word matching (WM), transformed word match-
+ing (TWM), paraphrasing (P), transformed para-
+phrasing (TP), and inference (I)—and a simplified
+3-level version (WM, P, I), which omits distinc-
+tions based on phrase reordering. In the 3-level
+setting, predictions of TWM and TP are mapped
+to WM and P, respectively, and ground-truth labels
+for single-sentence evidence items are converted
+accordingly. Model performance is measured using
+the micro-averaged F1 score.
+
+We evaluate eight instruction-tuned LLMs, in-
+cluding open-source models Gemma2-9B/27B
+(Team, 2024a), Mistral-7B/24B (Jiang et al.,
+2023), and Qwen2.5-7B/32B (Team, 2024b), as
+well as proprietary models GPT-40 and GPT-4o-
+mini (Hurst et al., 2024). Two prompting strate-
+gies are considered: Standard Prompting (SP),
+where the model receives a task definition and
+input and returns a label directly; and Chain-of-
+Thought Prompting (CoT), which encourages step-
+by-step reasoning before prediction (Wei et al.,
+2022). Greedy decoding is used as the default in-
+
+ference method across all models and prompting
+strategies. In the CoT setting, we additionally ap-
+ply self-consistency decoding (Wang et al., 2022),
+generating 10 samples with top-k=20, top-p=0.8,
+and temperature=0.7 and using priority answer.
+Each strategy is evaluated under three prompt-
+ing conditions—zero-shot, one-shot, and few-
+shot (Brown et al., 2020)—with the few-shot
+demonstrations covering items from all labels. Ex-
+emplars are sampled from the RECO demonstration
+split and fixed across models to ensure consistency.
+To filter out overly trivial items that might inflate
+model performance, we exclude those that GPT-40
+correctly classifies with a zero-shot CoT prompt.
+Details on model versions and the experimental
+environment are provided in Appendix C.
+
+5 Results
+
+Table 2 presents the performance of LLMs and hu-
+man experts on the ES and TL classification tasks.
+Human performance is computed using annotators’
+initial labels, before applying inter-annotator agree-
+ment filtering and adjudication. The table also
+reports LLMs’ performance on the RC task, which
+requires the model to determine whether a state-
+ment is true or not based on the passage.
+
+Before evaluating LLMs’ ability to analyze the
+cognitive complexity, we first examined their per-
+formance on the RC task itself. According to the re-
+sults, all models except the Mistral family achieved
+F1 scores above 80, with larger models approach-
+ing 90, indicating strong reading comprehension
+ability. This result confirms that the RC items in
+the RECO dataset are relatively easy for current
+LLMs, and thus that errors in cognitive complexity
+prediction are unlikely to stem from failures in ba-
+sic comprehension or answer reasoning. However,
+for smaller models such as Mistral-7B, incomplete
+comprehension may still contribute to some degree
+of performance variation.
+
+In the ES classification task, GPT-40 achieves
+the highest Fl score (75.5) with a one-shot CoT
+prompt, and Qwen2.5-32B performs comparably
+(73.1). Yet all models fall short of expert per-
+formance (87.9), highlighting the difficulty of
+modeling human cognitive processes in evidence
+selection. Within open-source model families,
+larger models tend to yield comparable perfor-
+mance across variants—particularly under self-
+consistency decoding—, while smaller models ex-
+hibit more divergent results. Mistral-7B, in par-
+
+
+===== PAGE BREAK =====
+
+Gemma2 Mistral Qwen2.5  GPT-40
+Method = #Demo 93 578 7B 24B 7B 32B mini -
+Reading Comprehension
+CoT      1   85.1 89.2 63.7 79.7 80.9 88.2 87.0 89.4
+
+Evidence Scope Classification [Human: 87.9]
+
+48.8 55.2 43.0 58.8 46.0 56.4 51.8 57.8
+48.8 60.0 45.8 59.8 49.8 59.8 55.2 60.8
+50.4 53.6 49.4 57.0 51.8 58.4 54.6 65.7
+
+0
+
+1
+
+6
+
+0   60.0 62.7 21.3 63.7 59.2 70.5 66.3 72.5
+CoT      1   64.5 70.1 53.6 66.3 58.4 73.1 68.9 75.5
+
+6
+
+0
+
+1
+
+6
+
+SP
+
+62.9 69.1 55.6 68.5 60.6 70.7 66.7 69.5
+
+61.7 67.9 19.5 68.3 60.4 73.1 67.3 72.9
+67.7 72.3 57.8 71.1 61.9 72.9 72.3 74.1
+63.9 70.7 56.6 68.9 60.8 71.5 69.3 72.9
+
+CoT (SC)
+
+(3-level) Transformation Level Classification (Human: 85.9]
+
+0   57.9 55.9 46.8 73.7 62.4 67.5 67.0 70.7
+55.2 58.3 58.4 75.4 58.8 69.0 67.8 69.7
+58.3 64.3 55.7 73.5 54.7 60.0 59.4 64.9
+
+1
+
+8
+
+0   53.1 58.8 59.0 76.9 68.6 72.4 67.8 76.6
+1   50.9 56.8 48.6 75.2 76.2 74.7 71.9 78.1
+8   57.1 61.3 62.8 75.4 66.0 73.2 73.6 75.4
+0
+1
+8
+
+SP
+
+CoT
+
+58.6 54.6 68.5 83.2 76.5 78.3 69.6 74.1
+54.6 58.0 52.2 67.9 72.3 76.2 71.5 74.3
+64.2 62.7 64.1 76.9 66.8 73.3 71.4 71.8
+
+(5-level) Transformation Level Classification [Human: 83.5]
+
+36.8 38.8 28.4 52.0 43.6 51.2 51.2 54.8
+42.0 42.4 34.0 57.2 47.6 52.0 50.8 52.8
+35.6 49.6 40.0 56.4 42.8 43.2 48.8 52.4
+
+0
+
+1
+
+8
+
+0   34.0 43.2 38.8 59.2 42.8 59.6 52.8 66.0
+CoT      1   37.6 38.4 32.0 54.0 53.6 58.4 56.0 67.2
+
+8
+
+0
+
+1
+
+8
+
+CoT (SC)
+
+SP
+
+42.8 47.6 48.0 56.4 48.0 55.6 58.8 59.2
+
+37.6 44.0 44.8 67.2 46.0 66.0 54.8 60.4
+43.2 45.2 39.2 53.6 56.8 63.2 55.6 63.6
+48.0 48.4 50.0 58.8 45.2 59.2 56.4 58.8
+
+CoT (SC)
+
+Table 2: Performance of LLMs on the RC task and
+the ES and TL classification tasks. Greedy decoding
+is the default inference method, and SC indicates that
+self-consistency decoding is used. Bolded values de-
+note each model’s best score per task; underlined values
+indicate the best score across demonstration settings.
+
+ticular, exhibits unstable behavior, occasionally
+yielding unexpectedly low scores despite identical
+prompts. As expected, zero-shot prompting un-
+derperforms compared to demonstration-based set-
+tings. However, in large models, few-shot prompt-
+ing occasionally degraded performance, likely due
+to longer context length overwhelming their atten-
+tion capacity.
+
+In the TL classification task with the 3-level
+taxonomy, Mistral-24B (83.2) and Qwen2.5-32B
+(78.3) outperform GPT-40 (78.1), approaching hu-
+man performance (85.9). Under the 5-level tax-
+onomy, however, overall model performance de-
+creases, underscoring the challenge of capturing
+phrase reordering between statements and evidence.
+Nevertheless, open-source models again achieve
+
+performance comparable to GPT-40. By contrast,
+Gemma2-27B consistently underperforms, trail-
+ing even smaller models, which suggests limita-
+tions in handling lexical and syntactic transforma-
+tions. Prompting effects are less consistent than in
+ES classification: optimal configurations vary by
+model, and in some cases zero-shot prompting even
+outperforms demonstration-based prompting. Self-
+consistency decoding improves results in several
+settings, particularly zero-shot CoT, but its gains
+are less stable than in ES classification.
+
+In summary, while LLMs do not fully align
+with expert judgments, they demonstrate strong
+potential as estimators of cognitive complexity
+in RC items, especially in ES and 3-level TL
+classifications. Notably, the competitive perfor-
+mance of open-source models relative to GPT-40
+suggests that reliance on proprietary LLMs may
+not be necessary for analyzing cognitive complex-
+ity. While we employ simple prompting methods
+to better isolate inherent model capabilities, more
+advanced prompt engineering may yield further
+improvements. In Appendix D, we evaluate the
+reasoning-specialized model Qwen3 (Team, 2025).
+
+6 Analysis
+
+6.1 Fine-Grained Feature Analysis
+
+To better understand the capabilities and limitations
+of LLMs, we decomposed the two classification
+tasks into a set of fine-grained sub-tasks. For each
+sub-task, we constructed few-shot CoT prompts
+by adapting those used in the main experiments,
+with instructions tailored to the specific cognitive
+feature under evaluation. Results are reported in
+Table 3.
+
+The ES classification task was divided into two
+core sub-tasks: Sub-task 1.1: Falsifiability Judg-
+ment — determining whether a Not True statement
+is False (contradicted) or Not Given (lacking suffi-
+cient evidence). Sub-task 1.2: Evidence Sentence
+Counting — identifying how many sentences are
+required to support or refute a statement. Most
+models performed reliably on falsifiability classi-
+fication, but performance was substantially lower
+for evidence sentence counting. This suggests that
+while LLMs can distinguish between refuted and
+unsupported statements, they struggle to explicitly
+identify all sentences that humans reference when
+solving the item.
+
+The TL classification task was evaluated through
+a hierarchical breakdown of transformation types,
+
+
+===== PAGE BREAK =====
+
+GPT-4o
+mini -
+
+Gemma2  Mistral  Qwen2.5
+9B 27B 7B 24B 7B 32B
+
+(1.1)   82.8 82.1 71.4 81.7 77.5 90.1 81.3. 87.8
+(1.2)   68.7 74.3 59.2 69.4 68.5 73.8 67.0 71.9
+
+(2.1)       73.4 75.8 65.5 82.4 68.7 81.7 81.4 80.0
+(2.2)       81.9 84.9 67.3 85.9 72.4 86.4 88.4 88.9
+(2.3)       59.5 68.0 58.8 61.4 51.0 54.3 66.7 65.4
+
+Sub-task
+
+Table 3: LLM performance on sub-tasks measuring
+fine-grained abilities required for the main classification
+tasks. Bold values denote the best model for each sub-
+task.
+
+—® Gemma2-27B
+—m GPT4o0
+—* Human
+
+Ratio (%)
+
+iS)
+3
+
+1 2 3 4 5 6 7
+# Evidence
+
+Figure 2: Distribution of the number of evidence sen-
+tences selected by LLMs and humans.
+
+allowing for a more detailed examination of how
+LLMs handle different forms of linguistic trans-
+formation: Sub-task 2.1. Inference Detection
+— distinguishing inference-based statements from
+those explainable by surface-level transformations,
+such as paraphrasing or phrase reordering. Sub-
+task 2.2. Paraphrasing Detection — identify-
+ing whether a statement is a lexical rephrasing or
+a verbatim restatement. Sub-task 2.3: Phrase
+Reordering Detection — detecting reordering of
+words and phrases. According to the results,
+model performance showed distinct strengths and
+weaknesses across sub-tasks. GPT-40-mini per-
+formed comparably to, or even better than, GPT-
+4o—especially on inference and phrase reordering
+detection, where GPT-40 underperformed. Para-
+phrasing detection was handled well across models,
+while phrase reordering remained especially chal-
+lenging.
+
+Overall, LLMs showed consistent performance
+on falsifiability classification (Sub-task 1.1) and
+paraphrase detection (Sub-task 2.2), but struggled
+with evidence sentence counting (Sub-task 1.2) and
+phrase reordering detection (Sub-task 2.3). While
+models demonstrated strong answer reasoning abil-
+ity (as shown in Table 2), our analysis indicates that
+even when they solved items correctly, they often
+failed to explicitly capture the cognitive features
+underlying their reasoning process.
+
+Evidence Selection Precision Recall Fl
+
+Gemma2-27B                   86.4           78.3 78.8
+Mistral-24B                           82.4              744 74.3
+Qwen?2.5-32B                   85.4           76.9 774
+GPT-40                             88.8           79.2 80.0
+
+Table 4: Model performance on evidence sentence
+selection.
+
+Mistral-24B
+
+82 143 41 2.0
+
+Qwen2.5-32B
+
+00 102 41 82
+
+GPT-40
+
+122 41 20 41
+
+eo) =: ed 74 00
+
+- 29 7.1 |400 114 386
+
+74 74 Th 3.7
+
+- 94 94 283 30.2 22.6
+
+37 11d 1d 7.4
+
+-43 14 |343 22.9 371
+40
+
+TP P TWM WM
+TP P TWM WM
+TP P TWM WM
+
+True Label
+True Label
+True Label
+
+- 38 19 |358 283 30.2    5.7 15.1 396 245 15.1
+
+20
+=~ 00 00 48 am: | =. 05 19 48 oH
+~
+
+WM TWM PTR I   WM TWM P TP I
+Predicted Label                 Predicted Label
+
+--05 10 29 15.2 [Ewe
+
+WM TWM P OTP) I
+Predicted Label
+
+Figure 3: Distribution of TL labels predicted by LLMs
+for single-sentence evidence items.
+
+6.2. Error Analysis
+
+We further examined the prediction tendencies of
+GPT-40 and the best-performing model in each
+task. Figure 2 shows the distribution of the num-
+ber of evidence sentences predicted by Gemma?2-
+27B and GPT-40, compared to human-selected evi-
+dence. LLMs tend to select fewer sentences than
+humans, often defaulting to a single sentence as
+evidence. Table 4 reports the degree of alignment
+between the evidence sentences selected by each
+model and those identified by experts. As in the pre-
+vious observation, recall scores were consistently
+lower than corresponding precision scores, indi-
+cating that models often fail to explicitly retrieve
+all the sentences required by humans to solve the
+item. We hypothesize that LLMs—by encoding
+the entire passage before engaging in step-by-step
+reasoning—tend to overlook sentences containing
+seemingly minor details that nevertheless exert a
+significant influence on the answer choice, remain-
+ing unaware of these omissions.
+
+Figure 3 presents the distribution of TL pre-
+dictions for items with single-sentence evidence.
+LLMs consistently achieved higher precision for
+WM and I items than for other categories. How-
+ever, they frequently misclassified TWM as WM,
+failing to detect subtle reordering of phrases. Mod-
+els also showed confusion between P and TP, often
+misclassifying them as each other or as J. These
+patterns align with the earlier results in Table 3,
+particularly for phrase reordering detection, where
+all models struggled. Representative error cases il-
+lustrating these confusions are analyzed in the next
+
+
+===== PAGE BREAK =====
+
+Case #1
+
+Passage:                                                                    GPT-40’s Response:
+(1) Once upon a time, there was an island where all the feelings lived: 1. Understand the Statement
+Happiness, Sadness, Knowledge, and all of the others, including Love. - Statement: “Sadness wanted to stay alone.”
+(...)                                                                                - Key claim: Sadness had a desire to be alone.
+(15) Sadness was close by so Love asked, “Sadness, let me go with 2. Retrieve Relevant Information from the Passage
+you.”                                                                          - Sentence (15): Love asks Sadness if she can go with her.
+(16) “Oh...Love, I am so sad that I need to be by myself!”                 - Sentence (16): Sadness responds, “Oh...Love, I am so sad that I need to be by myself!”
+(17) Happiness passed by Love, too, but she was so happy that she      3. Assess Scope of Evidence
+did not even hear when Love called her. ...                                - Sentence (16) directly supports the statement by indicating Sadness’s desire to be alone.
+Statement: Sadness wanted to stay alone.                                   - The sentence explicitly mentions Sadness’s need to be by herself, which aligns with the
+Ground Truth ES: Multi-sentence evidence                            statement that Sadness wanted to stay alone. (...)
+Answer: Single
+
+Case #2
+GPT-40’s Response:
+1. Analyze the Statement
+
+Passage:
+(1) Detective Wolf and Miss Fox
+
+(2) Detective Wolf has waited in the doorway all the morning.
+(3) He is going to meet Miss Fox.
+(4) She bought a bag of diamonds from Africa.
+
+- Content words: diamonds, bought, Africa
+2. Locate Supporting Evidence in the Passage
+- Sentence (4): “She bought a bag of diamonds from Africa.”
+
+(...)                                                                     3. Compare the Statement and Evidence
+
+Statement: The diamonds were bought from Africa.
+Ground Truth TL: Transformed Word Matching
+
+- All content words match exactly with the passage: “diamonds,” “bought,” “Africa.”
+- The order of content words is exactly the same as in the statement. (...)
+
+Answer: Word Matching
+
+Figure 4: Representative error cases with GPT-40’s responses.
+
+subsection.
+
+6.3 Case Study
+
+Figure 4 presents error cases that illustrate common
+failure patterns in LLMs. We analyze two exam-
+ples where GPT-40 incorrectly classifies items in
+the ES and TL classification tasks. In Case #1,
+the model misclassifies an item requiring multi-
+sentence evidence as single-sentence evidence. The
+passage involves multiple characters in dialogue,
+and correctly identifying the speaker of a specific
+utterance is essential for determining the truth of
+the statement. According to annotators, both Sen-
+tence (15) and Sentence (16) are required: Sentence
+(15) establishes that the subject is “Sadness,” while
+Sentence (16) describes her action. However, the
+model references Sentence (15) in its explanation
+and correctly links “Sadness” to the action in Sen-
+tence (16), yet asserts: “Sentence (16) explicitly
+mentions Sadness’s need to be by herself.” The
+case reveals a metacognitive failure: the model ar-
+rives at the correct factual judgment but fails to
+recognize the reasoning behavior it engaged in to
+reach that conclusion.
+
+In Case #2, the item labeled as TWM was incor-
+rectly classified as WM. A comparison with Sen-
+tence (4) reveals a reordering of content words
+caused by a shift to the passive construction. How-
+ever, GPT-40 claims: “The order of content words
+in the evidence is exactly the same as in the state-
+ment.” This suggests that the model sometimes fails
+to detect subtle syntactic transformations. These
+two cases together suggest that, even when LLMs
+provide seemingly coherent explanations, they may
+miss structural cues and fail to reflect on the rea-
+
+soning processes underlying their own answers.
+Such blind spots underscore a persistent challenge
+of detecting and modeling the cognitive features
+underlying human problem-solving processes.
+
+7 Conclusion
+
+The cognitive complexity of the problem-solving
+process is a key factor for analyzing the prior diffi-
+culty of RC items, yet no scalable method currently
+exists for automatically measuring it. In this study,
+we investigated whether LLMs can predict the cog-
+nitive complexity of RC items through two cogni-
+tively grounded dimensions: Evidence Scope and
+Transformation Level. To this end, we constructed
+RECO—a benchmark dataset of RC items anno-
+tated along these two dimensions—and conducted
+a comprehensive evaluation of eight LLMs under
+diverse prompting and decoding configurations.
+
+The results show that LLMs have strong poten-
+tial as proxies for cognitive complexity estimation,
+with some open-source models—such as Qwen?.5-
+32B—achieving performance comparable to pro-
+prietary systems like GPT-40. Nevertheless, LLMs
+are not fully aligned with human experts and ex-
+hibit limitations in their metacognitive abilities—
+particularly in detecting phrase reordering or iden-
+tifying all necessary evidence from the passage.
+We hope our findings encourage further research in
+item difficulty estimation and difficulty-controlled
+item generation—contributing to the development
+of more interpretable and cognitively aligned edu-
+cational NLP systems.
+
+
+===== PAGE BREAK =====
+
+Limitations
+
+Label Imbalance and Data Scale. Our dataset
+exhibits label imbalance across cognitive dimen-
+sions, which is an inevitable outcome of annotat-
+ing RC items randomly sampled from assessments.
+The scarcity of certain labels can be attributed to
+several factors: such item types may be more dif-
+ficult to create, less emphasized in instructional
+practice, or underrepresented in the specific as-
+sessments from which our samples were drawn.
+However, supplementing these underrepresented
+categories would require additional large-scale an-
+notation, which was infeasible under our budget
+constraints.
+
+Moreover, constructing the dataset required
+costly expert annotation—three raters per
+item—which constrained our ability to perform
+supervised fine-tuning. Nevertheless, our dataset
+comprises 776 items, a substantially larger
+resource than the previously released CMCQRD
+dataset containing only 289 items (Mullooly
+et al., 2023). Our findings also suggest that larger
+models (24B-—32B) exhibit more robust in-context
+classification than smaller ones (7B—-9B), thus
+highlighting opportunities for future work on data
+augmentation and knowledge distillation to build
+smaller yet effective models.
+
+Limited Coverage of RC Item Types. The
+two cognitive dimensions investigated—Evidence
+Scope and Transformation Level—do not general-
+ize across all RC item types in capturing their cog-
+nitive complexity. For instance, questions targeting
+main ideas or author intent inherently require multi-
+sentence inference. In contrast, the dimensions we
+employ are most relevant to factual detail questions
+such as TENG, MTF, and WH-questions. Because
+different RC item types involve distinct cognitive
+complexity factors, addressing all of them compre-
+hensively would be beyond the scope of a single
+study. In this work, we therefore focus on two key
+dimensions best captured by factual detail ques-
+tions, as this question format spans a wide range of
+cognitive complexity—from single-sentence word
+matching to multi-sentence inference. Our goal
+is to establish a foundation for future research on
+additional factors across a broader set of RC item
+
+types.
+
+Limits of a Single Factor in Explaining Item
+Difficulty. Finally, the two dimensions studied
+here represent only a subset of the many factors
+
+influencing RC item difficulty. Establishing a di-
+rect or linear relationship between a single fac-
+tor and difficulty would require controlling for all
+other variables, which is not the case in our dataset.
+For instance, a multi-sentence inference item may
+not necessarily be harder than a single-sentence
+paraphrasing item if the latter references a more
+complex passage. Thus, these two factors alone
+cannot fully account for item difficulty. This study
+instead focuses on testing whether LLMs can es-
+timate cognitively grounded dimensions that have
+traditionally relied on human annotation.
+
+Acknowledgments
+
+We are grateful to Jonghwi Kim for providing valu-
+able feedback on the paper.
+
+References
+
+Samah AlKhuzaey, Floriana Grasso, Terry R Payne,
+and Valentina Tamma. 2024. Text-based question
+difficulty prediction: A systematic review of auto-
+matic approaches. International Journal of Artificial
+Intelligence in Education, 34(3):862-914.
+
+Richard C Anderson. 1972. How to construct achieve-
+ment tests to assess comprehension. Review of edu-
+cational research, 42(2):145-170.
+
+Luca Benedetto, Giovanni Aradelli, Paolo Cremonesi,
+Andrea Cappelli, Andrea Giussani, and Roberto Tur-
+rin. 2021. On the application of transformers for
+estimating the difficulty of multiple-choice questions
+from text. In Proceedings of the 16th workshop on
+innovative use of NLP for building educational appli-
+cations, pages 147-157.
+
+Benjamin S Bloom, Max D Engelhart, Edward J Furst,
+Walker H Hill, David R Krathwohl, et al. 1956. Tax-
+onomy of educational objectives: The classification
+of educational goals. Handbook 1: Cognitive domain.
+Longman New York.
+
+John R Bormuth, John Manning, Julian Carr, and
+David Pearson. 1970. Children’s comprehension
+of between-and within-sentence syntactic structures.
+Journal of educational psychology, 61(5):349.
+
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, et al. 2020. Language models are few-shot
+learners. Advances in neural information processing
+
+systems, 33:1877-1901.
+
+Inn-Chull Choi and Youngsun Moon. 2020. Predicting
+the difficulty of efl tests based on corpus linguistic
+features and expert judgment. Language Assessment
+Quarterly, 17(1):18-42.
+
+
+===== PAGE BREAK =====
+
+Christopher Clark, Kenton Lee, Ming-Wei Chang,
+Tom Kwiatkowski, Michael Collins, and Kristina
+Toutanova. 2019. Boolq: Exploring the surprising
+difficulty of natural yes/no questions. In Proceedings
+of the 2019 Conference of the North American Chap-
+ter of the Association for Computational Linguistics:
+Human Language Technologies, Volume I (Long and
+Short Papers), pages 2924-2936.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. Bert: Pre-training of deep
+bidirectional transformers for language understand-
+ing. In Proceedings of the 2019 conference of the
+North American chapter of the association for com-
+putational linguistics: human language technologies,
+volume I (long and short papers), pages 4171-4186.
+
+Andreea Dutulescu, Stefan Ruseti, Mihai Dascalu, and
+Danielle Mcnamara. 2024. How hard can this ques-
+tion be? an exploratory analysis of features assessing
+question difficulty using IIms. In Proceedings of the
+17th International Conference on Educational Data
+Mining, pages 802-808.
+
+Susan E Embretson and C Douglas Wetzel. 1987. Com-
+ponent latent trait models for paragraph compre-
+hension tests. Applied psychological measurement,
+11(2):175-193.
+
+Roy Freedle and Irene Kostin. 1991. The prediction
+of gre reading comprehension item difficulty for ex-
+pository prose passages for each of three item types:
+Main ideas, inferences and explicit statements. ETS
+Research Report Series, 1991(2):i-53.
+
+Ronald K. Hambleton and Ronald W. Jones. 1993.
+Comparison of classical test theory and item re-
+sponse theory and their applications to test develop-
+ment. Educational Measurement: Issues and Prac-
+
+tice, 12(3):38-47.
+
+Fu-Yuan Hsu, Hahn-Ming Lee, Tao-Hsing Chang, and
+Yao-Ting Sung. 2018. Automated estimation of item
+difficulty for multiple-choice tests: An application of
+word embedding techniques. Information Processing
+& Management, 54(6):969-984.
+
+Zhenya Huang, Qi Liu, Enhong Chen, Hongke Zhao,
+Mingyong Gao, Si Wei, Yu Su, and Guoping Hu.
+2017. Question difficulty prediction for reading prob-
+lems in standard tests. In Proceedings of the AAAI
+conference on artificial intelligence, volume 31.
+
+Aaron Hurst, Adam Lerer, Adam P Goucher, Adam
+Perelman, Aditya Ramesh, Aidan Clark, AJ Os-
+trow, Akila Welihinda, Alan Hayes, Alec Radford,
+et al. 2024. Gpt-40 system card. arXiv preprint
+arXiv:2410.21276.
+
+Dorit Hutzler, Esther David, Mireille Avigal, and Rina
+Azoulay. 2014. Learning methods for rating the diffi-
+culty of reading comprehension questions. In 20/4
+ieee international conference on software science,
+technology and engineering, pages 54—62. IEEE.
+
+Yoshee Jain, John Hollander, Amber He, Sunny Tang,
+Liang Zhang, and John Sabatini. 2025. Exploring
+the potential of large language models for estimat-
+ing the reading comprehension question difficulty.
+In International Conference on Human-Computer
+Interaction, pages 202-213. Springer.
+
+Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-
+sch, Chris Bamford, Devendra Singh Chaplot, Diego
+de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+laume Lample, Lucile Saulnier, Lélio Renard Lavaud,
+Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,
+Thibaut Lavril, Thomas Wang, Timothée Lacroix,
+and William El Sayed. 2023. Mistral 7b. Preprint,
+arXiv:2310.06825.
+
+Radhika Kapoor, Sang T Truong, Nick Haber,
+Maria Araceli Ruiz-Primo, and Benjamin W
+Domingue. 2025. Prediction of item difficulty
+for reading comprehension items by creation
+of annotated item repository. arXiv preprint
+arXiv:2502.20663.
+
+Miyoung Ko, Sue Park, Joonsuk Park, and Minjoon Seo.
+2024. Hierarchical deconstruction of Ilm reasoning:
+A graph-based framework for analyzing knowledge
+utilization. In Proceedings of the 2024 Conference on
+Empirical Methods in Natural Language Processing,
+pages 4995-5027.
+
+Guokun Lai, Qizhe Xie, Hanxiao Liu, Yiming Yang,
+and Eduard Hovy. 2017. Race: Large-scale read-
+ing comprehension dataset from examinations. In
+Proceedings of the 2017 Conference on Empirical
+Methods in Natural Language Processing, pages 785—
+794.
+
+Yichan Liang, Jianheng Li, and Jian Yin. 2019. A new
+multi-choice reading comprehension dataset for cur-
+riculum learning. In Asian Conference on Machine
+Learning, pages 742-757. PMLR.
+
+Adian Liusie, Vatsal Raina, Andrew Mullooly, Kate
+Knill, and Mark JF Gales. 2023. Analysis of the cam-
+bridge multiple-choice questions reading dataset with
+a focus on candidate response distribution. arXiv
+preprint arXiv:2306.13047.
+
+Edward Loper and Steven Bird. 2002. NItk: The natural
+language toolkit. arXiv preprint cs/0205028.
+
+Frederic M. Lord. 1980. Applications of Item Response
+Theory To Practical Testing Problems. Routledge.
+
+Xinyi Lu and Xu Wang. 2024. Generative students: Us-
+ing llm-simulated student profiles to support question
+item evaluation. In Proceedings of the Eleventh ACM
+Conference on Learning@ Scale, pages 16-27.
+
+Danielle S McNamara, Arthur C Graesser, Philip M
+McCarthy, and Zhigiang Cai. 2014. Automated eval-
+uation of text and discourse with Coh-Metrix. Cam-
+bridge University Press.
+
+
+===== PAGE BREAK =====
+
+Tomas Mikolov, Kai Chen, Greg Corrado, and Jef-
+frey Dean. 2013. Efficient estimation of word
+representations in vector space. arXiv preprint
+arXiv: 1301.3781.
+
+Andrew Mullooly, @istein Andersen, Luca Benedetto,
+Paula Buttery, Andrew Caines, Mark JF Gales, Yasin
+Karatay, Kate Knill, Adian Liusie, Vatsal Raina, et al.
+2023. The cambridge multiple-choice questions read-
+ing dataset.
+
+Irina Pandarova, Torben Schmidt, Johannes Hartig,
+Ahcéne Boubekki, Roger Dale Jones, and Ulf Brefeld.
+2019. Predicting the difficulty of exercise items for
+dynamic difficulty adaptation in adaptive language
+tutoring. International Journal of Artificial Intelli-
+gence in Education, 29(3):342-367.
+
+Gi-Pyo Park. 2004. Comparison of 12 listening and read-
+ing comprehension by university students learning en-
+glish in korea. Foreign Language Annals, 37(3):448-
+458.
+
+Jae-Woo Park, Seong-Jin Park, Hyun-Sik Won, and
+Kang-Min Kim. 2024. Large language models are
+students at various levels: Zero-shot question dif-
+ficulty estimation. In Findings of the Association
+for Computational Linguistics: EMNLP 2024, pages
+8157-8177.
+
+Elaheh Rafatbakhsh and Alireza Ahmadi. 2023. Predict-
+ing the difficulty of efl reading comprehension tests
+based on linguistic indices. Asian-Pacific Journal of
+Second and Foreign Language Education, 8(1):41.
+
+Vatsal Raina and Mark Gales. 2024. Question difficulty
+ranking for multiple-choice reading comprehension.
+arXiv preprint arXiv:2404.10704.
+
+Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and
+Percy Liang. 2016. Squad: 100,000+ questions
+for machine comprehension of text. arXiv preprint
+arXiv: 1606.05250.
+
+Ana-Cristina Rogoz and Radu Tudor Ionescu. 2024.
+Unibucllm: Harnessing Ilms for automated predic-
+tion of item difficulty and response time for multiple-
+choice questions. arXiv preprint arXiv:2404.13343.
+
+Gemma Team. 2024a. Gemma.
+
+Qwen Team. 2024b. Qwen?2.5: A party of foundation
+models.
+
+Qwen Team. 2025. Qwen3 technical report. Preprint,
+arXiv:2505.09388.
+
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le,
+Ed Chi, Sharan Narang, Aakanksha Chowdhery, and
+Denny Zhou. 2022. Self-consistency improves chain
+of thought reasoning in language models. arXiv
+preprint arXiv:2203.11171.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+et al. 2022. Chain-of-thought prompting elicits rea-
+soning in large language models. Advances in neural
+information processing systems, 35:24824—24837.
+
+Mayi Xu, Yongqi Li, Ke Sun, and Tieyun Qian. 2024.
+Adaption-of-thought: Learning question difficulty
+improves large language models for reasoning. In
+Proceedings of the 2024 Conference on Empirical
+Methods in Natural Language Processing, pages
+5468-5495.
+
+Ying Xu, Dakuo Wang, Mo Yu, Daniel Ritchie, Bing-
+sheng Yao, Tongshuang Wu, Zheng Zhang, Toby Jia-
+Jun Li, Nora Bradford, Branda Sun, et al. 2022. Fan-
+tastic questions and where to find them: Fairytaleqa—
+an authentic dataset for narrative comprehension. In
+Proceedings of the 60th Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 447-460.
+
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio,
+William Cohen, Ruslan Salakhutdinov, and Christo-
+pher D Manning. 2018. Hotpotqa: A dataset for
+diverse, explainable multi-hop question answering.
+In Proceedings of the 2018 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+2369-2380.
+
+Ya Zhou and Can Tao. 2020. Multi-task bert for prob-
+lem difficulty prediction. In 2020 international con-
+ference on communications, information system and
+computer engineering (cisce), pages 213-216. IEEE.
+
+
+===== PAGE BREAK =====
+
+A. Data Annotation Details
+
+RACE++ (Lai et al., 2017; Liang et al., 2019)
+is a reading comprehension (RC) dataset consist-
+ing of English RC items sourced from exams ad-
+ministered to Chinese middle school, high school,
+and college students. To construct RECO, we
+use Multiple-choice True/False (MTF) items from
+the RACE++ dataset, each consisting of a read-
+ing passage and four options. We collected only
+items requiring holistic passage comprehension,
+excluding those targeting specific entities or lo-
+cal paragraph-level details. Items from the middle
+and high school levels were drawn from the test
+split, while college-level items were taken from
+the validation and test splits, due to limited data
+in its test set. Each MTF item was divided into
+four True/False/Not Given (TFNG) items, yield-
+ing triplets of (passage, statement, factuality label
+[True or Not True]).
+
+We recruited three experts, who independently
+labeled 238 MTF items (952 statements) divided
+into six batches. Annotators were compensated per
+item according to the education level of the source
+test: $1.20 for middle school, $1.50 for high school,
+and $2.00 for college-level items, with additional
+payment for training and revision.
+
+Figure 8 illustrates examples of the annotation
+sheet used by annotators. For each statement, an-
+notators were shown the passage, the statement,
+and its factuality label. Annotators first identified
+the sentence(s) necessary to verify the statement’s
+factuality (Evidence Scope) and then determined
+its Transformation Level based on the lexical and
+structural relationship between the statement and
+the selected evidence. Because TL is defined only
+for True statements, annotators revised each False
+statement—excluding those labeled as Insufficient
+Evidence—into its closest True version before as-
+signing a TL label.
+
+To further ensure data quality, we added two ad-
+ditional survey questions. First, annotators were
+asked whether they agreed with the provided fac-
+tuality label, and items with disagreement were
+discarded. Second, they reported their confidence
+in the labels they assigned; although no low-
+confidence items were reported, any such cases
+would have been excluded. Finally, items flagged
+as potentially problematic or ethically inappropri-
+ate were also removed.
+
+Figure 5 presents inter-annotator agreement for
+both annotation dimensions. Among the 898 items
+
+Combined Label
+100
+
+86.41%
+~ 804
+&                                        68.37%
+2                        61.58%    62.92%
+g 804           53.23%
+|
+o
+E 404
+o
+o
+i=]
+@
+204
+0
+AtLeastTwo All  AL1&A2 A2&A3 AL&A3
+Evidence Scope                        Transformation Level
+= 80         1%  4%  =  = 80             oy 72.05%
+2 20 4                    2 20 3
+0          T    T    T      0          T    T    T
+Figure 5: Inter-annotator agreement across labeling
+
+dimensions. Agreement ratios are shown for (top) com-
+bined labels of two dimensions. “At Least Two” indi-
+cates majority agreement among annotators, while “All”
+requires unanimous agreement. Pairwise agreements
+between annotators (Al, A2, A3) are also reported. For
+TL agreement, multi-evidence items labeled as word
+matching or paraphrasing were considered equivalent
+to transformed word matching and transformed para-
+Dhrasing, respectively.
+
+retained after filtering based on annotators’ survey
+responses, 86.41% received the same label from at
+least two annotators, while 53.23% achieved full
+agreement among all three. Although the annota-
+tion process was guided by structured label defini-
+tions, it required close examination of lexical, syn-
+tactic, and inferential relationships between state-
+ments and evidence, making it more demanding
+than typical classification tasks. In some cases, mi-
+nor oversights—such as missing subtle paraphrases
+or nuanced details—led to disagreements. To miti-
+gate their impact on data quality, we removed items
+for which all three annotators provided different
+labels. For items with partial agreement (i.e., two
+matching labels and one dissenting), the authors
+manually reviewed all annotations and resolved
+discrepancies by cross-referencing annotators’ jus-
+tifications with the passage content. After this adju-
+dication process, we obtained 776 annotated TFNG
+items, which we refer to as RECO (Reading Com-
+prehension dataset with Cognitive Complexity An-
+notations).
+
+
+===== PAGE BREAK =====
+
+Middle School                High School
+
+4.9%   \
+6.7%   \
+
+College
+2.48%
+
+16.9% 14.0%
+
+0.997-1%
+
+Labels
+mmm Single-I
+Multi-WM
+
+Single WM
+Single-TWM
+
+mm Single-P
+mmm Single-TP
+
+Mm Multi-P
+mmm Multi-I
+
+Insufficient
+
+Figure 6: Distribution of combined difficulty labels in
+the RECO dataset across educational levels.
+
+0              5              10             15             20
+Maximum Gap between Successive Evidence Sentences
+
+Figure 7: Distribution of the maximum gap between
+successive evidence sentences for multiple-sentence ev-
+idence items. For each item, the gap is measured as the
+largest distance between any two consecutive evidence
+sentences in the passage.
+
+B__ Data Analysis
+
+Figure 6 presents the distribution of cognitive labels
+in RECO across different educational levels. Word-
+matching items with single-sentence evidence—
+representing the lowest cognitive complexity—are
+more prevalent in middle school exams but de-
+crease substantially at higher levels. Conversely,
+multi-sentence and inference-based items occur
+more frequently in high school and college as-
+sessments. These patterns suggest that cognitive
+complexity varies considerably even among items
+within the same educational level or format, imply-
+ing that educational level alone is insufficient for
+fine-grained difficulty analysis.
+
+Figure 7 illustrates the maximum gap between
+successive evidence sentences, as identified by the
+raters, for multi-sentence evidence items. Accord-
+ing to the chart, approximately 45% of these items
+have evidence sentences that are adjacent in the pas-
+sage, whereas about 55% require comprehension
+across sentences that are farther apart. This indi-
+cates that many items demand integration of infor-
+mation from non-contiguous parts of the passage,
+rather than relying solely on one or two consecutive
+sentences.
+
+C Experimental Details
+
+In our experiments, we used open-source mod-
+els from Hugging Face* with the following model
+names:
+
+¢ Gemma2-9B: google/gemma-2-9b-it
+
+¢ Gemma2-27B: google/gemma-2-27b-it
+
+¢ Mistral-7B:
+mistralai/Mistral-7B-Instruct-vQ.3
+Mistral-24B:
+mistralai/Mistral-Smal1-24B-Instruct
+Qwen2.5-7B: Qwen/Qwen2.5-7B-Instruct
+Qwen?2.5-32B:
+Qwen/Qwen2.5-32B-Instruct
+In addition, we used GPT-40 and GPT-
+4o-mini via the OpenAI APP, with
+model versions gpt-40-2024-08-06 and
+gpt-40-mini-2024-07-18, respectively.
+
+For self-consistency decoding Wang et al.
+(2022), we used the default hyperparameter values
+of each model that the authors defined, especially
+for top-p, top-k, and temperature. All experiments
+were conducted using two NVIDIA A100 GPUs.
+
+D_ Answer Reasoning vs. Metacognitive
+Awareness
+
+We investigated whether LLMs with advanced rea-
+soning capabilities are also effective at analyzing
+cognitive complexity. For this experiment, we used
+Qwen3-32B (Team, 2025), a reasoning-specialized
+model that supports a “thinking mode” designed for
+deep reasoning and self-reflection. We compared
+the performance of Qwen3-32B in two settings—
+with and without thinking mode—on the cogni-
+tive difficulty classification tasks. As a baseline,
+we also included Qwen2.5-32B, a model from the
+same family but not specialized for reasoning.
+
+In Table 5, we observed that Qwen3-32B
+in thinking mode underperformed both its non-
+thinking-mode counterpart and Qwen2.5-32B,
+achieving lower F1 scores across both classification
+tasks. These results suggest that advanced reason-
+ing and self-reflection capabilities do not neces-
+sarily enhance a model’s ability to classify cogni-
+tive complexity features such as ES and TL. This
+may be because these tasks do not require complex
+multi-step reasoning, but rather fine-grained catego-
+rization of human cognitive processes—something
+better handled through intuitive pattern recognition
+than abstract reasoning. The experimental results
+
+‘https: //huggingface.co
+Shttps://openai.com
+
+
+===== PAGE BREAK =====
+
+TL                 TL
+
+Model                             ES (S-level) _ (3-level)
+Qwen2.5-32B                   705 658         72.4
+Qwen3-32Bnon—thinking 67.9     66.3       78.9
+Qwen3-32Brhinking             65.5 64.8           718
+
+Table 5: Performance comparison of LLMs with and
+without deep-thinking capabilities.
+
+align with this interpretation and highlight the dis-
+tinction between problem-solving ability and the
+metacognitive awareness.
+
+
+===== PAGE BREAK =====
+
+1, Evidence Mapping
+
+Identify all sentences necessary to verify the factuality of the option.
+
+[Passage]
+
+(On a small farm in Mexico, there are no schools.
+A bus is the school!
+
+The driver of the bus is the teacher!
+
+Itis a school bus, but it doesn't take children to school
+
+It just goes round from place to place, and sometimes it comes to this farm
+
+The bus will stay here for three months
+
+The farmers call it a school on wheels
+
+Every time the bus comes, the farmers come running to it, shouting and laughing.
+
+They warmly welcome the school bus!
+
+When the bus is on the farm, in the morning, the teacher teaches the small children
+
+In the afternoon, the bigger children come to have their lessons because they must work in the morning.
+At night, the fathers and mothers come to school
+
+They want to lear, too.
+
+How the farmers hope that some day they can have a real school on their farm!
+
+Oboooo0oo0o0o0o0o0000
+
+Option A. The children and their parents on the farm all come to the bus school to learn. (True)
+
+2. Reasoning Complexity Measurement
+Identify the level of reasoning required to determine the factuality of the option.
+(@) When a single sentence alone is sufficient to determine the factuality of the option,
+
+© Word Matching        © Transformed Word Matching
+© Paraphrase          © Transformed Paraphrase    © inference
+
+(i) When multiple sentences from the passage are required together to determine the factuality of the option,
+
+© Word Matching        O Paraphrase          O inference
+
+3. Additional Survey
+
+Do you agree that this option is True?
+O ve                              © ne
+
+11am confident that my response is correct,
+
+© Strongly agree      © Somewhat agree     © Somewhat disagree    © disagree
+
+1, Evidence Mapping
+
+Identify all sentences necessary to verify the factuality of the option.
+
+[Passage]
+
+On a small farm in Mexico, there are no schools,
+Abus is the school!
+
+The driver of the bus is the teacher!
+
+Iisa schoo! bus, but it doesn't take children to school
+
+It just goes round from place to place, and sometimes it comes to this farm
+
+The bus will stay here for three months
+
+The farmers call it a school on wheels
+
+Every time the bus comes, the farmers come running to it, shouting and laughing.
+
+They warmly welcome the school bus!
+
+When the bus is on the farm, in the morning, the teacher teaches the small children
+
+In the afternoon, the bigger children come to have their lessons because they must work in the morning
+At night, the fathers and mothers come to school.
+
+They want to learn, too,
+
+How the farmers hope that some day they can have a real school on their farm!
+NO EVIDENCE
+
+| Coooo0000e8anc0 |
+
+Option B. A school bus is a real school for farmers’ children. (Not True)
+
+2, Reasoning Complexity Measurement (No EVIDENCE selected: skip this section.)
+Identify the level of reasoning required to determine the factuality of the option.
+
+Revise only the portion of the option that conflicts with the passage, Apply minimal edits, and make use of wording from the evidence
+sentence whenever possible.
+
+enfFTOOO
+
+‘Assess the reasoning complexity based on your revised option.
+() When a single sentence alone is sufficient to determine the factuality of the option,
+
+© Word Matching                      © Transformed Word Matching
+
+© Paraphrase                                   © Transformed Paraphrase                © inference
+id When multiple sentences from the passage are required together to determine the factuality of the option,
+
+© Word Matching        O Paraphrase          O inference
+
+3. Additional Survey
+
+Do you agree that this option is Not True?
+O ve                              Q %
+lam confident that my response is correct.
+
+© Stronoly agree      © Somewhat agree     © Somewhat disagree    © disooree
+
+Figure 8: Example annotation sheets for True (left) and Not True (right) statements. For Not True statements,
+annotators could mark “No Evidence” when the passage lacked sufficient information (corresponding to the
+Insufficient Evidence category). Annotators were also asked to create a minimally revised True version of each False
+statement to enable assessment of its Transformation Level.

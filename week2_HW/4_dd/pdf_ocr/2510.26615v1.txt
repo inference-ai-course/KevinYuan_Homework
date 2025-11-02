@@ -1,0 +1,2491 @@
+arX1v:2510.26615v1 [cs.CL] 30 Oct 2025
+
+SlideAgent: Hierarchical Agentic Framework for Multi-Page Visual
+Document Understanding
+
+Yiqiao Jin'*,
+
+Rachneet Kaur’, Zhen Zeng’, Sumitra Ganesh’, and Srijan Kumar!
+
+‘Georgia Institute of Technology, ” J.P. Morgan AI Research
+{yjin328,srijan}@gatech. edu, zhen. zeng@jpmchase. com,
+{rachneet.kaur, sumitra. ganesh}@jpmorgan.com
+https: //SlideAgent.github.io/
+
+Abstract
+
+Multi-page visual documents such as manuals,
+brochures, presentations, and posters convey
+key information through layout, colors, icons,
+and cross-slide references. While large lan-
+guage models (LLMs) offer opportunities in
+document understanding, current systems strug-
+gle with complex, multi-page visual documents,
+particularly in fine-grained reasoning over el-
+ements and pages. We introduce SlideA gent,
+a versatile agentic framework for understand-
+ing multi-modal, multi-page, and multi-layout
+documents, especially slide decks. SlideAgent
+employs specialized agents and decomposes
+reasoning into three specialized levels—global,
+page, and element-to construct a structured,
+query-agnostic representation that captures
+both overarching themes and detailed visual or
+textual cues. During inference, SlideAgent se-
+lectively activates specialized agents for multi-
+level reasoning and integrates their outputs into
+coherent, context-aware answers. Extensive ex-
+periments show that SlideAgent achieves signif-
+icant improvement over both proprietary (+7.9)
+and open-source models (+9.8).
+
+1 Introduction
+
+Visual documents—from earnings reports and aca-
+demic lectures to business strategy presentations—
+are ubiquitous, conveying ideas not only from
+text, but also from the intricate interplay of layout,
+icons, visual hierarchy, and cross-page relation-
+ships. These documents are central to high-stakes
+domains such as finance, science, and technology.
+Accurately interpreting them thus remains a press-
+ing challenge.
+
+Challenges. Accurately interpreting these multi-
+page, multi-modal artifacts remains challenging.
+Recent advances in multimodal large language
+models (MLLMs) have accelerated document un-
+derstanding (Verma et al., 2024), yet three gaps
+
+“Work done as an intern at J.P. Morgan AI Research.
+
+The product mix for GWP Q2 2015 includes
+how many categories?
+Input Page
+
+Input Element
+
+i= oo
+Q2 2015
+
+—og®
+YT id
+
+‘eight’ |
+
+_=f         = iF
+
+Stam) Stee
+
+Figure 1: When given the full page, the LLM miscounts
+the number of product mix categories. After isolating
+the chart, it correctly identifies all eight categories, high-
+lighting the importance of accurate element parsing.
+
+remain: 1) Scalable Fine-Grained Reasoning.
+State-of-the-art MLLMs process a limited num-
+ber of images at once (Liu et al., 2023) and
+tend to treat each page holistically, missing fine-
+grained, element-level cues required for user
+queries (Faysse et al., 2024; Tanaka et al., 2025).
+In Figure 1, GPT-40 miscounts chart segments on a
+cluttered page of a slide deck, but correctly identi-
+fies all segments once the relevant chart is cropped—
+highlighting the importance of element-level pars-
+ing for latent reasoning abilities. 2) Domain-
+Specific Visual Semantics. Most MLLMs are pre-
+trained on natural images (Wu et al., 2024), lack-
+ing exposure to domain-specific diagrams, finan-
+cial charts, or scientific plots. Consequently, they
+struggle with the specialized language of visual
+documents (Cho et al., 2024). For example, logos
+appear on every page, reinforcing brand identities
+but do not offer additional content. Color schemes
+encode categorical information (red for losses and
+green for gains in financial reports). Icons convey
+abstract concepts (lightbulbs for innovation, arrows
+for causal relationships); and spatial positioning
+signals importance (centered elements typically
+
+
+===== PAGE BREAK =====
+
+matter more than corner annotations). falter in spa-
+tial reasoning (Wang et al., 2024b,a), failing to lo-
+cate visual elements (Sharma and Vats, 2025; Bhat-
+tacharyya et al., 2025; Polak and Morgan, 2025).
+Low-resolution visual encoders in MLLMs (Liu
+et al., 2023) further miss details such as footnotes
+or superscripts. 3) Metadata-Free Integration.
+Many systems (Singer-Vine, 2025; huridocs, 2025;
+Rausch et al., 2021) rely on clean metadata—figure
+locations, hierarchy tags, embedded text layers—
+that can be unavailable or corrupted in real-world
+PDF. Users may take screenshots of PDF docu-
+ments, scan copies of physical documents, export
+slides or documents as flattened PDFs, upload or
+share PDFs generated from software that strips out
+or does not preserve document structure. Recent
+metadata-free methods (Yu et al., 2025; Tanaka
+et al., 2025) address these by parsing only visual
+images without relying on the metadata, despite a
+performance gap.
+
+This Work. We present SlideAgent, an LLM-
+based agentic framework for fine-grained un-
+derstanding of multi-page, varying-size visual
+documents. Inspired by the human information
+processing model (Lang, 2000; Naysmith et al.,
+2021), SlideAgent employs a hierarchical archi-
+tecture with specialized agents at three levels:
+global (document-wide topics), page (page-specific
+features and cross-page relations), and element
+(fine-grained components such as charts, figures,
+and text blocks). During knowledge construc-
+tion stage, SlideAgent parses layout and generates
+query-agnostic knowledge at each level. At in-
+ference stage, SlideAgent retrieves guery-specific
+knowledge, enabling scalable fine-grained reason-
+ing over relevant pages and elements. We bench-
+mark SlideAgent and baseline models, demon-
+strating significant performance on both open-
+source and proprietary models. SlideAgent sur-
+passes its LLM counterpart by 7.9 (proprietary)
+and 9.8 (open-source), respectively. We also show
+that SlideAgent enhances spatial reasoning, visual
+counting, and cross-element understanding, with
+results that are highly interpretable.
+
+2 Method
+
+Problem Formulation Given a multi-page visual
+document P = {p1,..-, pip} with |P| pages and
+a query q, the goal is to generate a natural language
+answer a = f(q,P) by reasoning over relevant
+visual and textual elements.
+
+Overview As shown in Figure 2, SlideAgent op-
+erates in two stages: 1) Knowledge Construction:
+Build a hierarchical, query-agnostic knowledge
+base K = {K,,K,,K.} capturing global, page,
+and element knowledge; 2) Retrieval and Question-
+Answering: Using multi-level retrieval to retrieve
+query-specific content from K and synthesize the
+answer a, ensuring both broad contextual under-
+standing and fine-grained reasoning.
+
+2.1 Knowledge Construction Stage
+
+Given a multi-page document, SlideAgent con-
+structs hierarchical knowledge at three levels using
+specialized agents in a top-down manner.
+
+Global Agent The global agent M, generates
+document-level knowledge K, = M,(P), captur-
+ing the overall summary, objectives, and narrative
+flow of the document. This layer establishes overar-
+ching themes to support high-level reasoning about
+the document’s purpose. Since visual documents
+are often large and LLMs have a limited capacity
+for processing visuals, SlideAgent samples the first
+three pages to generate K, (example in Appendix
+Figure 7).
+
+Page Agent For each page p; € P, the page
+agent generates page-level knowledge K., in a se-
+quential manner, conditioned on the page’s vi-
+sual content v;, the global knowledge K,, and the
+knowledge from the preceding page Kits
+
+Ki =M,(v;,Kg,K5-"),1 € [1 [Pl]. Kp =0
+
+()
+The complete page-level knowledge K, =
+UI?! Ki provides an intermediate representation
+that captures page-specific content while linking
+them to the global context (sample in Figure 8). To
+ensure comprehensive understanding of all pages,
+K, is subsequently used to refine Ky.
+
+Element Agent LLMs often struggle with spa-
+tial reasoning over visual documents (Wang et al.,
+2024b,a), failing to locate visual elements (Sharma
+and Vats, 2025; Bhattacharyya et al., 2025; Polak
+and Morgan, 2025). To address this, our element
+agent integrates external tools to explicitly capture
+the spatial and structural information of each page.
+
+At the finest granularity, the element agent de-
+composes each page p; into a set of elements
+using a layout parsing pipeline f      vi >
+{(i, ej, by.ty) hea. where each element is repre-
+sented by its page index 7, verbatim text e;, bound-
+ing box coordinates b;, and element type t;. f
+
+
+===== PAGE BREAK =====
+
+Knowledge
+Construction
+
+Inference
+
+S                                             Page Retrieval
+id
+
+Which country has
+the smallest GWP
+in the time range
+described by the
+donut chart?
+
+Which countries
+
+are mentioned?
+What does the donut
+chart represent?
+Which charts or
+tables describe GWP
+for Q2 2015?
+
+Agent
+Orchestrator
+
+Merging &
+
+Element
+Deduplication
+
+Detection
+
+Element
+Retrieval
+
+How does Denmark's
+
+GWP compare with
+
+(Title
+
+(Tone   Analytical, informative, and optimistic
+
+)| Link to Previous Builds on the introductory
+
+~\
+
+Protector Forsikring Q2 2015
+Investor Presentation
+
+Objective Inform investors about the
+company's performance in 2015, strategic
+initiatives, and future outlook.
+
+.                                   Reasoning From the
+Structure Overview: ...                              content summary ...
+
+Key Insights...                                       Answer
+
+Norway
+
+Audience Investors and stakeholders in the
+insurance industry
+
+Global Knowledge Kg
+
+Purpose Detailed overview of Protector to
+establish context for the Q2 2015 results.
+
+Reasoning From the
+description and visual
+content on Page 4, we
+see that ...
+
+wv
+Summary The slide presents key facts ...
+Answer
+Synthesizer g
+
+g ‘Answer Denmark
+
+slide by offering foundational information about
+the company, necessary for understanding its
+Q2 2015 performance.
+
+Takeaway Protector is a well-established,
+financially robust non-life insurance company ...
+
+Answer Denmark
+
+Page Knowledge K,
+
+Text | Upper Left
+Introduces the main
+financial metric,
+Setting the context for the
+data / visuals that follow ...|
+
+Donut Chart | Upper Right
+Bar chart showing
+increasing trends for GWP
+from 2011-2015
+
+Reasoning We can
+infer from Element 3
+that Denmark has a
+
+45% GWP growth ...
+
+other countries?
+
+=  |  Lt         Element
+
+Agent
+Subquery
+Element Parsing
+
+Generation
+
+M.
+
+Answer Denmark
+
+Bar Chart | Lower Left
+Product mix for Q2 2015,
+including COI, Property, ..
+
+Flags for Norway,
+Sweden, Denmark
+
+Image | Upper Right    |
+
+Element Knowledge K,
+
+Figure 2: SlideAgent generates knowledge about input slide decks in a hierarchical manner at 3 levels: global, page,
+and element. At each level, specialized agents generate query-agnostic knowledge during knowledge construction,
+then retrieve and reason over query-specific textual & visual knowledge during inference stage. Sample knowledge
+K generated by SlideAgent is in Appendix Figure 7,8,9 and answers generated by the agents are in Figure 5.
+
+integrates text detection, layout detection, and ele-
+ment classification, followed by post-processing to
+merge fragmented elements (Appendix A.1).
+
+For each detected element e;, the agent con-
+sumes the annotated visuals and metadata to gener-
+ate element-level knowledge:
+
+ki
+
+e
+
+= Me(i, vi, ej, bj, tj, Kg, K,).      (2)
+Ki consists of the element’s semantic role, func-
+tional purpose, and its relation to the slide page (ex-
+ample in Figure 9). This design allows SlideAgent
+to reason consistently across diverse visual content
+while preserving spatial relationships for document
+understanding.
+
+2.2 Inference Stage
+
+Query Classification Different queries require
+different perspectives to answer effectively. For
+instance, queries about global understanding, like
+“What is the overall theme of this presentation?”
+requires a broad overview from a macroscopic per-
+spective and activates only the global agent. In
+contrast, a fact-based query, like “What is the rev-
+enue on slide 3?” requires detailed, slide-specific
+information and requires both the page and element
+agents. Leveraging too many agents may increase
+computation or introduce noise. Thus, the agent
+orchestrator first attempts to classify each query q
+into one of 4 predefined categories, such as global
+understanding, fact-based direct queries, multi-hop
+
+reasoning, and layout & visual relationships. Each
+type corresponds to a question-answering strategy
+and a targeted set of agents (Appendix Table 7). For
+instance, global understanding queries activate only
+the global agent, as they require a broad overview,
+while fact-based queries trigger both the page and
+element agents to retrieve detailed, slide-specific
+information. If none of the predefined categories
+apply, the agent defaults to the “unknown” cate-
+gory, which activates all agents.
+
+Subquery Generation and retrieval The origi-
+nal query q is usually short and can lead to noisy
+retrieval. Using q, SlideAgent generates subqueries
+Q targeting key entities in the query. For example,
+for the query ‘Which country has the smallest GWP
+in the time range described by the donut chart, the
+model generates subqueries related to keywords
+such as country, donut chart, and GWP. q and Q
+are concatenated to jointly retrieve the top-  ke pages
+P and the top elements € along with their page /
+element knowledge K,, and K,. Note that the re-
+triever can include simple sparse retrievers such
+as BM25 (Robertson et al., 2004), dense retriever
+such as SFR (Meng et al., 2024), GTE (Li et al.,
+2023) and Ling (Kim et al., 2024), and multimodal
+retriever such as COLPALI (Faysse et al., 2024)
+and VisRAG (Yu et al., 2025).
+
+Answer Generation and Synthesis The system
+guides structured reasoning through hierarchical
+
+
+===== PAGE BREAK =====
+
+context understanding to generate h,, hy, he, which
+contain both the agent’s answer and its reason-
+ing. The global context is processed to generate
+hg = fg(Kg,Ps,q), which captures the overall
+document-level context. The page-level agent then
+derives from the retrieved pages and corresponding
+knowledge: hy = fp(Kp, Rp(P, {gq} U Q), hg).
+At the element-level, the visual input is annotated
+with bounding boxes {b;}, which are then pro-
+cessed by the element agent to generate he =
+fe(RL(E, {q} UQ), Annot(V)), capturing the de-
+tailed visual and textual cues.
+
+If all agents agree according to answer matching
+(Appendix B.2), or only one agent is activated, the
+answer is taken directly from the activated agent.
+Otherwise, the answer synthesizer $(-) combines
+the reasoning from all agents and visuals from the
+retrieved pages to generate the final answer:
+
+a= (hg, Ap, he, {vi : pi E R(P)}). — B)
+
+3 Experiments
+
+Datasets We evaluate SlideAgent and baselines
+on two tasks: 1) multi-page understanding, us-
+ing datasets such as SlideVQA (Tanaka et al.,
+2023), TechSlides, and FinSlides (Wasserman et al.,
+2025); and 2) single-page understanding, using
+InfoVQA (Mathew et al., 2022). Details of the
+datasets are in Appendix C.1.
+
+Models. We benchmark SlideAgent against 3
+types of baselines: 1) Multimodal LLMs: 15
+LLMs from 8 model families, including proprietary
+models (GPT-40 (OpenAI, 2025), Gemini (Anil
+et al., 2023), Claude (Anthropic, 2025)) and open-
+source models (Llama-3.2 (Grattafiori et al., 2024),
+InternVL3 (Chen et al., 2024), Phi-3 (Abdin et al.,
+2024), Qwen2.5-VL (Bai et al., 2025)); 2) Mul-
+timodal RAG Methods: VisRAG (Yu et al.,
+2025), VDocRAG (Tanaka et al., 2025), and COL-
+PALI (Faysse et al., 2024); 3) Multi-agent Sys-
+tems: ViDoRAG (Wang et al., 2025a). We evaluate
+SlideA gent using two backbone LLMs, including
+both proprietary models (GPT-40 (OpenAI, 2025))
+and open-source models (InternVL3-8B (Chen
+et al., 2024)). These models are chosen for their
+widespread use in state-of-the-art QA systems (Yu
+et al., 2025; Jin et al., 2025; Cho et al., 2024). The
+parameter sizes, knowledge cutoff dates, and re-
+lease dates are in Appendix Table 8. We use the
+text-based retriever SFR (Meng et al., 2024) due
+to its strong efficiency-performance (Cheng et al.,
+2024; Jin et al., 2025). For models restricted to
+
+Variants of SlideAgent (GPT-40)
+
+Retrieved Pages           Ground-truth Pages
+
+100                                    100
+
+SlideAgent                                  SlideAgent
+w/o S                                       w/o S
+95        w/o G                            95        w/o G
+w/o P                                       w/o P
+90        w/o E                            90        w/o E
+© 85                                     © 85
+8                                          8
+E so                                     E so
+£                                          £
+&2 75                                     2 75
+70                                         70
+65                                         65
+Overall Numeric     Fl                 Overall Numeric     Fl
+
+Figure 3: Performance comparison among variants of
+SlideAgent with base model GPT-4o.
+
+single-image input (e.g. LLaVA-v1.5 (Liu et al.,
+2023)), we concatenate the top 3 retrieved images
+into one following previous work (Yu et al., 2025).
+In settings where ground-truth pages are available,
+we provide them as input to all models. Otherwise,
+each model receives as many retrieved pages up to
+its input capacity.
+
+Metrics. We evaluate the performance of
+SlideAgent in end-to-end question answering. For
+questions asking about numeric values, we extract,
+standardize, and compare the prediction and the
+ground-truth in various formats, including percent-
+ages, decimals, integers, and word-based represen-
+tations (e.g., “three’’, “thousand”, “million’’). Num-
+bers are normalized to a unified format (e.g., ‘17k’
+— ‘17000’, ‘2.5 million’ + ‘2500000’, ‘97%’ >
+0.97). Otherwise, we use Fl-score to evaluate the
+lexical overlap between predicted and ground-truth
+answers. Both answers are normalized, tokenized,
+and preprocessed by removing stopwords and punc-
+tuation before metric calculation. For ranking, we
+use MRR, Hit@k, and nDCG@k (Appendix C.2)
+
+Settings We evaluate SlideAgent under two real-
+istic settings: 1) End-to-End Performance. The
+model must first retrieve relevant pages before an-
+swering the query, reflecting real workflows where
+users query long visual documents —analysts nav-
+igating 100-page earnings presentation, students
+reviewing lecture slides, or engineers inspecting
+multi-page technical specifications. This setting
+measures the end-to-end capability in retrieval, spa-
+tial reasoning, and layout understanding. 2) Per-
+formance with Ground-truth Pages. The model
+is directly given the page(s) containing the answer,
+isolating reasoning from retrieval. This mirrors
+cases where context is known-e.g., a product man-
+
+
+===== PAGE BREAK =====
+
+Model                        SlideVQA                     TechSlides                       FinSlides
+Overall Num Fl | Overall Num FI       Overall Num FI
+Multimodal LLMs (Type 1)
+Gemini 2.0           75.0      713 79.8      50.4      67.6 41.6       70.8      70.6 77.8
+Gemini 2.5            83.8      78.3 91.8       51.1       71.4 41.2       76.2       75.8 100.0
+Gemini 2.5-lite | 71.2      60.8 87.0      47.3      58.1 41.9       57.0      56.6 68.3
+Claude 4.1             78.4       74.3 82.3       61.0       81.4 52.3       56.5       54.8 73.3
+Claude 3.5            62.5      68.3 54.6      52.5      80.2 39.5       48.5      49.5 29.6
+GPT-4o0                 77.0       72.1 84.0      63.4       78.3 53.9       80.0       80.8 62.1
+Multimodal RAG (Type 2) and Agentic Methods (Type 3)
+COLPALI             78.8       73.7 83.4       64.1       73.2 54.5        80.9       81.5 62.7
+VisRAG                78.2       73.1 85.4       64.7       72.6 54.7       79.2       81.1 75.8
+VDocRAG            80.0       75.0 87.8       67.0       80.5 57.0       83.5      83.8 64.2
+ViDoRAG             81.1       76.4 88.1       68.7      78.2 59.4       82.2       83.3 65.1
+SlideAgent            84.9       80.4 90.5 | 70.9       82.5 66.2       85.5       85.9 79.6
+Impr.                    +7.9      $8.3 46.5 | 47.5      44.2 412.3] 45.5      $5.0 +17.5
+
+Table 1: Performance comparison of proprietary models on SlideVQA, TechSlides, and FinSlides. All baseline
+methods use GPT-40 for answer generation. Improvements over the base model GPT-40 is shown in green. The best
+and second best performance are highlighted in bold and underlined. SlideAgent outperforms all baseline methods
+(Type 2/3) sharing the same base model (GPT-40), and even outperforms stronger raw LLMs (e.g. Gemini-2.5).
+
+ager reviewing a linked design slide—and primarily
+focuses on reasoning and layout comprehension.
+
+Model                  Overall Num _ FI1
+Raw LLMs
+
+Gemini 2.0       72.3     66.1 81.3
+Gemini 2.5           86.9       81.1 95.4
+Gemini 2.5 lite       71.7        62.6 87.0
+Claude 4.1             36.3        35.4 38.9
+Claude 3.5               31.5         30.8 37.0
+GPT-40                    69.0         59.3 90.5
+Multimodal RAG and Agentic Methods
+ViDoRAG                 71.2          60.5 90.7
+SlideAgent                 79.6           69.9 94.1
+Impr.            +10.6 +105 +3.6
+
+Table 2: Performance comparison among Gemini,
+Claude, GPT-40, ViDoRAG, and SlideAgent models.
+
+3.1 End-to-End Performance
+
+Tables 1/2/3 and Appendix Table 5 demonstrate
+the end-to-end performance of SlideAgent across
+proprietary and open-source models.
+
+Consistent Improvements across Architectures
+For both proprietary and open-source models,
+SlideAgent consistently outperforms all baseline
+methods (Type 2/3) and the base models across
+all metrics. For proprietary models (Table 1),
+
+SlideAgent improves overall accuracy by +7.9,
+numeric reasoning by +8.3, and lexical overlap
+by +6.5 on SlideVQA. Similar trends are ob-
+served for TechSlides (+7.5 overall; +12.3 F1)
+and FinSlides (+5.5 overall; +17.5 F1), indicating
+robust performance across diverse domains. For
+open-source models, the advantage remains pro-
+nounced: SlideAgent outperforms InternVL3-8B
+by +9.8 overall (+11.7 numeric), showing that our
+hierarchical, multi-agent design generalizes well
+across LLMs.
+
+Comparison with Multimodal LLMs
+SlideAgent consistently achieves the best or
+second-best performance among proprietary mod-
+els (Tables 1 and 11). Notably, although the base
+GPT-40 model slightly lags behind stronger LLMs
+such as Gemini 2.5 in raw capability (e.g. 83.8
+for Gemini 2.5 vs. 77.0 for GPT-40 in Table 1),
+SlideAgent’s structured reasoning pipeline fills this
+gap (84.9 overall for SlideAgent). For open-source
+models, SlideAgent achieves better performance
+across all models except for the Qwen2.5 family.
+While strong base models such as Gemini-2.5 and
+Qwen?2.5 already exhibit advanced multimodal
+comprehension, SlideAgent is model-agnostic in
+nature and can be directly applied to these models
+to further enhance performance.
+
+Performance across Query Types Figure 4
+presents the performance breakdown across query
+
+
+===== PAGE BREAK =====
+
+Model                          SlideVQA                     TechSlides                      FinSlides
+Overall Num FI | Overall Num _ FI | Overall Num _ Fl
+Multimodal LLMs (Type 1)
+Llama 3.2 11B       42.9      43.3 42.3      41.4       52.5 36.2      23.3      23.2 26.2
+Phi3                   72.3      61.8 90.6      59.4      60.0 59.1      48.8      48.5 64.3
+Qwen?2.5 7B         79.5      70.5 94.3     59.3      52.5 65.9     53.6      52.5 85.7
+Qwen?2.5 32B       79.2     71.1 92.2 | 67.5      87.5 60.6     57.4     56.6 87.5
+LLaVA 1.5 7B      36.8      22.4 79.0     23.3      12.5 38.7     10.7      10.1 16.6
+LLaVA 1.5 13B     44.9     25.1 81.8     28.1     17.5 45.0    20.6     16.5 36.7
+LLaVA 1.6 7B       50.9      37.3 82.6     34.4      37.5 32.2      12.2      12.1 17.8
+LLaVA 1.6 13B     16.7      10.2 81.5     45.2     40.0 49.1     32.0     31.3 64.3
+InternVL3 8B       63.0      56.5 74.1     55.4      57.5 544 | 49.8      495 64.3
+Multimodal RAG (Type 2) and Agentic Method (Type 3)
+COLPALI            63.4      56.7 73.8      57.1       60.9 55.2      50.4      49.3 65.7
+VisRAG                 63.6       56.5 75.5       56.8       57.7 55.4       51.1       496 65.2
+VDocRAG             65.2       59.7 77.0      59.2       60.7 58.3       51.8       50.1 65.9
+ViDoRAG            68.8      61.9 77.3      61.4      61.9 59.3      52.7      55.4 66.6
+SlideAgent           72.7      68.2 79.4      63.1      78.0 61.7      63.3      62.8 68.3
+Impr.                     49.8 411.7 45.4) 47.7 420.5 42.3) 413.5 413.3 44.0
+
+Table 3: Performance comparison of various models on SlideVQA, TechSlides, and FinSlides datasets. SlideAgent
+outperforms all baseline methods (Type 2/3) sharing the same base model (GPT-40).
+
+Correctness by Case GPT-4o
+90                                                       90
+
+SlideAgent
+GPT-46)
+
+80                                                  80
+
+Correctness by Case InternVL
+
+SlideAgent
+InternVL
+
+x
+i)
+x
+i)
+
+Correctness%
+
+a
+i}
+
+Correctness%
+
+a
+i}
+
+wu
+°
+wu
+°
+
+40
+
+40
+\      4               \        oO              \      4        ro)     s        Sy
+\ ar Ce      NOP os?      yw             \ ar Ce      0? gu      yw
+\o'               x     ‘        ©)             \o'               x     ‘        ©)
+ic)            ow     »)     on™             ic)            ow     »)     on™
+
+Query Type                                    Query Type
+
+Figure 4: Accuracy of SlideAgent and base models
+(GPT-40 / InternVL3-8B) on different query types.
+
+types, as defined in Table 7. SlideAgent im-
+proves question-answering across diverse query
+types, especially in multi-hop reasoning and vi-
+sual/layout questions. The greatest improvement
+occurs on case 3 (multi-hop reasoning), with a 9.8
+point improvement (67.4 to 77.2). This means ex-
+plicitly guiding the model’s reasoning using gen-
+erated knowledge (Ky,Kp,K.~) significantly im-
+proves reasoning capabilities. A notable 7.7-point
+improvement (66.7 — 74.4) is also observed in
+visual/layout reasoning, demonstrating the ben-
+efit of fine-grained element-level reasoning and
+retrieval that multimodal LLMs hardly achieve.
+Both SlideAgent and its counterpart perform well
+on Case 2 (Fact-based Direct Queries), with only
+a modest 2.1-point improvement, reflecting the
+
+model’s ability to handle page-level reasoning with
+little space for further enhancement.
+
+3.2 Performance with Ground-truth Pages
+
+When ground-truth pages are provided (Ta-
+ble 11/12), the performance gap narrows. As all
+models receive the exact pages with the answers,
+noise introduced in retrieval is eliminated. Under
+this oracle setting, SlideAgent still improves over
+GPT-40 (47.7 overall and +12.5 numeric on Slide-
+VQA), demonstrating the effectiveness of element-
+level retrieval.
+
+3.3 Effectiveness of Knowledge Construction
+
+We evaluate whether hierarchical knowledge repre-
+sentations (C) improve retrieval beyond end-to-end
+QA. Specifically, we test page-level retrieval using
+generated subqueries Q and page knowledge K,
+from SlideAgent. Table 4 shows consistent gains
+across both text-based retrievers (BM25 (Robertson
+et al., 2004), BGE (Xiao et al., 2023), SFR (Meng
+et al., 2024)) and multimodal retrievers (COL-
+PALI (Faysse et al., 2024), VisRAG (Yu et al.,
+2025), SigLIP2 (Tschannen et al., 2025)).
+
+Text-based Retrievers Show Largest Gains.
+Structured agent outputs substantially enhance text-
+based retrievers. SFR achieves the largest gains
+(+6.4 MRR, +8.5 nDCG@1), showing that page-
+
+
+===== PAGE BREAK =====
+
+Text-based Retrievers                       MRR Recall@1 nDCG@1 Recall@3 Hit@3 nDCG@3
+BM25 (Robertson et al., 2004)      59.0       51.5          52.0           63.0          65.3       57.7
+
+wi SA                              63.9 +49 54.9434 56.6446     67.1441 68.8435 62.6 +49
+BGE (Xiao et al., 2023)              70.1       56.1          60.9          75.8          78.1       69.2
+
+w/ SA                              72.3 422 58.4423 63.2 423     77.4416 80.3422 71.3 +21
+SFR (Meng et al., 2024)              70.1       56.1          60.9          75.8          78.1       69.2
+
+w/ SA                              76.5 +64 59.9438 69.4 +8.5     77.3 +15     81.8 43.7 73.2 +4.0
+Multimodal Retrievers                     MRR _ Recall@1 NDCG@1 Recall@3 Hit@3 NDCG@3
+SigLIP2 (Tschannen et al., 2025) | 26.7       15.9          18.0          31.0         34.0       25.0
+
+w/ SA                              28.0 +13 16.3 +04     18.0 +0.0     32.3413 35.5415 26.1 41.1
+COLPALI (Faysse et al., 2024) | 82.1       68.2         75.5          78.9         84.0       T14
+
+w/ SA                               82.9 108 70.4422 76.2 +07      88.6 +97 90.1 +6.1 83.1 45.7
+VisRAG (Yu et al., 2025)            76.0       63.3         68.6          82.3          84.1       76.0
+
+w/ SA                              79.7 437 66.3430 71.6430     85.5432 87.7436 79.4 +34
+
+Table 4: Artifacts generated by SlideAgent, particularly Q and M.,, improves page-level retrieval performance,
+
+especially for text-based retrievers.
+
+level knowledge K, provides richer semantic sig-
+nals than raw OCR, especially useful in the absence
+of the vision modality. Even sparse retrievers like
+BM25 improves (+4.9 MRR), as lexical matching
+benefits from structured page descriptions, which
+integrates multimodal cues that pure text extraction
+often miss. Notably, despite much lower compu-
+tational costs, text-based retrievers already rival
+multimodal LLM-based methods, justifying our
+choice of SFR as the base retriever.
+
+Multimodal Retrievers Exhibit Smaller but Con-
+sistent Gains. COLPALI (Faysse et al., 2024)
+improves slightly in ranking quality (+0.8 MRR)
+but substantially in coverage (+9.7 Recall@3), in-
+dicating that structured subqueries help it surface
+more relevant pages even if they are not ranked at
+the very top. VisRAG (Yu et al., 2025) achieves a
+larger ranking boost (+3.7 MRR), suggesting that
+multimodal LLMs still benefit from textual guid-
+ance in aligning queries to page content. SigLIP2
+shows minimal gains (+1.3 MRR), likely because
+it is optimized for natural image domains and trans-
+fers less effectively to document-style inputs.
+
+3.4 Ablation Studies
+
+We analyze each design choice by removing global
+agent (w/o G), page agent (w/o P), element agent
+(w/o E), and subquery generation (w/o S). Fig-
+ures 3/6 summarize results across proprietary (GPT-
+40) and open-source (InternVL3-8B) backbones.
+
+Page-level Reasoning is Critical Removing the
+page agent causes the steepest degradation—GPT-4o0
+
+drops —6.3 overall (—9.5 numeric) and InternVL3-
+8B -8.8 overall. The page agent integrates global
+themes K, and sequential context Kit (Eq. 1),
+enabling cross-slide coherence and multi-hop rea-
+soning. Its absence breaks this structural bridge
+between global context and page details. Results
+for SlideAgent w/o E, w/o G, and w/o S are in
+Appendix D.1.
+
+3.5 Qualitative Answer Analysis
+
+Figure 5 shows a qualitative example of answer gen-
+erated by SlideAgent to illustrate how SlideAgent
+leverages hierarchical knowledge for reasoning.
+Given the slide deck, SlideAgent builds hierar-
+chical knowledge K = {K,,Ky,K.} (Figures 7-
+9). Because the query lacks global/page cues (e.g.
+“on page 4’), the agent orchestrator activates all
+agents. The global agent performs deck-level triage
+and nominates the pages directly following page 2’s
+summary as related to “cause/effect region.” The
+page agent pinpoints Page 4: Wealth Management—
+The Cause, whose description states that listed
+problems leads to Business Under-Performance.
+Element (.) grounds the answer by parsing the
+flowchart on Page 4, extracting the node whose
+verbatim text matches the query and following
+its directed edge to the target node labeled Busi-
+ness Under-Performance. The answer synthe-
+sizer fuses these signals to return Business under-
+performance with explicit provenance (Page 4,
+flowchart edge from the queried node). This layer-
+ing is essential: without global triage, search drifts;
+without page focus, we may match the phrase but
+
+
+===== PAGE BREAK =====
+
+a
+
+What does poor visibility of economic performance
+and drivers by customer segments result in?
+
+jent - The Effect,
+
+Global
+Agent
+
+Answer: Cannot be derived.                                    >)
+Reasoning: The question is not directly addressed in
+the deck's summary. However, pages immediately
+following page 2 might contain the answer because
+they describe the cause and effects of wealth
+
+Evolving A Needs Based Approach Ta)Wealth
+Management
+
+Se
+
+Bi ceo nts
+A
+
+eo
+
+Chanmele'Servicing The Landscape
+
+\ management today.                                                           yy
+~
+
+(Answer: Business under-performance.
+Reasoning:
+especially Page 4, it is clear that the diagram outlines
+several core problems leading to business under-
+performance in wealth management. One of these
+core problems is "Poor visibility of economic           vv
+performance and drivers by customer segments."
+This issue results in business under-performance, a
+broader term encompassing various negative impacts
+on the company's financial health and operational
+efficiency. Without clear visibility into how different
+customer segments are performing economically and
+what drives their performance, the company struggles
+to optimize its strategies and services effectively,
+
+Analyzing the page descriptions,
+
+Answer
+Synthesizer
+
+Element
+Agent
+
+\ leading to overall under-performance.                         SS                Business
+>)                 under-
+Answer: Business under-performance.                                   performance
+
+Reasoning: On the slide "Wealth Management - The
+Cause," the element specifically pointing to "Poor
+visibility of economic performance and drivers by
+customer segments" is positioned in the flowchart,
+which is linked to "Business Under-performance."
+
+y
+
+Figure 5: Example answers generated by SlideAgent. Agents at different levels work together to provide compre-
+
+hensive responses.
+
+miss causality; without element grounding we rely
+on summaries and risk speculation. Combining all
+three yields robust reasoning: the global agent pro-
+vides thematic scope, the page agent narrows can-
+didates, and the element agent confirms answers
+with visual grounding. This layered verification
+produces accurate, confident responses.
+
+4 Related Work
+
+In this section, we discuss relevant works in visual
+document understanding and Multimodal LLMs.
+A more detailed description is in Appendix B.
+
+Visual Document Understanding relied on com-
+puter vision pipelines combining OCR, layout pars-
+ing, and heuristics to extract semantics (Shilman
+et al., 2005; Bhowmik, 2023; Gao et al., 2019;
+Kieninger, 1998; Smith, 2007). Though effec-
+tive, these methods were brittle to noisy and vi-
+sually rich inputs. Recent models such as BERT-
+grid (Denk and Reisswig, 2019), LayoutLM (Xu
+et al., 2020b,a), LayoutTS (Tanaka et al., 2021),
+and TILT (Powalski et al., 2021) jointly encode
+texts, layouts, and visuals through multimodal
+pretraining—laying the foundation for LLM docu-
+ment understanding. Visual Question Answering
+based on Multi-page Document requires layout
+comprehension and long-context reasoning. Earlier
+studies focused on segmentation (Haurilet et al.,
+2019) and generation (Sun et al., 2021; Fu et al.,
+2022) perspectives, while recent work focus on
+multi-hop, numerical, or commonsense reasoning
+capabilities (Tanaka et al., 2023; Mathew et al.,
+2022; Ma et al., 2024). Retrieval pipelines such as
+
+ColPali (Faysse et al., 2024), VisRAG (Yu et al.,
+2025), and VDocRAG (Tanaka et al., 2025) com-
+bine retrieval and reasoning for multi-page com-
+prehension, emphasizing the need for fine-grained
+element-level reasoning.
+
+General-Purpose Multimodal LLMs such as
+GPT-4/40 (Achiam et al., 2023; Hurst et al., 2024),
+Gemini (Anil et al., 2023), LLaVA (Liu et al.,
+2023), and InternVL3 (Zhu et al., 2025) have ad-
+vanced visual reasoning (Shao et al., 2024; Yang
+et al., 2023). Yet, trained largely on natural im-
+ages (Wt et al., 2024), these models struggle with
+visual documents such as slides, which require pre-
+cise grounding of heterogeneous elements (charts,
+tables, icons).
+
+5 Conclusion
+
+We present SlideAgent, a hierarchical agentic
+framework that leverages specialized agents at mul-
+tiple levels for fine-grained infographics under-
+standing, particularly for slide decks. SlideAgent
+demonstrates significant performance gains and
+strong generalizability across both proprietary and
+open-source models.
+
+6 Limitations
+
+We did not evaluate element-level retrieval due
+to the lack of corresponding annotations in exist-
+ing datasets and the difficulty of defining precise
+boundaries among elements. Benchmarks in vi-
+sual document understanding could include such
+annotations to enable finer-grained analysis.
+
+
+===== PAGE BREAK =====
+
+Retrieval Method. Our framework supports both
+textual and multimodal retrievers. We primarily
+adopt text-based retrieval for efficiency, though
+future work could explore multimodal retrievers or
+domain-specific strategies tailored to slide decks.
+
+7 Ethical Considerations
+
+Data Privacy, Consent, and Intellectual Prop-
+erty. Visual documents such as those processed
+by SlideAgent may contain sensitive business or
+personal data. Ensuring compliance with privacy
+regulations (e.g., GDPR, CCPA) and obtaining
+appropriate consent are essential. Organizations
+should also respect intellectual property rights and
+establish policies that balance knowledge sharing
+with fair use.
+
+Content Reliability and User Responsibility.
+Like other LLM-based systems, SlideAgent may
+inherit biases or produce inaccurate content. While
+it enhances question answering, outputs should be
+verified by human judgment, particularly in sensi-
+tive or high-stakes scenarios. Clear user guidance
+and validation practices can help ensure responsi-
+ble use.
+
+Disclaimer
+
+This paper was prepared for informational purposes
+by the Artificial Intelligence Research group of JP-
+Morgan Chase & Co and its affiliates ("J.P. Mor-
+gan") and is not a product of the Research De-
+partment of J.P. Morgan. J.P. Morgan makes no
+representation and warranty whatsoever and dis-
+claims all liability, for the completeness, accuracy
+or reliability of the information contained herein.
+This document is not intended as investment re-
+search or investment advice, or a recommendation,
+offer or solicitation for the purchase or sale of any
+security, financial instrument, financial product or
+service, or to be used in any way for evaluating the
+merits of participating in any transaction, and shall
+not constitute a solicitation under any jurisdiction
+or to any person, if such solicitation under such
+jurisdiction or to such person would be unlawful.
+
+References
+
+Marah Abdin, Jyoti Aneja, Hany Awadalla, Ahmed
+Awadallah, Ammar Ahmad Awan, Nguyen Bach,
+Amit Bahree, Arash Bakhtiari, Jianmin Bao, Harki-
+rat Behl, and | others. 2024. Phi-3 technical report:
+A highly capable language model locally on your
+phone, 2024. arXiv:2404.14219, 2:6.
+
+Josh Achiam, Steven Adler, Sandhini Agarwal, Lama
+Ahmad, Ilge Akkaya, Florencia Leoni Aleman,
+Diogo Almeida, Janko Altenschmidt, Sam Altman,
+Shyamal Anadkat, and | others. 2023. Gpt-4 techni-
+cal report. arXiv preprint arXiv:2303.08774.
+
+Rohan Anil, Sebastian Borgeaud, Yonghui Wu, Jean-
+Baptiste Alayrac, Jiahui Yu, Radu Soricut, Johan
+Schalkwyk, Andrew M Dai, Anja Hauth, and | oth-
+ers. 2023. Gemini: a family of highly capable multi-
+modal models. arXiv:2312.11805.
+
+Anthropic. 2025. Claude.
+
+Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wen-
+bin Ge, Sibo Song, Kai Dang, Peng Wang, Shijie
+Wang, Jun Tang, and | others. 2025. Qwen?2. 5-vl
+technical report. arXiv:2502. 13923.
+
+Aniket Bhattacharyya, Anurag Tripathi, Ujjal Das,
+Archan Karmakar, Amit Pathak, and Maneesh Gupta.
+2025. Information extraction from visually rich doc-
+uments using Ilm-based organization of documents
+into independent textual segments. In ACL.
+
+Showmik Bhowmik. 2023. Document layout analysis,
+volume 3. Springer.
+
+Zhe Chen, Jiannan Wu, Wenhai Wang, Weijie Su, Guo
+Chen, Sen Xing, Muyan Zhong, Qinglong Zhang,
+Xizhou Zhu, Lewei Lu, and 1 others. 2024. Internvl:
+Scaling up vision foundation models and aligning
+for generic visual-linguistic tasks. In CVPR, pages
+24185-24198.
+
+Xin Cheng, Xun Wang, Xingxing Zhang, Tao Ge, Si-
+Qing Chen, Furu Wei, Huishuai Zhang, and Dongyan
+Zhao. 2024. xrag: Extreme context compression
+for retrieval-augmented generation with one token.
+arXiv:2405.13792.
+
+Jaemin Cho, Debanjan Mahata, Ozan Irsoy, Yujie He,
+and Mohit Bansal. 2024. M3docrag: Multi-modal
+retrieval is what you need for multi-page multi-
+document understanding. arXiv:2411.04952.
+
+Timo I Denk and Christian Reisswig. 2019. Bert-
+grid: Contextualized embedding for 2d document
+representation and understanding. arXiv preprint
+arXiv: 1909.04948.
+
+Manuel Faysse, Hugues Sibille, Tony Wu, Bilel Omrani,
+Gautier Viaud, Céline Hudelot, and Pierre Colombo.
+2024. Colpali: Efficient document retrieval with
+vision language models. In JCLR.
+
+Tsu-Jui Fu, William Yang Wang, Daniel McDuff, and
+Yale Song. 2022. Doc2ppt: Automatic presentation
+slides generation from scientific documents. In Pro-
+ceedings of the AAAI Conference on Artificial Intelli-
+gence, volume 36, pages 634-642.
+
+Liangcai Gao, Yilun Huang, Hervé Déjean, Jean-Luc
+Meunier, Qingin Yan, Yu Fang, Florian Kleber, and
+Eva Lang. 2019. Icdar 2019 competition on table de-
+tection and recognition (ctdar). In 2019 International
+
+
+===== PAGE BREAK =====
+
+conference on document analysis and recognition
+
+(ICDAR), pages 1510-1515. IEEE.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten,
+Alex Vaughan, and | others. 2024. The llama 3 herd
+of models. arXiv preprint arXiv:2407.21783.
+
+Monica Haurilet, Ziad Al-Halah, and Rainer Stiefelha-
+gen. 2019. Spase-multi-label page segmentation for
+presentation slides. In 2019 IEEE Winter Conference
+on Applications of Computer Vision (WACV), pages
+726-734. IEEE.
+
+huridocs. 2025. Pdf document layout analysis: A
+docker-powered microservice for intelligent pdf doc-
+ument layout analysis, ocr, and content extraction.
+
+Aaron Hurst, Adam Lerer, Adam P Goucher, Adam
+Perelman, Aditya Ramesh, Aidan Clark, AJ Ostrow,
+Akila Welihinda, Alan Hayes, Alec Radford, and 1
+others. 2024. Gpt-40 system card. arXiv preprint
+arXiv:2410.21276.
+
+Guillaume Jaume, Hazim Kemal Ekenel, and Jean-
+Philippe Thiran. 2019. Funsd: A dataset for form
+understanding in noisy scanned documents. In 2019
+International Conference on Document Analysis and
+Recognition Workshops (ICDARW), volume 2, pages
+1-6. IEEE.
+
+Yigqiao Jin, Kartik Sharma, Vineeth Rakesh, Yingtong
+Dou, Menghai Pan, Mahashweta Das, and Srijan Ku-
+mar. 2025. Sara: Selective and adaptive retrieval-
+augmented generation with context compression.
+arXiv:2507.05633.
+
+Yiqiao Jin, Qinlin Zhao, Yiyang Wang, Hao Chen, Kai-
+jie Zhu, Yijia Xiao, and Jindong Wang. 2024. Agen-
+treview: Exploring peer review dynamics with Ilm
+agents. In EMNLP, pages 1208-1226.
+
+Thomas G Kieninger. 1998. Table structure recognition
+based on robust block segmentation. In Document
+recognition V, volume 3305, pages 22—32. SPIE.
+
+Junseong Kim, Seolhwa Lee, Jihoon Kwon, Sangmo
+Gu, Yejin Kim, Minkyung Cho, Jy-yong Sohn, and
+Chanyeol Choi. 2024. Linq-embed-mistral:elevating
+text retrieval with improved gpt data through task-
+specific control and quality refinement. Ling AI Re-
+search Blog.
+
+Annie Lang. 2000. The limited capacity model of medi-
+ated message processing. Journal of communication,
+
+50(1):46-70.
+
+VI Levenshtcin. 1966. Binary coors capable or ‘cor-
+recting deletions, insertions, and reversals. In Soviet
+physics-doklady, volume 10.
+
+Minghao Li, Yiheng Xu, Lei Cui, Shaohan Huang, Furu
+Wei, Zhoujun Li, and Ming Zhou. 2020. Docbank:
+A benchmark dataset for document layout analysis.
+arXiv preprint arXiv:2006.01038.
+
+Zehan Li, Xin Zhang, Yanzhao Zhang, Dingkun Long,
+Pengjun Xie, and Meishan Zhang. 2023. Towards
+general text embeddings with multi-stage contrastive
+learning. arXiv:2308.03281.
+
+Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae
+Lee. 2023. Visual instruction tuning. NeurIPS,
+36:34892-34916.
+
+Haowei Liu, Xi Zhang, Haiyang Xu, Yaya Shi, Chaoya
+Jiang, Ming Yan, Ji Zhang, Fei Huang, Chunfeng
+Yuan, Bing Li, and | others. 2024. Mibench: Evaluat-
+ing multimodal large language models over multiple
+images. arXiv preprint arXiv:2407.15272.
+
+Yubo Ma, Yuhang Zang, Liangyu Chen, Meiqi Chen,
+Yizhu Jiao, Xinze Li, Xinyuan Lu, Ziyu Liu, Yan Ma,
+Xiaoyi Dong, and | others. 2024. Mmlongbench-doc:
+Benchmarking long-context document understanding
+with visualizations. Advances in Neural Information
+
+Processing Systems, 37:95963-96010.
+
+Ahmed Masry, Do Xuan Long, Jia Qing Tan, Shafig Joty,
+and Enamul Hoque. 2022. Chartqa: A benchmark
+for question answering about charts with visual and
+logical reasoning. arXiv preprint arXiv:2203.10244.
+
+Minesh Mathew, Viraj Bagal, Rubén Tito, Dimosthenis
+Karatzas, Ernest Valveny, and CV Jawahar. 2022.
+Infographicvqa. In CVPR, pages 1697-1706.
+
+Minesh Mathew, Dimosthenis Karatzas, and CV Jawa-
+har. 2021. Docvqa: A dataset for vqa on document
+images. In CVPR, pages 2200-2209.
+
+Rui Meng, Ye Liu, Shafiq Rayhan Joty, Caiming
+Xiong, Yingbo Zhou, and Semih Yavuz. 2024. Sfr-
+embedding-mistral:enhance text retrieval with trans-
+fer learning. Salesforce AI Research Blog.
+
+Anand Mishra, Shashank Shekhar, Ajeet Kumar Singh,
+and Anirban Chakraborty. 2019. Ocr-vqa: Visual
+question answering by reading text in images. In
+2019 international conference on document analysis
+and recognition (ICDAR), pages 947-952. TEEE.
+
+Laura F Naysmith, Veena Kumari, and Steven CR
+Williams. 2021. Neural mapping of prepulse-induced
+startle reflex modulation as indices of sensory in-
+formation processing in healthy and clinical popula-
+tions: A systematic review. Human Brain Mapping,
+42(16):5495-55 18.
+
+OpenAI. 2025. Gpt-4o.
+
+Maciej P Polak and Dane Morgan. 2025. Leveraging
+vision capabilities of multimodal Ilms for automated
+data extraction from plots. arXiv:2503.12326.
+
+Rafat Powalski, Lukasz Borchmann, Dawid Jurkiewicz,
+Tomasz Dwojak, Michat Pietruszka, and Gabriela
+Patka. 2021. Going full-tilt boogie on document
+understanding with text-image-layout transformer. In
+International Conference on Document Analysis and
+Recognition, pages 732-747. Springer.
+
+
+===== PAGE BREAK =====
+
+Johannes Rausch, Octavio Martinez, Fabian Bissig,
+Ce Zhang, and Stefan Feuerriegel. 2021. Docparser:
+Hierarchical document structure parsing from render-
+ings. In AAAT, volume 35, pages 4328-4338.
+
+Stephen Robertson, Hugo Zaragoza, and Michael Taylor.
+2004. Simple bm25 extension to multiple weighted
+fields. In CIKM, pages 42-49.
+
+Hao Shao, Shengju Qian, Han Xiao, Guanglu Song,
+Zhuofan Zong, Letian Wang, Yu Liu, and Hong-
+sheng Li. 2024. Visual cot: Advancing multi-modal
+language models with a comprehensive dataset and
+benchmark for chain-of-thought reasoning. In The
+Thirty-eight Conference on Neural Information Pro-
+cessing Systems Datasets and Benchmarks Track.
+
+Karun Sharma and Vidushee Vats. 2025. Think to
+ground: Improving spatial reasoning in Ilms for bet-
+ter visual grounding. In Workshop on Reasoning and
+Planning for Large Language Models.
+
+Michael Shilman, Percy Liang, and Paul Viola. 2005.
+Learning nongenerative grammatical models for doc-
+ument analysis. In Tenth IEEE International Con-
+ference on Computer Vision (ICCV’05) Volume 1,
+volume 2, pages 962-969. IEEE.
+
+Jeremy Singer-Vine. 2025. pdfplumber.
+
+Amanpreet Singh, Vivek Natarajan, Meet Shah,
+Yu Jiang, Xinlei Chen, Dhruv Batra, Devi Parikh,
+and Marcus Rohrbach. 2019. Towards vqa models
+that can read. In Proceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition,
+
+pages 8317-8326.
+
+Ray Smith. 2007. An overview of the tesseract ocr en-
+gine. In Ninth international conference on document
+analysis and recognition (ICDAR 2007), volume 2,
+pages 629-633. IEEE.
+
+Edward Sun, Yufang Hou, Dakuo Wang, Yunfeng
+Zhang, and Nancy XR Wang. 2021. D2s: Document-
+to-slide generation via query-based text summariza-
+tion. arXiv preprint arXiv:2105.03664.
+
+Ryota Tanaka, Taichi Iki, Taku Hasegawa, Kyosuke
+Nishida, Kuniko Saito, and Jun Suzuki. 2025.
+Vdocrag: Retrieval-augmented generation over
+visually-rich documents. arXiv:2504.09795.
+
+Ryota Tanaka, Kyosuke Nishida, Kosuke Nishida, Taku
+Hasegawa, Itsumi Saito, and Kuniko Saito. 2023.
+Slidevqa: A dataset for document visual question
+answering on multiple images. In AAAJ, volume 37,
+pages 13636-13645.
+
+Ryota Tanaka, Kyosuke Nishida, and Sen Yoshida. 2021.
+Visualmrc: Machine reading comprehension on docu-
+ment images. In Proceedings of the AAAI Conference
+on Artificial Intelligence, volume 35, pages 13878-
+13888.
+
+Deep Search Team. 2024. Docling technical report.
+Technical report.
+
+Rubén Tito, Dimosthenis Karatzas, and Ernest Valveny.
+2021. Document collection visual question answer-
+ing. In International Conference on Document Anal-
+ysis and Recognition, pages 778-792. Springer.
+
+Michael Tschannen, Alexey Gritsenko, Xiao Wang,
+Muhammad Ferjad Naeem, Ibrahim Alabdulmohsin,
+Nikhil Parthasarathy, Talfan Evans, Lucas Beyer,
+Ye Xia, Basil Mustafa, and 1 others. 2025. Siglip
+2: Multilingual vision-language encoders with im-
+proved semantic understanding, localization, and
+dense features. arXiv preprint arXiv:2502.14786.
+
+Gaurav Verma, Rachneet Kaur, Nishan Srishankar, Zhen
+Zeng, Tucker Balch, and Manuela Veloso. 2024.
+Adaptagent: Adapting multimodal web agents with
+few-shot learning from human demonstrations. In
+ACL.
+
+Dongsheng Wang, Natraj Raman, Mathieu Sibue,
+Zhigiang Ma, Petr Babkin, Simerjot Kaur, Yulong
+Pei, Armineh Nourbakhsh, and Xiaomo Liu. 2024a.
+Docllm: A layout-aware generative language model
+for multimodal document understanding. In ACL,
+pages 8529-8548.
+
+Jiayu Wang, Yifei Ming, Zhenmei Shi, Vibhav Vineet,
+Xin Wang, Sharon Li, and Neel Joshi. 2024b. Is a
+picture worth a thousand words? delving into spa-
+tial reasoning for vision language models. NeurIPS,
+37:75392-75421.
+
+Qiuchen Wang, Ruixue Ding, Zehui Chen, Weiqi Wu,
+Shihang Wang, Pengjun Xie, and Feng Zhao. 2025a.
+Vidorag: Visual document retrieval-augmented gen-
+eration via dynamic iterative reasoning agents.
+arXiv:2502.18017.
+
+Yiyang Wang, Rishabh Goel, Sheraz Hassan, Taegen J
+Doscher, Shilin Wang, Lexington Allen Whalen,
+Aditya S Gandhi, Yaman S Sangar, Alex Cabral,
+Xuhai Xu, and 1 others. 2025b. Puffem: An e-
+cigarette sleeve for estimating user nicotine intake.
+In CHASE, pages 129-133. IEEE.
+
+Navve Wasserman, Roi Pony, Oshri Naparstek, Adi Raz
+Goldfarb, Eli Schwartz, Udi Barzelay, and Leonid
+Karlinsky. 2025. Real-mm-rag: A real-world multi-
+modal retrieval benchmark. In ACL.
+
+Shengqiong Wu, Hao Fei, Leigang Qu, Wei Ji, and Tat-
+Seng Chua. 2024. Next-gpt: Any-to-any multimodal
+Ilm. In ICML.
+
+Shitao Xiao, Zheng Liu, Peitian Zhang, and Niklas
+Muennighoff. 2023. C-pack: Packaged resources
+to advance general chinese embedding. Preprint,
+arXiv:2309.07597.
+
+Yang Xu, Yiheng Xu, Tengchao Lv, Lei Cui, Furu
+Wei, Guoxin Wang, Yijuan Lu, Dinei Florencio,
+Cha Zhang, Wanxiang Che, and | others. 2020a.
+Layoutlmv2: Multi-modal pre-training for visually-
+rich document understanding. arXiv preprint
+arXiv:2012.14740.
+
+
+===== PAGE BREAK =====
+
+Yiheng Xu, Minghao Li, Lei Cui, Shaohan Huang, Furu
+Wei, and Ming Zhou. 2020b. Layoutlm: Pre-training
+of text and layout for document image understanding.
+In Proceedings of the 26th ACM SIGKDD interna-
+tional conference on knowledge discovery & data
+mining, pages 1192-1200.
+
+Yunqiu Xu, Linchao Zhu, and Yi Yang. 2024. Mc-
+bench: A benchmark for multi-context visual
+grounding in the era of mllms. arXiv preprint
+arXiv:2410, 12332.
+
+Jianwei Yang, Hao Zhang, Feng Li, Xueyan Zou, Chun-
+yuan Li, and Jianfeng Gao. 2023. Set-of-mark
+prompting unleashes extraordinary visual grounding
+in gpt-4v. arXiv preprint arXiv:2310.11441.
+
+Shi Yu, Chaoyue Tang, Bokai Xu, Junbo Cui, Jun-
+hao Ran, Yukun Yan, Zhenghao Liu, Shuo Wang,
+Xu Han, Zhiyuan Liu, and 1 others. 2025. Vis-
+rag: Vision-based retrieval-augmented generation on
+multi-modality documents. In JCLR.
+
+Jinguo Zhu, Weiyun Wang, Zhe Chen, Zhaoyang Liu,
+Shenglong Ye, Lixin Gu, Hao Tian, Yuchen Duan,
+Weijie Su, Jie Shao, Zhangwei Gao, Erfei Cui, Xue-
+hui Wang, Yue Cao, Yangzhou Liu, Xingguang Wei,
+Hongjie Zhang, Haomin Wang, Weiye Xu, and 32
+others. 2025. Internvl3: Exploring advanced train-
+ing and test-time recipes for open-source multimodal
+models. Preprint, arXiv:2504. 10479.
+
+Model             Overall Num _ F1
+
+Raw LLMs
+
+Llama 3.2 11B        55.4       49.6 67.9
+Phi3                 53.4     43.1 88.7
+Qwen2.5 7B         80.1      73.0 96.4
+Qwen2.5 32B       72.1      62.0 94.8
+LLaVA 1.5 7B       25.1      10.6 83.9
+LLaVA 1.5 13B     20.2      8.0 84.2
+LLaVA 1.6 7B       32.6      22.6 79.9
+LLaVA 1.6 13B     34.9     24.8 80.9
+InternVL3 8B        66.7      57.7 85.2
+
+Multimodal RAG and Agentic Methods
+
+ViDoRAG              67.1        59.2 85.9
+SlideAgent                   75.4          66.5 92.1
+Impr.             +8.7    +8.8  +6.8
+
+Table 5: Performance comparison among open-source
+multimodal models and agentic methods.
+
+A Details Method
+A.1 Element Merging
+
+Raw output, especially text spans from the element
+processing pipeline (Section 2.1) can fragment co-
+herent texts into multiple parts, creating challenges
+
+Variants of SlideAgent (InternVL3-8B)
+
+Retrieved Pages           Ground-truth Pages
+
+100                                    100
+
+SlideAgent                                     SlideAgent
+w/o S                                       w/o S
+w/o G                                       w/o G
+90        w/o P                            90        w/o P
+w/o E                                       w/o E
+S                                               S
+< 80                                         < 80
+o                                               o
+fs                                               fs
+£                                               £
+fe)                                               fe)
+a1                                              a1
+o@ 70                                         o 70
+oa                                              oa
+60                                              60
+Overall Numeric     Fl                 Overall Numeric     Fl
+
+Figure 6: Performance comparison among variants of
+SlideAgent with base model InternVL3-8B.
+
+for downstream understanding. We thus adopt a
+graph-based merging algorithm to reconstruct se-
+mantically coherent text blocks while preserving
+spatial layout.
+
+Distance-Based Adjacency Our merging crite-
+rion is based on minimum distance between bound-
+ing boxes. For two boxes bj = (xt, yi, 73, y3)
+and b; = (xj, y), 74, y3), the minimum distance
+is computed from the horizontal and vertical dis-
+tances dy, and d,:
+
+where dp, = min(|x5, — a} |, |x3 — |) if boxes
+don’t overlap horizontally, and dy, = 0 otherwise.
+Similarly, d, = min(|y — y{|,|y3 — yj|) if boxes
+don’t overlap vertically, and d,, = 0 otherwise.
+
+Two boxes are considered adjacent if
+dmin(bi,b;) < 7 Where 7 is a threshold we
+choose to be 15 pixels. The results are fed into the
+following graph-based component detection.
+
+B’ Extended Related Work
+
+B.1 Document and Infographics
+Understanding
+
+Early research in document and infographic un-
+derstanding predates multimodal LLMs and was
+dominated by computer vision pipelines. Classical
+approaches typically combined OCR, layout pars-
+ing, and heuristic rules to extract semantics from
+text-rich visual content such as forms, tables, and
+scientific figures (Shilman et al., 2005; Bhowmik,
+2023; Gao et al., 2019; Kieninger, 1998; Smith,
+2007). While these methods enabled structured
+information extraction, they were brittle to domain
+shifts and noisy scans.
+
+
+===== PAGE BREAK =====
+
+WealthiManagement — The Cause
+
+Topic Transforming Wealth Management through Technology, Strategy, and Client-Centric Innovation
+Objective
+
+To propose a modern, strategic, and technology-driven overhaul of traditional wealth management
+practices by highlighting challenges, solutions, and implementation strategies.
+
+Structure Overview
+
+* Slide 1: Title and branding
+
+ide 2: Executive summary of challenges and client dissatisfaction in wealth management
+
+ide 3: High-level vision for a unified, transparent, and agile approach
+
+ide 4: Analysis of evolving client expectations and market dynamics
+
+Agenda                 ide 5: Strategic goals—efficiency, personalization, digital transformation
+
+|  Wealth Management Today
+
+|  The Changing Landscape — What clients want
+
+Evolving A Needs Based Approach To) Wealth
+
+Management
+
+|  Technology As An Enabler
+
+|   About Agile Financial Technologies
+
+ide 6: Proposed customer segmentation framework and service alignment
+|                  ide 7: Dynamic value proposition and client lifecycle mapping
+
+“ee            ide 8: Institutional and retail strategy harmonization
+
+ide 9: Migration pathways to wealth services and client journey redefinition
+ide 10: Breaking down operational silos and optimizing internal processes
+
+ide 11: Technology integration: automation, data flows, outsourcing
+
+ide 12: End-to-end wealth management framework (acquire, plan, manage, report)
+
+ANNA HAAHRAARARHAA A
+
+ide 13: Agenda and summary of thematic structure
+
+Key Insights
+
++ Wealth management is constrained by outdated practices, high costs, and fragmented services.
+
+* Clients demand personalized, transparent, and tech-enabled solutions that adapt to their evolving
+needs.
+
++ The company positions itself as a holistic enabler—focusing on outsourcing, automation, and
+integrated service delivery.
+
++ Strategic segmentation, unified platforms, and partnership models are key to future-ready wealth
+services.
+
++ Astructured, technology-driven framework enables operational efficiency and superior client
+experiences.
+
+Audience
+
++ Executives and decision-makers in wealth management firms, financial institutions, and fintech
+companies
+
+Tone
+
++ Persuasive and strategic with an emphasis on innovation and client-centric transformation
+
+Figure 7: Sample global knowledge K, generated by the global agent, showing document-level summary, objectives,
+and narrative structure.
+
+Notation               Description
+
+Dis Vi                    A slide page and its visual content
+
+P = {pi,p2,---      Set of pages in the slide deck
+
+q                            User query
+
+Q                         Set of subqueries generated from the original query q
+
+a                        The final answer generated by SlideAgent
+
+ej                        Individual element in a slide, consisting of visual content, bounding box, and
+type
+
+b;                         Bounding box coordinates of an element within a slide
+
+tj                        Type of the element (e.g., text, chart, image, table)
+
+Kg,Kp,Ke            Global, page, and element knowledge
+
+Mg,Mp, Me        Global, page, and element agent
+
+R                         Retrieval function that fetches relevant pages or elements based on subqueries
+
+o(-)                    Answer synthesizer that combines reasoning from all agents to generate the
+final answer a
+
+Annot(V)              Annotated visual content used by the element agent for processing
+
+hg, hp, he              Answers and reasoning from global, page, and element agents
+
+Table 6: Mathematical notation used throughout the paper.
+
+
+===== PAGE BREAK =====
+
+Agenda
+
+The Changing Landscape — What clients want
+
+Wealth Management Today
+
+Evolving A Needs Based Approach To)\Wealth
+Management
+
+Technology As An Enabler
+
+About Agile Financial Technologies
+
+WealthiManagement - The Effect
+
+~The days of low volatility and high margins are over
+
++ Many wealth managers are only marginally profitable
+
++ Assets and infrastructure of the parent institution subsidize the costs of the wealth
+management arm
+
++ Proftabllty driven by new client and asset acquisition, which relies upon an
+unsustainable cost structure
+
++ Wealth Management associated typically with HNWI—who drive hard bargains & are a
+demand for extensive and expensive service levels.
+
++ Marketing to clients with too much or too litle wealth
+
++ Products and services offered not aligned to the behavior of individual client resulting in
+{allure to target services that fi the goals oftheir clients
+
++ Lack of attention to a new generation of mass affluent
+
++ Unavailablity of a consolidated perspective and client profiing across an institution's
+v           various arms (retail banks, brokerage businesses, and insurance operations) and
+TERI Ate concerted lead generation mechanism
+
+cross-sell                                      y
+
+WealthiMattagement — The Cause
+
+ig
+id
+
+products an
+services with
+customer profitability
+
+Business
+Under-
+performance
+
+Page
+Agent
+
+Purpose: To outline the key topics and structure of the presentation, setting the stage for the detailed
+discussion.
+
+Summary: This slide presents the agenda, listing five main topics: Wealth Management Today, The
+Changing Landscape — What clients want, Evolving A Needs Based Approach To Wealth Management,
+Technology As An Enabler, etc.
+
+Link to Previous: Introduces the specific areas that will be elaborated on later, providing a roadmap
+following the introductory slides.
+
+Takeaway: The presentation will cover current trends in wealth management, client needs, approaches to
+wealth management, technology's role, and company information.
+
+Cumulative Summary: The presentation begins with an introduction to wealth management, highlighting its
+significance in the financial sector. It then outlines the agenda, which includes discussing the current state of
+wealth management, understanding client needs, evolving approaches to wealth management, the role of
+technology as an enabler, and a brief about Agile Financial Technologies. This roadmap prepares the
+audience for a comprehensive exploration of how the landscape is changing and how the company
+positions itself within this evolving framework.
+
+Purpose: To highlight the challenges currently faced by the wealth management sector.
+
+Summary: The slide outlines three main challenges: high costs due to low margins and unsustainable cost
+structures, demanding and diverse client needs, and an inability to cross-sell due to fragmented client
+profiling across different financial arms.
+
+Link to Previous: Building on the introduction and agenda, this slide delves into specific issues within the
+current state of wealth management, setting the stage for discussing solutions and evolving strategies.",
+
+Takeaway: The wealth management sector is struggling with high operational costs, demanding client
+expectations, and inefficiencies in cross-selling, which need to be addressed to remain competitive.",
+
+Cumulative Summary: The presentation begins with an introduction to wealth management, emphasizing
+its importance in the financial sector. It then outlines the agenda, covering the current state of wealth
+management, understanding client needs, and evolving approaches facilitated by technology. The specific
+challenges highlighted include high costs, demanding clients, and cross-selling inefficiencies. These issues
+necessitate innovative strategies and technological solutions to ensure sustainable growth and client
+satisfaction in the wealth management industry.
+
+Purpose: To identify and elaborate on the underlying causes of the challenges faced in wealth
+management.
+
+Summary: The slide presents a diagram highlighting six core problems causing business under-
+performance in wealth management
+
+Link to Previous: This slide builds on the identified challenges by delving into the specific causes behind
+these challenges, providing a deeper understanding of the issues that need to be addressed.
+
+Takeaway: The key message is that multiple interconnected factors contribute to business under-
+performance in wealth management, necessitating a comprehensive approach to solutions.
+
+Cumulative Summary: The presentation begins with an introduction to the significance of wealth
+management in the financial sector, followed by an agenda outlining the current state, client needs, and
+technological evolution in the field. It highlights specific challenges such as high costs, demanding clients,
+and cross-selling inefficiencies. The latest slide delves into the root causes of these challenges, identifying
+key areas like information silos, misalignment of services with profitability, dependency on relationships,
+poor visibility on performance metrics, and increased costs from past growth. These insights underscore the
+need for innovative strategies and technological solutions to foster sustainable growth and client
+satisfaction.
+
+Figure 8: Sample page-level knowledge representation Ki, generated by the page agent, capturing slide-specific
+content and cross-slide relationships.
+
+Case
+
+Characteristics
+
+Example
+
+Agents
+
+1-Global Un-
+derstanding
+
+2-Fact-based
+Direct Query
+
+3-Multi-hop
+Reasoning
+
+4-Layout
+/          Visual
+Relationship
+
+5-Uncertain
+
+Asks about the overall
+theme, purpose, or general
+summary of the entire pre-
+sentation.
+
+Asks for specific facts,
+data, or information from
+particular slides.
+
+Requires comparing in-
+formation across multiple
+slides or elements.
+
+Asks about visual relation-
+ships, positioning, or lay-
+out elements.
+
+If the query is unclear, use
+all agents to answer the
+
+query.
+
+"What is the main topic of the
+presentation?", "What is this
+deck about?"
+
+"What is the revenue reported on
+slide 7?", "Which slide shows the
+product roadmap?"
+
+"Compare revenues in slide 5 and
+slide 10", "How do Sweden and
+Denmark compare?"
+
+"What does the diagram below
+the table on slide 12 illustrate?",
+"Is the color red used to denote
+negative performance?"
+
+\
+
+Global
+
+Page,  Ele-
+
+ment
+
+Global, Page,
+Element
+
+Element
+
+Global, Page,
+Element
+
+Table 7: SlideAgent’s query classification that determines which hierarchical agents to activate.
+
+
+===== PAGE BREAK =====
+
+B        Agenda
+
+Wealth Management Today
+
+a
+The Changing Landscape — What clients want
+
+Management
+
+Evolving A Needs Based Approach To Wealth!
+
+A
+
+Technology As An Enabler
+
+2
+‘About Agile Financial Technologies]
+
+_———
+
+Wealth Management -The Effect
+
+management arm
+
+lunsustainable cost structure
+
+-/The days of low volatility and high margins are over:
+-|Many wealth managers are only marginally profitable
+-|Assels and infrastructure of the parent institution subsidize the costs of the wealth]
+
++|Profitabilty driven by new client and asset acquisition, which relies upon an
+
+\demand for extensive and expensive service levels
+
+a
+{Wealth Management associated typically with HNWI —who drive hard bargains & are al
+
+-|Marketing to clients with too much or too litle wealth
+
++|Products and services offered not aligned to the behavior of individual client resulting i
+Hailure to target services that fit the goals of their clients.
+-|Lack of attention to a new generation of mass affuents
+
+TMM [concerted toad generation mechanism
+
+[A
+-[Unavailability of a consolidated perspective and client profiling across an institution’
+various arms (retail banks, brokerage businesses, and insurance operations) and
+
+cross-sell
+
+\wealth Management the Cause]
+
+Inability to align
+products and
+
+services with
+ene             customer profitability
+information
+
+sibility of                          .
+nomic                        Business
+perform:                                    Under-
+performance
+
+Content: Evolving A Needs Based Approach To Wealth Management
+
+Semantic Role: This element introduces the topic of evolving strategies in wealth
+management.
+
+Functional Purpose: It aims to inform the audience about the need to adapt
+wealth management practices to better meet client needs.
+
+Relation to Slide: This element is part of the agenda, outlining a key discussion
+point regarding innovative approaches in financial management.
+
+Bbox: [0.11, 0.48, 0.79, 0.60]
+
+Content: Agenda
+
+Semantic Role: This element indicates the purpose of the slide, which is to
+outline the agenda.
+
+Functional Purpose: It provides clarity to the audience, signaling that the slide
+contains the main topics to be covered in the presentation.
+
+Relation to Slide: It frames the slide's content, helping the audience understand
+the structure and flow of the presentation.
+
+Bbox: [0.84, 0.044, 0.98, 0.11]
+
+Content: Wealth Management associated typically with HNWI ...
+
+Functional Purpose: Emphasize the challenge of meeting client expectations and
+tailoring services appropriately.
+
+Relation to Slide: Supports the point about demanding and diverse client needs,
+reinforcing the complexity and high expectations from clients.
+
+Bbox: [0.20, 0.42, 0.95, 0.60]
+
+C_ Content: Confidential
+
+Content: Inability to cross-sell                    Semantic Role: Indicate the
+Semantic Role: Subheader indicating one      confidentiality of the slide content.
+of the main challenges.                          Functional Purpose: Ensure
+
+Functional Purpose: Draw attention tothe — viewers are aware the information
+specific issue of cross-selling inefficiencies. _ is confidential.
+
+Relation to Slide: Directly relates to the        Relation to Slide: Serves as a
+challenge of cross-selling inefficiencies         footer to remind viewers of the
+mentioned in the description and element 2. sensitive nature of the information.
+Bbox: [0.04, 0.76, 0.17, 0.85]                  Bbox: [0.03, 0.98, 0.10, 1.00]
+
+Content: Islands of information created by the deployment of point solutions and
+disparate IT solutions...
+
+Semantic Role: Highlighting a specific problem related to fragmented information
+systems.
+
+Functional Purpose: Emphasize the issue of information silos in wealth
+management.
+
+Relation to Slide: Supports the slide's overall message of identifying core problems
+causing business under-performance.
+
+Bbox: [0.14, 0.33, 0.36, 0.51]
+
+Content: Past revenue growth led to increased fixed costs of acquiring and serving
+new customers...
+
+Semantic Role: Highlighting a specific problem related to increased costs from
+past growth.
+
+Functional Purpose: Emphasize the issue of rising fixed costs due to past
+revenue growth.
+
+Relation to Slide: Supports the slide's overall message of identifying core
+problems causing business under-performance.
+
+Bbox: [0.74, 0.67, 0.96, 0.83]
+
+Figure 9: Sample element-level knowledge representation K2 generated by the element agent.
+
+
+===== PAGE BREAK =====
+
+With the rise of deep learning, several special-
+ized benchmarks spurred progress in document vi-
+sual question answering (VQA). Datasets such as
+DocVQA (Mathew et al., 2021), DocCVQA (Tito
+et al., 2021), FUNSD (Jaume et al., 2019), and
+DocBank (Li et al., 2020) emphasized reasoning
+over diverse document layouts, scanned forms, and
+large-scale document collections. ChartQA (Masry
+et al., 2022) further extended this line by intro-
+ducing reasoning over structured figures like bar
+and line charts. On the modeling side, early work
+on text-centric VQA demonstrated that reading
+and interpreting embedded text was crucial (Singh
+et al., 2019; Mishra et al., 2019). To better rep-
+resent visually rich documents, approaches such
+as BERT grid (Denk and Reisswig, 2019) and Lay-
+outLM (Xu et al., 2020b) proposed contextualized
+embeddings that jointly encode textual content and
+2D spatial layout. This line was extended by Lay-
+outLMv?2 (Xu et al., 2020a), LayoutTS (Tanaka
+et al., 2021), and TILT (Powalski et al., 2021),
+which integrated stronger visual features and mul-
+timodal pretraining objectives. These advances
+have achieved impressive results on single-image
+document VQA tasks by unifying textual, layout,
+and visual signals, laying the foundation for more
+recent LLM-based systems.
+
+B.1.1 Slide Deck Understanding
+
+Building on document and infographic understand-
+ing, research has also explored presentation slides,
+which pose unique challenges due to their combina-
+tion of dense text, figures, and multi-page structure.
+Early efforts addressed component-level analysis,
+such as object segmentation on slide pages (Hau-
+rilet et al., 2019), or generation tasks like creating
+slides from research papers (Sun et al., 2021; Fu
+et al., 2022). More recently, benchmarks such as
+MMLongBench (Ma et al., 2024) have emphasized
+long-context processing over lengthy multi-page
+PDFs, highlighting the scalability issues that arise
+when moving from single documents to multi-slide
+collections.
+
+B.1.2 Slide Visual Question Answering
+
+Slide visual question answering (Slide VQA)
+emerges as a prominent direction within this
+broader area, aiming to automatically interpret pre-
+sentation slides to answer natural-language queries.
+Early work such as SlideVQA (Tanaka et al., 2023)
+introduced multi-modal slide decks paired with
+questions requiring single-hop, multi-hop, and nu-
+
+merical reasoning across slides. This line was ex-
+tended by InfoVQA (Mathew et al., 2022), which
+targeted information-centric slides and documents,
+often involving arithmetic and commonsense rea-
+soning. More recent benchmarks such as Tech-
+Slides and FinSlides (Wasserman et al., 2025) from
+the REAL-MM-RAG suite emphasize domain-
+specific contexts—technical and financial presenta-
+tions that integrate text, figures, and tables.
+
+At the same time, multi-image and multi-context
+evaluation benchmarks such as MIBench (Liu et al.,
+2024) and MC-Bench (Xu et al., 2024) highlight
+the unique reasoning challenges in multi-slide and
+multi-panel scenarios. Retrieval-based methods
+such as ColPali (Faysse et al., 2024) improve
+slide-grounded search and QA, while pipeline
+approaches like VisRAG (Yu et al., 2025) and
+VDocRAG (Tanaka et al., 2025) integrate retrieval
+with reasoning to support multi-page comprehen-
+sion. Collectively, these datasets and methods un-
+derscore both the promise and complexity of slide
+understanding, while leaving open the question of
+whether element-level reasoning—beyond page-
+level retrieval—can substantially improve perfor-
+mance.
+
+B.1.3 General Purpose LLMs
+
+General-purpose large language models (MLLMs)
+such as GPT-4 (Achiam et al., 2023), GPT-
+4o (Hurst et al., 2024), Gemini (Anil et al., 2023),
+LLaVA (Liu et al., 2023), InternVL3 (Zhu et al.,
+2025), and Visual CoT (Shao et al., 2024) have sig-
+nificantly advanced visual reasoning across a wide
+range of tasks. Visual prompting methods like Set-
+of-Marks (Yang et al., 2023) further enhance rea-
+soning by augmenting inputs with structured visual
+annotations. While these open-source and closed-
+source MLLMs form the foundation for many com-
+parisons, they often struggle when applied to slides,
+where precise grounding and fine-grained interpre-
+tation are required to parse heterogeneous elements
+such as charts, tables, and icons.
+
+Yet key challenges remain. Domain-specific
+visual semantics are often overlooked, as LLMs
+trained primarily on natural images (Wu et al.,
+2024) struggle to capture the specialized conven-
+tions of slides and infographics—for instance, repet-
+itive logos, color-coded encodings, or abstract
+symbolic icons. Metadata-dependent integration
+is similarly fragile: real-world slides and PDFs
+frequently lack clean structural annotations, and
+scanned or flattened exports strip away layout cues,
+
+
+===== PAGE BREAK =====
+
+rendering metadata-reliant systems brittle (huri-
+docs, 2025; Rausch et al., 2021). Finally, scal-
+able fine-grained reasoning capabilities remains
+limited (Jin et al., 2024). Current models can pro-
+cess only a small number of images at once (Liu
+et al., 2023), while retrieval typically occurs at the
+page level (Faysse et al., 2024; Tanaka et al., 2025),
+overlooking element-level reasoning.
+
+Our work builds on these developments by intro-
+ducing a metadata-free, slide-specialized agentic
+framework. Unlike prior page-level approaches,
+our method constructs hierarchical representations
+and employs retrieval-then-reasoning at the global
+(deck-level), page (slide-level), and element (fine-
+grained component) layers. This design enables
+robust comprehension across diverse slide domains
+and opens the door to systematic evaluation of
+whether element-level reasoning provides measur-
+able improvements over page-level retrieval alone.
+Adjacency Graph Construction. An undirected
+graph G = (V, E) is constructed, where vertices
+V = {1,2,...,|B]} represent the bounding boxes
+for the textual elements, and EF edges connect
+adjacent boxes. An edge (i,j) € F exists if
+dmin (bi, b;) <T.
+
+Connected Component Detection. We identify
+coherent text spans using depth-first search (DFS)
+to find connected components. Each component
+Cy = {t1,72,...,%m} represents indices of boxes
+that should be merged into a single text block.
+Spatial Merging and Text Concatenation. For
+each component Ci,, we compute the unified bound-
+ing box:
+
+B, = { min zi min yj max x} max
+ie, ieCy”  ieCy, 7 IEC,”
+
+The final text is given by concatenating text in
+the reading order. This is achieved by sorting boxes
+within each component using lexicographic order-
+ing: primary sort by vertical position (y1), sec-
+ondary sort by horizontal position (x1).
+
+This approach effectively reduces element frag-
+mentation while preserving spatial relationships,
+enabling more accurate element-level descriptions
+for our hierarchical framework. Algorithm 1 pro-
+vides the complete implementation details.
+
+B.2. Answer Matching
+
+To determine answer equivalence, i.e. if two agents
+agree upon their opinions, we do fuzzy string
+matching between each pair of answers aj, a2 uS-
+
+ing Normalized Levenshtein Similarity (NLS):
+
+NLS(a}, a2) = (1   ene) .
+
+max(|a1|, |a2|)
+
+where editdistance(a1, a2) computes the Leven-
+shtein distance (Lcevenshtcin, 1966) between the
+answers after tokenization. Two answers are con-
+sidered equivalent if NLS(a1, a2) > 0.75.
+
+C_ Experimental Setup
+
+C.1 Dataset Descriptions
+
+¢ SlideVQA (Tanaka et al., 2023) is a multi-
+modal, multi-image VQA dataset consisting
+of > 2600 slide decks that require single-hop,
+multi-hop, and numerical reasoning. Each
+slide deck corresponds to multiple questions.
+The license is availble at !.
+
+InfoVQA (Mathew et al., 2022) is a dataset
+that feature questions that require reasoning
+and arithmetic skills. It contains over 30,000
+questions with over 5,400 images. The dataset
+is released under CC-BY license.
+
+TechSlides and FinSlides (Wasserman et al.,
+2025) are from the REAL-MM-RAG bench-
+mark, which comprises slides and documents
+with text, figures, tables, and images, requir-
+ing systems to handle combined textual and
+visual data. The dataset is released under the
+CDLA-Permissive-2.0 license.
+
+C.2. Metrics
+
+For ranking evaluation, we adopt MRR, Hit@k,
+and nDCG@k. Mean Reciprocal Rank (MRR)
+reflects how early the correct answer appears in
+the ranked list by averaging the reciprocal of its
+first relevant position across all queries. Hit@k
+measures the proportion of queries for which at
+least one correct answer occurs within the top-k
+retrieved results. Normalized Discounted Cumu-
+lative Gain (nDCG@k) assesses overall ranking
+quality by weighting relevant items according to
+their positions and normalizing by the ideal rank-
+ing, thereby capturing both accuracy and ordering
+of retrieved answers.
+
+‘https ://github.com/nttmdlab-nlp/SlideVQA/
+blob/main/LICENSE
+
+
+===== PAGE BREAK =====
+
+C.3. Implementation Details
+
+We used EasyOCR? and Docling (Team, 2024) for
+detecting textual and visual elements, respectively.
+Whenever applicable, the answers are generated
+using a temperature of 0.0 to ensure deterministic
+results.
+
+Algorithm 1 Graph-based depth-first search for
+merging fragmented elements into coherent seman-
+tic units while preserving spatial layout.
+Input: Set of OCR bounding boxes B = {b; =
+(xt, yt, 7, y3, t)}12\, distance threshold 7 = 15
+Output: Merged bounding boxes B
+1: Initialize adjacency matrix A € {0, 1}!8!*I/4!
+with zeros
+: for i = 1 to|B| do
+for j =i+1to|B| do
+if dmin (bi, b;) <T then
+Aji,j] <1, Alj,i] <1
+end if
+end for
+: end for
+: Initialize visited array visited{1 : |B|] < false
+: Initialize components list C < |]
+: for: = 1 to|B| do
+
+CMPARDUNPYY
+
+ep
+- OS
+
+12:      if visited|?] = false then
+
+13:          Initialize component C' < |]
+
+14:             DFS (i, A, visited, C)            > Collect
+connected component
+
+15:           Append C to C
+
+16:       end if
+
+17: end for
+
+18: Initialize merged boxes B < |]
+19: for each component C' € C do
+20:     if |C| = 1 then
+
+21:           Append bc] to B > Single box, no
+merging
+
+22:      else
+
+23:          r+ Minjec ri. yy + Minjeo yi
+
+24:          v2 <- MaxjcC x, y2 <— MaxjcC ys
+
+25:           Sort C by (y‘, v4) to get reading order
+
+26:         tmerged < " " join ({ti } sesortea(c) )  .
+
+27:             Append (x1, Y1, £2, Y2, tmerged) to B
+
+28:       end if
+
+29: end for
+
+30: return B
+
+“https ://github.com/JaidedAI/Easy0CR
+
+D_ Additional Experiments
+D.1 Ablation Studies (Cont’d)
+
+Element-level Reasoning Ensures Precision
+Ablating the element agent causes a moderate yet
+consistent decline (4.6 overall for GPT-40; —6.3
+for InternVL3-8B), especially numeric questions.
+Even with perfect retrieval, omitting fine-grained
+texts and layouts weakens factual grounding.
+
+Impact of Global Thematic Guidance Remov-
+ing the global agent yields the smallest drop (—2.8
+GPT-40; -3.7 InternVL3-8B), as lower-level agents
+already embed partial global context via K,, and K.
+in knowledge construction (Eq. 1/2). However, re-
+sponses become less aware of overarching themes.
+
+Subquery Generation Strengthens Retrieval.
+Removing subqueries causes larger losses under
+retrieval (5.0 GPT-40; —11.3 InternVL3-8B) than
+with ground-truth pages (—2.9 to -4.9). Visual-
+aware subqueries markedly improve retriever ac-
+curacy by aligning textual intent with visual
+semantics—especially beneficial for weaker open-
+source encoders.
+
+E Future Work
+
+Element Parsing. SlideAgent relies on advanced
+text and layout detection tools, which may struggle
+with visually complex or low-contrast designs (e.g.,
+white charts on white backgrounds). Enhancing
+robustness in parsing could further improve overall
+reliability.
+
+Modeling Element Relations. SlideAgent cur-
+rently treats elements independently. Extending
+it to explicitly model inter-element relations—for
+instance, via graph structures linking textual and
+visual components—offers a promising direction for
+capturing richer semantics, though at higher com-
+putational cost.
+
+User-Centric Interaction. While SlideAgent pri-
+marily enhances reasoning and retrieval for slide
+understanding, future work could make such agen-
+tic frameworks more user-centric through seamless
+integration into real-world user behaviors (Wang
+et al., 2025b). Lightweight feedback mechanisms
+(e.g., contextual pop-ups or in-situ clarifications)
+could further improve interpretability and interac-
+tion without disrupting natural workflows or requir-
+ing excessive user input.
+
+
+===== PAGE BREAK =====
+
+Family                    Model                              Parameters              Knowledge Cutoff Release
+GPT (OpenAI,          gpt-4o                              \                           Oct 2023                 May 2024
+2025)
+Gemini (Anil etal., — gemini-2.5-flash                  \                            Jan 2025                  June 2025
+2023)
+gemini-2.5-flash-lite              \                             Jan 2025                   June 2025
+gemini-2.0-flash                   \                              June 2024                 Jan 2025
+Claude (Anthropic, — claude-3-5-haiku-latest          \                             April 2024                Oct 2024
+2025)
+claude-opus-4-1-20250805 —\                              Jan 2025                   Aug 2025
+Llama (Grattafiori       Llama-3.2-11B-Vision-           11B                             \                                  Sep 2024
+et al., 2024)              Instruct
+InternVL (Chen          InternVL3-8B                       8B                            \                              Apr 2025
+et al., 2024)
+Phi (Abdin et al.,        Phi-3-vision-128k-instruct      3.8B                        Oct 2023                  July 2024
+2024)
+Qwen (Bai et al.,        Qwen2.5-VL-7B-Instruct       7B                        \                           Feb. 2025
+2025)
+Qwen2.5-VL-32B-Instruct      32B                        \                            Feb 2025
+LLaVA (Liu et al.,      llava-1.5-7b-hf                    7B                         Dec 2022                 Apr. 2023
+2023)
+llava-1.5-13b-hf                         13B                                Dec 2022                      Apr. 2023
+llava-v1.6-mistral-7b-hf          7B                             Dec 2023                   Mar 2024
+llava-v1.6-vicuna-13b-hf              13B                                          Dec 2023                              Mar 2024
+
+Table 8: Overview of models used in the experiments, including their family, model name, parameter size, knowledge
+cutoff date, and release date.
+
+
+===== PAGE BREAK =====
+
+You are given a complete slide deck consisting of multiple slides. Your task is to synthesize a concise,
+high-level summary of the overall message, structure, and purpose of the deck.
+
+##4# Cumulative Summary of the Preceding Slides
+{Cumulative Summary}
+
+### Response format Please respond with a markdown string that follows the following format:
+Title <Concise Explicit / Inferred Title of the Presentation>
+
+Objective <What is the presentation trying to achieve? (e.g., inform, persuade, pitch, propose)>
+
+Structure Overview
+¢ Slide 1: <Brief description of the slide>
+¢ Slide 2: <Brief description of the slide>
+¢ Slide N: <Brief description of the slide>
+Key Insights
+¢ <Major takeaway 1>
+¢ <Major takeaway 2>
+
+Audience <Intended audience type (e.g., executives, investors, engineers) >
+Tone <Overall tone: e.g., persuasive, analytical, optimistic, urgent>
+
+Table 9: Prompt template for the global agent to generate comprehensive slide deck summaries, including title,
+objective, structure, key insights, audience, and tone.
+
+Element Type <text | image | chart | table | icon | button | etc.>
+
+Position on Slide <e.g., top-right, centered, below title>
+
+Verbatim Content <if text, give the literal string; else describe the visual>
+
+Semantic Role <What is the element trying to do or communicate? >
+
+Functional Purpose <Its practical function within the slide (e.g., emphasize point, guide attention, show
+evidence, support action)>
+
+Relation to Slide <How does it connect to or support the slide’s overall message? >
+
+Inferred Importance <how central is this element to the slide? Answer with low, medium, or high>
+
+Table 10: Element-level slide description prompt format used by the element agent to generate detailed annotations
+for each visual component.
+
+
+===== PAGE BREAK =====
+
+Model                       SlideVQA                   TechSlides                   FinSlides
+
+oae                Overall Num FI | Overall Num FI | Overall Num_ Fl
+Raw Models
+Gemini 2.0           86.3       81.0 90.3      59.7      60.0 59.6} 78.1      77.8 88.9
+Gemini 2.5           89.0       85.7 93.2      61.5      65.0 59.5      76.6      76.4 83.3
+Gemini 2.5-lite      81.8       75.5 90.1      56.3      55.0 57.0} 78.1      784 66.7
+Claude 4.1            85.7       82.4 89.7      58.0      775° 48.3      52.6      52.0 60.8
+Claude 3.5           58.2      64.0 50.9      55.8      83.7 42.5      47.8      48.0 40.3
+GPT-4o0                79.4       71.9 86.4      64.5      77.1 58.0      83.0      84.3 80.1
+Multimodal RAG and Agentic Methods
+ViDoRAG            81.8       73.8 87.0      65.8      78.0 58.7      84.2      84.7 81.5
+SlideA gent                 87.1           84.4 90.6         68.7         82.5 61.5         85.8         85.9 85.6
+Impr.                   47.7 412.5 44.2] 44.1      $5.4 43.5 | 42.8      41.5 45.5
+
+Table 11: Performance comparison of baselines and proprietary models on SlideVQA, TechSlides, and FinSlides,
+assuming access to ground-truth pages containing the correct answer. All baseline methods use GPT-40 for question-
+answering.
+
+Model                         SlideVQA                    TechSlides                     FinSlides
+Overall Num _ FI | Overall Num FI! | Overall Num _ FI
+
+Raw Models
+
+Llama 3.2 11B       44.6      52.1 34.6      47.1      62.8 39.3      39.1      39.2 33.5
+
+Phi3                      78.3       69.1 91.6      53.9       67.4 47.2      63.8      63.7 65.1
+
+Qwen2.5 7B           85.1      T1707 95.3      57.7       69.8 51.8       52.7       52.0 77.8
+
+Qwen2.5 32B       87.4     82.6 93.7 | 49.6     62.8 43.2 | 69.5     69.6 65.1
+LLaVA 1.5 7B      42.9     27.9 79.9 | 24.6     15.0 39.4     14.2      14.4 20.9
+LLaVA 1.5 13B     46.7     29.5 83.1     29.2     17.5 46.6} 23.8     20.3 41.2
+LLaVA 1.6 7B       59.0     45.8 84.2     36.2      40.0 34.0      16.0      15.2 21.3
+LLaVA 1.6 13B     62.3     48.2 87.1     54.7     62.5 49.5     35.2     30.7. 67.6
+InternVL3 8B       73.3     65.4 85.7     58.4     72.1 515     56.3      55.9 65.6
+
+Baseline methods based on InternVL3-8B
+
+ViDoRAG              76.3       68.1 89.9 | 61.3       75.1 53.9 | 58.4       58.7 67.3
+SlideAgent             82.8       75.3 93.3 | 64.6 79.5 58.0 | 62.8       62.6 68.1
+Impr.                        +9.5       +9.8 +7.6 | +6.2       +74 464] +65       +6.7 42.5
+
+Table 12: Performance comparison of baselines and proprietary models on SlideVQA, TechSlides, and FinSlides,
+assuming access to ground-truth pages containing the correct answer. All baseline methods use InternVL3-8B for
+question-answering.

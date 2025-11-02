@@ -1,0 +1,1168 @@
+arX1v:2510.25557v1 [cs.LG] 29 Oct 2025
+
+Hybrid Quantum-Classical Recurrent Neural
+Networks
+
+Wenduan Xu
+Quantinuum
+Cambridge, UK
+wenduan. xu@quantinuum.com
+
+Abstract
+
+We present a hybrid quantum-classical recurrent neural network (QRNN) archi-
+tecture in which the entire recurrent core is realized as a parametrized quantum
+circuit (PQC) controlled by a classical feedforward network. The hidden state is the
+quantum state of an n-qubit PQC, residing in an exponentially large Hilbert space
+C2". The PQC is unitary by construction, making the hidden-state evolution norm-
+preserving without external constraints. At each timestep, mid-circuit readouts are
+combined with the input embedding and processed by the feedforward network,
+which provides explicit classical nonlinearity. The outputs parametrize the PQC,
+which updates the hidden state via unitary dynamics. The QRNN is compact
+and physically consistent, and it unifies (i) unitary recurrence as a high-capacity
+memory, (ii) partial observation via mid-circuit measurements, and (iii) nonlinear
+classical control for input-conditioned parametrization. We evaluate the model in
+simulation with up to 14 qubits on sentiment analysis, MNIST, permuted MNIST,
+copying memory, and language modeling, adopting projective measurements as a
+limiting case to obtain mid-circuit readouts while maintaining a coherent recurrent
+quantum memory. We further devise a soft attention mechanism over the mid-
+circuit readouts in a sequence-to-sequence model and show its effectiveness for
+machine translation. To our knowledge, this is the first model (RNN or otherwise)
+grounded in quantum operations to achieve competitive performance against strong
+classical baselines across a broad class of sequence-learning tasks.
+
+1 Introduction
+
+Recurrent neural networks (RNNs) process sequence data by maintaining a hidden state that is
+updated at each timestep, which can create a bottleneck for memory and representational capacity.
+While vanilla RNNs have been empirically shown to retain roughly one real value of information
+per hidden unit, with the effective task-specific capacity linearly bounded by the number of model
+parameters (Collins et al.|/2017), similar limitations extend to gated architectures such as LSTMs and
+GRUs (Hochreiter and Schmidhuber||1997} {Cho et al.|/2014), despite their use of gating and explicit
+memory cells (Collins et al.|/2017). This means that more complex sequences may exceed what the
+hidden state can encode, forcing the model to compress or forget.
+
+The introduction of the Transformer 2017) appeared to obviate explicit recurrence by
+
+bypassing the hidden-state bottleneck. However, recent work shows that recurrent inductive bias re-
+mains highly competitive and provides representational advantages not matched by Transformers
+
+ 2023} 2023] ([Bhattamishra et al.}[2024  2024).
+Another challenge in training RNNs is the vanishing and exploding gradient problem
+
+1994} |Hochreiter and Schmidhuber}|1997), which arises from repeated multiplication through the
+recurrent Jacobian. Among various strategies to address this (Mikolov)|2012 2013
+
+ 2015), unitary and orthogonal RNNs (Arjovsky et al.        ‘(Helfrich et al.
+
+
+
+===== PAGE BREAK =====
+
+_                          -— —_       | aK -..       _
+
+=                          FA ---—       | x ---       =.
+U(6;)                                 =            U(8:)       -           U(4;,)       =
+
+=                          x---—       | AK ---—       Lx
+F (Zo: X1)                                                     F (Zt-1: Xt)                      F (Zk—1: Xk)
+
+(c)
+
+Figure 1: Hybrid QRNN. (a) Recurrent core PQC with n = 4 qubits (illustrative) and 16 parametrized
+gates, acting on a quantum state in the Hilbert space C?"; each horizontal line corresponds to one
+qubit. (b) RX and RY gates|'|Bach gate in the PQC is parametrized by a rotation angle 6;, where
+1 <i< 16. (c) QRNN unrolled for a sequence of length k. The feedforward network F takes as
+input the concatenation of the mid-circuit readout vector from the previous timestep and the current
+input (z;_1:X;), and outputs 6; € R'° containing the 16 rotation angles that parametrize the PQC
+shown in (a) as U(@;), which acts on the quantum state propagated from the previous step. % denotes
+qubit measurements.
+
+2018 2022) constrain the recurrent weights to be norm-preserving, allowing gradients to
+
+remain stable across timesteps. These models perform well on synthetic tasks, but their results on
+broader benchmarks vary.
+
+With the advancement of quantum computing
+[2024} [DeCross et al.|[2025), parametrized quantum circuits (PQCs), which are a core component of
+variational hybrid quantum-classical models, have concurrently emerged as an alternative mechanism
+for function approximation (Benedetti et al.
+ 2024b). PQCs implement unitary transformations
+
+by construction, which naturally preserve norms (§3.1). Acting on n qubits, they enable expressive
+transformations over quantum states in an exponentially large Hilbert space C2". Although such
+spaces are classically intractable beyond moderate n, they can be manipulated with only n qubits on
+quantum hardware.
+
+In this work, we present a hybrid quantum-—classical recurrent neural network (QRNN) architecture
+grounded in quantum operations, in which the entire recurrent core is realized as a PQC. The hidden
+state is the quantum state of the PQC, residing in an exponentially large Hilbert space. A classical
+feedforward network parametrizes and steers the quantum computation, introducing nonlinearity
+
+‘All RX gates are controlled rotations that apply only when the connected control qubit is in the |1) state:
+CRX(A;) = [0X0] @7 + |1\1| @ RX(G;).
+
+
+===== PAGE BREAK =====
+
+through mid-circuit readouts, which are realized in simulation as a limiting case via projective
+measurements. This avoids emulating nonlinearity through linear quantum dynamics, leaving the
+PQC strictly for coherent unitary evolution.
+
+Fig. [I]illustrates both the PQC (with four qubits shown for illustration) and the unrolled QRNN:
+
+e Ateach timestep t, the input is mapped to a classical embedding x; via a learnable embedding
+layer.
+
+A classical feedforward network F takes as input the concatenation of the readout vector
+Zt—1 (outputs from all measurements at timestep ¢ — 1) and the current input x,. It outputs
+the PQC parameters 0; which configure the PQC with a fixed gate layout (Fig. [Ta), denoted
+U(@;), applied at timestep t (Fig. [Ich
+
+The PQC applies the parametrized unitary gates to evolve the quantum state, yielding the
+updated state. Residing in an exponentially large Hilbert space, this state persists across
+timesteps and provides the model’s core recurrent memory.
+
+The mid-circuit readout z; (or the final readout at the end of the sequence) is a classical
+feature vector obtained from the quantum state via measurements and is used: (i) as recurrent
+feedback z;_ at timestep ¢, and (11) as the input to task-specific classical layers.
+
+We develop the models on GPUs, allowing us to simulate and train quantum recurrence via classical
+backpropagation, with the expectation that such models will become classically unsimulatable as the
+number of qubits increases. To our knowledge, this is the first model grounded in quantum operations
+(RNN or otherwise) demonstrated in classical simulation with up to 14 qubits across six realistic
+sequence-modeling tasks, achieving competitive performance with LSTM and the scaled Cayley
+orthogonal scoRNN designed for norm preservation (Helfrich et al.|{2018). Experiments also show
+that classical nonlinear control and feedback are effective, with the nonlinear variants outperforming
+their linear counterparts, and that the unitary quantum recurrent core maintains more stable gradients
+
+than LSTMs ($4.6).
+
+The QRNN is motivated in part by the memory and gradient problems of RNNs, but its main aim is
+to explore a hybrid quantum-classical recurrent model in an idealized proof of principle that allows
+us to study its computational behavior under best-case conditions across a broad class of sequence
+learning tasks. The PQC uses only one- and two-qubit gates without nonstandard
+operations, and the overall architecture provides a hardware-aware base case and a plausible path
+toward future hardware implementations.
+
+Another way to view the QRNN is via fast and slow weights in RNNs, which function as different types
+of memory across multiple timescales [Ba et al.}[2016). The PQC parameters
+serve as the short-term memory, analogous to the hidden activities of classical RNNs, and are
+controlled and reconfigured at each timestep by a classical feedforward network whose slow weights
+encode the long-term memory. The quantum state, updated via unitary transformations, evolves on a
+faster timescale than the slow weights, persists across timesteps, and acts as a third, higher-capacity
+memory in the Hilbert space, retaining information that influences subsequent computation
+
+ 1987||Schmidhuber}|1993).
+
+2 Related Work
+
+Bausch (Bausch}|2020) developed a QRNN with a persistent quantum memory based on quantum
+neurons (Cao et al.|/2017). However, nonlinearities are emulated within PQCs using probabilistic
+repeat-until-success circuit execution and postselection steps. The inherently linear nature of quantum
+computation constrains such emulation, and the available forms of nonlinearity remain limited
+
+ 2020 2023) Zi etal, 202).
+The so-called QLSTMs embed PQCs into the gating mechanisms of classical LSTMs (Chen et al.|
+2020 2024al [Ubale et al.|{2025), replacing dense layers in the LSTM gates with PQCs.
+
+However, all memory and recurrence remain entirely classical, governed by standard hidden and
+cell state updates. These architectures are best viewed as classical LSTMs augmented with auxiliary
+PQCs, rather than quantum recurrent models.
+
+
+===== PAGE BREAK =====
+
+ (2023) and (2023) also model recurrences with PQCs, while supporting
+
+per-timestep readouts, but they rely entirely on linear quantum dynamics of the PQC without explicit
+nonlinearities or classical control.
+
+Experiments with the existing models have focused on domain-specific tasks such as fraud de-
+tection (Ubale et al.| [2025), low-resource text classification 2024a), or scaled-down
+MNIST (Bausch\|2020 2023). We instead present the first QRNN to demonstrate
+
+competitive performance across six full-scale sequence modeling tasks.
+
+3 Model
+
+3.1 PQC
+
+Unitary evolution. A PQC typically starts from the all-zero state |) = |0)®”" € C2” and applies a
+series of gates arranged from left to right}?| An example PQC with n = 4 qubits is shown in Fig. [Lal
+where each horizontal line represents a qubit. The square boxes denote quantum gates, which by
+definition are unitary transformations acting on one or more qubits. Single-qubit gates apply local
+transformations, while multi-qubit gates can generate superposition and entanglement
+
+Let U denote the composition (product) of a collection of unitary gates, hence U'U = I. For any
+
+state |~),
+Ue) IP = WIUTT |b) = (LL) = (bl) = [I],
+
+which ensures norm preservation by construction|*
+
+Parametrized unitary gates. In a PQC, gates can be either fixed or parametrized. Fixed gates
+implement structural operations and remain constant throughout training |while the latter contain
+learnable parameters, which function like trainable weight matrices analogous to neural-network
+“layers”. The PQC in Fig. [Ia]consists of entirely parametrized gates.
+
+Measurements. ‘To probe the quantum state of a PQC, we can perform measurements to obtain
+real-valued readouts. These readouts provide partial observations of the state, and any required
+number of measurements, on any of the qubits, can be combined for downstream tasks. For instance,
+a measurement through the Pauli-Z observable with the unitary
+
+(0)
+
+assigns scalar values (e.g., +1 for |0) and —1 for |1)) in the computational basis in the single-qubit
+case. For a general quantum state however, the outcome is probabilistic: it yields +1 with probability
+||? and —1 with probability |3|?. The expectation value of this measurement is given by |a|? — |G|?,
+which can be used as a real-valued readout in hybrid quantum-classical models.
+
+Although the readouts obtained via measurement are a nonlinear function of the gate parameters,
+particularly those used in parametrized rotation gates such as RX, the resulting nonlinearity is
+
+generally weak (§4).
+
+3.2. Hybrid Model
+
+RNNs parameterize a conditional distribution with a function that depends on a hidden state h,_1,
+which compacts past inputs (x1,...,Xz—1) into a fixed-dimensional representation:
+
+P(X | X1,---,Xe-1) & p(x | by-1).
+
+?@ denotes the tensor product.
+
+See Appendix|A]for a basic description of qubits and superposition.
+
+“UT denotes the conjugate transpose (Hermitian adjoint) of U. Formally, if the PQC consists of L gates, U =
+ULUL—1°:: U1, Where each u; is a unitary operator acting on some subset of qubits, then Ut = ulul see ul,
+and hence UtU = I.
+
+>For example, the CNOT gate flips the target qubit if the control is in the |1) state.
+
+
+===== PAGE BREAK =====
+
+At each timestep t, the hidden state h; is updated based on the previous hidden state h,_; and the
+current input x;:
+
+hy = f(Iv-1,x1; 9),
+where f is a transformation (e.g., a basic RNN or LSTM cell) parametrized by ©. In the hybrid
+
+model (Fig. [Ich, we replace the hidden state with a quantum state represented by the PQC in Fig. [Ta]
+which is controlled by a classical feedforward network and evolved by applying the unitary gates.
+
+Let x; be the input embedding at timestep ¢, and let z;_1 be the measurement-based readout from the
+previous timestep. In the most generic form of the hybrid model]*|the two are concatenated into a
+single vector uz; = (Z:—1: X;) and passed through a classical feedforward network F with one hidden
+layer and a nonlinearity.
+
+The first transformation in F maps the input u, to a hidden representation v;:
+
+vi = ¢(W,u; + b;),                                      (1)
+where ¢ is a nonlinear activation function. The second transformation maps v; to
+0, = Wov: + ba,                                         (2)
+
+where 6; € R¢@ represents the parameters that control the PQC’s unitary operations at timestep t.
+Each element of 0; denoted 6; is mapped to a rotation angle in a parametrized quantum gate within
+the PQC (e.g., 1 <i <dandd=16in Fig. [Ta).
+
+The PQC itself is defined by a unitary operator U(0,), parametrized by 0,!'| Applying the gates in
+U(;) to the quantum state h,_1 = |¢,—1) yields the updated state h; = U(@;) |Y4-1). The updated
+state is then measured to obtain a classical readout vector
+
+z, = Measure(h,),                                                (3)
+
+which serves as a proxy for the quantum state and is combined with the next input x;+1 to evolve
+the recurrence. Mid-circuit measurements are simulated without collapsing the quantum state via
+projective measurements, thereby preserving coherence across timesteps.
+
+We train the entire hybrid model end-to-end using classical backpropagation, optimizing the pa-
+rameters © = {W,, bi, We, bz} via standard optimizers, such as Adam (Kinga and Ba 2014),
+Because each z; is real-valued, it can be used both as a per-timestep output and as a contextual
+embedding for soft attention in sequence-to-sequence decoding.
+
+4 Experiments
+
+We use the ansatz shown in Fig]la|(scaled to more qubits when required) as the core circuit for
+the QRNN. demonstrate experimentally that this ansatz is expressive, capable of
+generating strong entanglement, and able to represent a significant portion of the Hilbert space, even
+compared to deeper circuits built from less expressive ansitze]>| We implement and simulate the
+model using TorchQuantum (Wang et al.|[2022), which remains less optimized than classical toolkits
+due to the lack of efficient kernels for hybrid operations involving tight classical-quantum feedback,
+particularly in recurrent settings. Our ansatz balances expressivity, implementation simplicity, and
+simulation efficiency.
+
+For Measure in Eq.[3| measurements are performed in each of the Pauli-X, Pauli-Y, and Pauli-Z
+observables across all wires in the PQC, and the measurement outcomes are combined to form z;
+(Eq. 3). For the feedforward network F (Eq. [I]and Eq.2), we experimented with ReLU, LeakyReLU,
+GLU and GELU nonlinearities}’| For both language modeling and translation, we first transform
+the measurement outcomes with a separate feedforward layer and use the result both for vocabulary
+classification and as input to the next timestep.
+
+®We may add extra transformations to the measurement outcomes before classifications or feeding them to
+the next step; see
+
+™We use U(@;) to denote all unitary operations composed of multiple parametrized gates, each acting on one
+or more qubits with parameters drawn from 0;.
+
+8See Appendix|B}for details on the PQC design and expressibility evaluation methodology.
+
+°GLU requires projecting to twice the output dimensionality, effectively increasing the parameter count
+compared to standard nonlinearities like ReLU, when all other dimensions are held constant.
+
+
+===== PAGE BREAK =====
+
+Table 1: Classification accuracy on IMDB. Qubit count g, total measurements m™; or hidden state size
+h (for RNN, LSTM and scoRNN only); embedding dimension e; parameter count p. } indicates the
+
+LSTM in[Dai and Le (2013.
+
+Model                 Val       Test      Qmvh e        p
+QRNNreLu         87.25 85.37 804        100 5.2K
+QRNNieakyretu 87.41 87.00 84        100 5.2K
+QRNNce tu         87.53 86.38 854        100 5.2K
+-QRNNiinear 85.37 84.21 8n4.—Ss«*d100s«S5.2K
+QRNN Linear         84.21 83.22 4)        100 2.6K
+RNN                87.64 86.96 50        50     5K
+LSTM                       88.40 86.79 25             25        5.1K
+LSTMt             —        86.5     1,024 512 6.2M
+~scORNN ~— 84.05. 83.14. 170 = 100 31K —
+
+All experiments are run on a single A100/A30 GPU and we select the best models on the validation
+split across different random seeds and report the test results. The per-epoch training runtime ranges
+from ~4 minutes for MNIST (with 10 qubits) to ~60 minutes for language modeling (with 14 qubits).
+Hyperparameters shared across all the tasks include the Adam optimizer without learning rate decay
+(lr = 1x 10-3, X=1x 1074, and e = 1 x 10~1°) and dropout applied to the input at each step,
+with task-dependent drop rates. We apply full-sequence backpropagation without truncation, except
+for language modeling, where sequences are truncated to 35 tokens. No pretrained word embeddings
+are used. Additional hyperparameters and test set statistics (mean, min, max across runs) are provided
+in Appendix[C] For scoRNN, we use a hidden size of 170 and the hyperparameters from |Helfrich|
+
+ (2018) are used throughout.
+
+4.1 Sentiment Analysis
+
+The IMDB sentiment dataset is a balanced binary classification benchmark with
+25K labeled reviews each for training and testing. The average review length is 241 tokens, with
+a maximum length of 2,500 tokens. We use 7.5K reviews from the training set for validation and
+truncate all reviews to a maximum length of 400 tokens across all models.
+
+The hybrid model for this task follows the generic hybrid architecture described in $3.2} At the final
+input token, we apply an affine transformation to the measurement outcomes to produce two logits,
+which are used for classification via cross-entropy. Table|1/summarizes the results. QRNN{eakyReLU
+achieves the highest test accuracy. Ablating the classical nonlinearity (Eq. [I) degrades performance,
+though increasing the number of qubits in the linear model still yields some accuracy gains. Adding
+the nonlinearity results in a substantial improvement, outperforming all baselines. On this task, the
+orthogonal scoRNN underperforms other models, despite having a larger hidden state and over five
+times more parameters.
+
+4.2. MNIST and Permuted-MNIST
+
+We report results on the full MNIST dataset without downsampling using the same model as for
+IMDB, except with 10 output classes instead of binary classification. The standard pixel-by-pixel
+permuted MNIST (pMNIST) setup requires 784 steps to
+process each 28 x 28 digit, which makes simulation prohibitively slow. Here we permute the pixels
+of each digit first, which are then reshaped back to 28 x 28. In both the standard and permuted cases,
+we use the same hyperparameters.
+
+Table[2|shows that QRNNs with three different types of nonlinearity outperform the classical baselines
+on both tasks, clearly demonstrating the benefit of adding classical nonlinearities compared to the
+QRNN{ inear Models. We observe that permutation leads to an accuracy drop across all models: 2.45%
+
+
+===== PAGE BREAK =====
+
+Table 2: Classification accuracy on MNIST and pMNIST. Qubit count gq, total measurements ™; or
+hidden state size h (for RNN, LSTM and scoRNN only); embedding dimension e; parameter count p.
+} indicates the QRNN model of 2020) with 13 qubits and each digit downscaled to 4 x 4
+and binarized.
+
+MNIST            pMNIST
+Model                 Val       Test      Val       Test      Qnmvh e      p
+QRNNreLu          98.10 97.83 94.86 95.05 1039        28 3.9K
+QRNNreakyretu 98.01 97.96 95.13 94.86 1030           28 3.9K
+QRNNce tu        98.17 98.03 95.38 95.58 1039       28 3.9K
+-QRNNiinear «97-06 96.80 94.94 94.13 1039 28 3.9K
+QRNN Linear            94.31 93.87 91.10 90.55 515            28 1.3K
+QRNNt          —      96.70 —      —      qg=13 1    3.1K
+RNN                 97.42 97.28 95.16 94.28 50          28 3.9K
+LSTM               97.61 97.44 94.92 93.93 20         28 3.9K
+~scORNN  ~——s<97.94. 97.12 96.86 95.56 170 28 16K
+
+1.00
+0.99
+0.98
+a
+&                                                           ©   0.97               ELE YE SET TI SEE STIT TSS
+aa                                                           =)
+o7 4                                                                     8    0.96                       — QRNN-2.3K
+3                                                           en Ut Ae QRNN-2.8K      ScoRNN-16K
+-                                                 a   0.95                   —— LSTM-2.8K | —— RNN-2.8K
+10                                                      Ly LSTM-168K 0 vse RNN-42K
+— QRNN-2.3K                                                0.94
+noe QRNN-2.8K      ScoRNN-16K
+—— LSTM-2.8K | —— RNN-2.8K                                0.89
+seen LSTM-168K —-+-+) RNN-42K
+10-3                                                                        0.88
+0       10      20      30      40      50            ;     0       10      20      30      40      50
+Epoch                                                       Epoch
+(a)                                                         (b)
+
+Figure 2: Test loss (a) and accuracy (b) for copying memory with T’ = 200.
+
+for QRNNce uv, 3.00% for the RNN, 3.51% for the LSTM, and 1.51% for scoRNN, which achieves
+comparable performance to QRNNGetu.
+
+4.3 Copying Memory
+
+The copying memory problem tests a model’s ability to retain and recall information over long
+sequences (2016). Each input sequence has
+T + 20 tokens, where the first & = 10 are random digits from 1 to 8 (Netasses), followed by zeros,
+and the last 11 (& + 1) positions are filled with the digit ‘9’ with the first ‘9’ acting as a delimiter.
+The model must learn to detect the delimiter and recall the original digits right after it in the output
+sequence. We randomly generated 5K training and 1K test samples with JT’ = 200 (for training
+efficiency of QRNNs). A random guess baseline yields a loss of elog(Petess—1) = 0.095, reflecting
+the expected cross-entropy when choosing uniformly from incorrect digits. On this task, QRNN-2.3K
+matches LSTM-168K (loss 0.07, accuracy 97%) and outperforms LSTM-2.8K (loss 0.25, accuracy
+89.4%). scoRNN, specialized for this task, achieves near-perfect results, highlighting a performance
+gap between general-purpose and tailored models.
+
+
+===== PAGE BREAK =====
+
+Table 3: PTB word-level language modeling (PPL). Qubit count q, total measurements m; or hidden
+state size h (for RNN and LSTM only); embedding dimension e; parameter count p.
+
+“Model ——~—~—~CSwadl”—<“(as”sisStCSSC vO
+ORNNeetu         131.81 126.69 14% 650 130K
+QRNNieakyrety 131.41 126.58 144  — 650:130K
+QORNNoeLu        136.62 131.07 144 650 130K
+
+QRNNieakyrety 135.00 130.35 103 512 78K
+QRNNieakyretu 169.17 161.09 545    512 39K
+RNN                151.96 139.13. 256 256 131K
+LSTM                     124.22 120.30 128 128 131K
+
+Table 4: Multi30K German-to-English translation (BLEU). Qubit count q, total measurements m; or
+hidden state size h (for RNN and LSTM only); embedding dimension e; parameter count p.
+
+“Model —~—~—~—SCOWVadl’”—<SsTeSts—si sv COS
+ORNNou           31.08 31.92 133% 512 390K
+QRNNyeakyrety 29.22 28.99 1339 512 340K
+QRNNoru         29.95 29.14 133 512 340K
+
+“QRNNotu 30.16 31.51 1039 ~=39 512 360K
+QRNNoiv           27.63 29.66 545        512 270K
+RNN                  29.17 29.20 512. 256 390K
+LSTM                29.20 32.20 256 124 390K
+
+4.4 Word-Level Language Modeling
+The PTB dataset (Mikolov et al.\|2011) consists of 929K training tokens, 73K validation tokens, and
+
+82K test tokens. As is standard, we use a vocabulary size of 10K, converting OOV tokens to UNK. We
+tested scoRNN on this task, but it did not converge to a good solution. The LSTM achieved the best
+result, with 120.30 perplexity (PPL), followed closely by QRNN{eakyReLu at 126.58.
+
+4.5 Machine Translation
+
+Soft attentions can be implemented using various formulations, such as additive attention or dot-
+product attention (Luong et al.|/2015), but they share the same core principle: at each decoder timestep,
+compute a similarity score between the current decoder state and each encoder state, normalize these
+scores via a softmax, and form a context vector by summation, which is then combined with the
+decoder’s hidden state to generate the next output token.
+
+The attention mechanism implemented here follows the additive attention of|Bahdanau et al.|(2015).
+
+At each decoding step, the decoder hidden state is concatenated with encoder outputs, passed through
+a tanh activation followed by a linear projection to compute alignment scores. A softmax then
+normalizes these scores into attention weights, with masking applied to exclude padded positions.
+
+We applied the model to Multi30k German-to-English translation (Elhott et al.|/2016), with vocabulary
+sizes of 19.2K for German and 10.8K for English, and an average of 11 tokens per sentence in both
+
+languages. The training set contains 29K sentence pairs, with 1K each for validation and testing.
+
+Results in Table [4] show that QRNNozvu with 13 qubits closely matches the LSTM, followed by
+QRNNevu with 10 qubits. For the QRNN, it is somewhat surprising that intermediate readouts can
+still support mechanisms like soft attention, since these readouts capture only partial projections of the
+quantum state rather than the full hidden state. This suggests that, despite intermediate measurements,
+sufficient information is retained and propagated across timesteps. We qualitatively interpret the
+
+
+===== PAGE BREAK =====
+
+101                                                         101
+10°                                                         10°
+Ww                                                           Ww
+£                                                           £
+S$ 1071                                                    S$ 107!
+i                                                           i
+wv                                                           wv
+8                                                           8
+£                                                           £
+oO                                                           oO
+— QRNN                                                         — QRNN
+— .sT™™                                                     — LsT™m
+4                                       scoRNN                4                                      scoRNN
+107                                                         107
+0        100       200       300       400                  0      5      10     15     20     25
+Timestep                                                    Timestep
+
+(a)                                                                   (b)
+
+Figure 3: Normalized per-timestep gradient norms ||OL/Oh,||2, averaged over one mini-batch
+containing samples of identical T (batch size = 16). Curves are normalized by the final timestep
+(t = T) gradient to compare decay shape; higher gradient values closer to T = 0 indicate less
+vanishing. (a) IMDB, T’ = 400. (b) pMNIST, 7 = 28.
+
+learned soft alignments on a few examples where the translations required non-trivial linguistic
+interpretations in Appendix [D]
+
+4.6 Hidden State Gradients
+
+We measure per-timestep gradient norms on IMDB (T' = 400) and pMNIST (T' = 28) by retaining
+gradients on the per-timestep readouts (QRNN) and hidden states (LSTM) from saved checkpoints
+and computing ||OL/Oh,||2. Gradients are averaged across samples in a mini-batch and normalized
+by the last-step norm ||O£/Ohr||2 to compare decay shape.
+
+As shown in Fig. |3} the QRNN curves remain consistently above the LSTM on both IMDB and
+pMNIST, indicating less vanishing through time toward the start of the sequences. All curves start
+with 1.0 at ¢ = T (normalization), but the relative elevation of the QRNN curve at earlier timesteps
+demonstrates more stable gradient propagation. The LSTM gradient norm decays rapidly, collapsing
+below 10~* on the relatively short pMNIST sequences.
+
+5 Discussion and Conclusion
+
+Different quantum hardware platforms currently require distinct control stacks, and architectural
+choices do not translate one-to-one across devices, with factors such as native gate sets, qubit
+connectivity, and the implementation of mid-circuit measurements all affecting the realization of a
+given circuit. The aim here is not to prescribe a hardware roadmap but to analyze a hardware-realistic
+base case under idealized classical simulation to study the empirical properties of the architecture,
+where we model mid-circuit observations via projective measurements as a limiting case.
+
+As more efficient and scalable toolchains become available (e.g., future multi-GPU toolkits based on
+cuQuantum (Bayraktar et al.|{2023)), we anticipate more faithful simulations via ancilla-mediated
+schemes in which auxiliary qubits are entangled with the main circuit, measured, and reset as
+needed while the recurrent memory remains coherent. This aligns with mid-circuit measure-and-reset
+operations already supported on several platforms
+fet al.|/2023), although hardware implementations for large-scale sequence modeling would require
+fault-tolerant devices capable of sustaining long coherent recurrences and real-time classical control.
+
+This paper bridges quantum operations and recurrent learning by introducing a new hybrid QRNN
+whose recurrent core is implemented as a PQC steered by a classical controller. The unitary dynamics
+preserve norms, promoting stable gradient propagation; the controller supplies the nonlinearity and
+task adaptivity needed for expressiveness; and mid-circuit measurements enable per-timestep readouts
+
+and classical feedback. As techniques improve (Abbas et al.|!2023) and quantum hardware matures,
+the architecture provides a path toward hardware-realistic quantum models for sequential learning.
+
+
+===== PAGE BREAK =====
+
+Acknowledgments
+
+I would like to thank Bob Coecke for the research environment, Dimitri Kartsaklis, Sean Tull, and
+David Amaro for comments on an earlier draft.
+
+A Quantum States and Superposition
+
+Unlike a classical bit, a qubit exists in a superposition of the states 0 and 1 in a two-dimensional
+complex Hilbert space: |) = a|0) + 6|1) = [a  byt € C? and |0) = [1   OM and |1) = [0   1"
+are elements of the computational basis for the Hilbert space. The coefficients a and 3 are complex
+numbers referred to as the amplitudes that satisfy |a|? + ||? = 1. Fora state |) = a|0) + 8/1), the
+probability of obtaining |0) is |a|?, and the probability of obtaining |1) is |6|?.
+
+B  PQC Template
+
+We have chosen the PQC template based on the benchmarking study in|Sim et al.| (2019), which
+evaluates 19 different parametrized quantum circuits (PQCs) up to depth 5 (.e., the base circuit
+
+repeated up to five times and used a single PQC). Each PQC is assessed using two key metrics:
+
+expressibility and entangling capability. The architecture referred to as ansatz-14 in|Sim et al.|(2019)
+which we use here in a single layer configuration was shown to score highly on both. This gives a
+
+good balance of simulation cost and "goodness" of the PQC.
+
+Expressibility is quantified by comparing the distribution of pairwise fidelities between states gener-
+ated by the PQC to the theoretical fidelity distribution of Haar-random states, which represent uniform
+randomness over the composite Hilbert space (the tensor product of individual qubit spaces). Instead
+
+of generating Haar-random states directly, the method in 2019) uses the analytical form
+of the Haar fidelity distribution as a reference. PQC output states are obtained by sampling random
+
+parameters, and their pairwise fidelities are used to construct an empirical distribution. The KL
+divergence between this empirical distribution and the Haar reference provides a scalar expressibility
+score, with lower values indicating greater expressiveness.
+
+C_ Experimental Settings and Test Accuracy Statistics Across Runs
+
+Table 5: Hyperparameters: batch size b, dropout rate d; embedding initialization €;,,;¢.
+
+Task            b         d         Cinit
+
+IMDB          200 0.25 Xavier Uniform
+MNIST        200 0.0       -
+
+PTB             64       0.5      Xavier Uniform
+Multi30K 64       0.25 Xavier Uniform
+
+10
+
+
+===== PAGE BREAK =====
+
+Table 6: Accuracy statistics on IMDB test set across 100 runs for each nonlinearity variant. Qubit
+count q, total measurements ™m; embedding dimension e; parameter count p. Among all tasks, IMDB
+showed the greatest variability in QRNN performance across random seeds in development. This
+behavior may align with known sensitivities in training variational PQCs (Grant et al.| (2019). We
+therefore also report stats where we remove failed runs (< 70% accuracy, well below simple baselines
+such as BoW), indicated by «. For the three nonlinearities 40, 42 and 25 failed runs were observed
+each. The results also indicate that GELU nonlinearity reduces the sensitivity compared with the
+other two.
+
+Model                      min        max wb             min*  p*            dm e          p
+
+QRNNreLu       49.55 85.96 71.18 71.74 83.11 824 100 5.2K
+QRNNreakyretu 49.63 87.00 70.23 75.77 83.44 854 100 5.2K
+QRNNceLu            49.98 86.38 77.18 70.39 83.75 854 100 5.2K
+
+While parametrized quantum circuits (PQCs) can suffer from vanishing gradients in deep or wide
+settings due to the barren plateau phenomenon (McClean et al.|/2018), there is no general impossibility
+theorem that barren plateaus must occur in all parametrized quantum circuits; their presence and
+severity are known to depend on the ansatz, cost function, initialization, training strategy, and noise,
+and remain an empirical matter at practical scales. Several studies provide insights into how it arises
+
+or design principles that prevent or mitigate plateaus 2019}|Grant et al.|{2019
+2021  2022). These results indicate that barren plateaus are not inevitable, and that careful
+
+design yields a tractable and stable training landscape in practice. In particular, some architectures
+such as quantum convolutional neural networks avoid barren plateaus by construction
+2021), which supports the view that appropriate architectural choices can produce stable and trainable
+quantum models.
+
+Table 7: Accuracy statistics on MNIST and pMNIST test sets across 50 runs for each nonlinearity
+variant. Qubit count q and total measurements m; embedding dimension e; parameter count p.
+
+MNIST                                     pMNIST
+Model                           min         max         Lb               min          max         bb               dm          e         p
+QRNNre_u       97.51 98.25 97.84 9433 95.31 94.83 1039 28 3.9K
+QRNNreakyretU 97.42 98.15 97.88 94.33 95.38 94.80 1039 28 3.9K
+QRNNcELu              97.62 98.22 97.96 94.72 95.58 95.12 1039 28 3.9K
+
+Table 8: BLEU evaluations on the Multi30K German to English test set across 20 runs for each
+nonlinearity variant. Qubit count gq, total measurements m; embedding dimension e; parameter count
+
+p.
+
+Model                      min max pb             dm         €          p
+
+QRNNctu       19.83 31.92 27.88 1339 512 390K
+QRNNieakyretu 24.52 29.87 28.55 1339 512 340K
+QRNNcELu                 25.71 30.29 29.09 133) 512 340K
+
+D_ Attention Alignments
+
+To qualitatively analyze the model’s learned soft attention alignments we selected four sentences
+from test set and interpreted the hybrid model translations and alignments (Fig. [4).
+
+11
+
+
+===== PAGE BREAK =====
+
+bereitet
+Publikum
+gekleidete
+Manner
+bereiten
+Restaurant
+
+<eos>
+
+These
+band
+
+is
+preparing
+to
+perform
+in
+front
+of
+a
+
+in
+
+green
+outfits
+preparing
+food
+
+at
+
+a
+
+of                                                                                                     restaurant
+
+<eos>
+(a)             (b)
+
+w
+
+xo
+
+2
+
+=
+
+£
+Cc
+2   3       .   > 4 &
+
+Cc wn
+
+oO   e § 2  c A     o §  w © = £  A
+a    v vo Oo wn    yp & 2X  c fa £ ox 7)
+c  . © Ss Oo ON °    e\ecvoyy,e x o < ¥ °
+ov Zo kL l&Ve Fw  i)     Q€ os O35 1G = oe i)
+= So > THOVEY G Vv    feanuseosa = (0) na Vv
+
+People                                               Eight
+men
+are
+playing
+on
+stage
+
+sitting
+in
+
+a
+circle
+
+in
+
+front
+of
+a
+
+while
+
+a
+guitarist
+plays
+
+in
+the
+spotlight
+
+large
+building
+
+<eos>                                                                                 <eos>
+
+(c)                                                                                (d)
+
+Figure 4: Soft attention alignments produced by the QRNN encoder-decoder model.
+
+We observe that the hybrid model can manage spatial and syntactic shifts while capturing clause-level
+structure and semantics through its measurement-driven hidden states and soft attention as well
+as the LSTM baseline. It is evident that the model handles compound verb constructions and
+semantic expansion, in sentences like “Diese Band bereitet sich auf einen Auftritt vor Publikum
+in einer Kirche vor” (Fig. and “Zwei griin gekleidete Mdnner bereiten in einem Restaurant
+Essen zu” (Fig. 4b}, where German separable verbs—‘“bereitet ... vor” and “bereiten... zu”—are
+correctly reconstructed into the English verb phrases “is preparing to perform” and “preparing”,
+respectively. The soft attention allowed the model to attend across non-contiguous source tokens,
+enabling reassembly of verb phrases. Additionally, lexical expansions such as “Publikum” — “a
+crowd of people” (Fig. 4a) and “gekleidete Manner” —> “men in green outfits” (Fig. 4b) demonstrate
+contextually appropriate semantic elaboration beyond literal translation.
+
+The model also displays syntactic reordering and clause realignment, necessitated by divergences
+between German and English word order. This is shown in both “Diese Band... vor Publikum...
+
+12
+
+
+===== PAGE BREAK =====
+
+vor” and (Fig. [4a) “Menschen, die vor einem grofen Gebdude im Kreis sitzen” (Fig. [4ch. In the
+former, German’s verb-final structure is reorganized into a mid-sentence English verb phrase, while
+handling nested prepositional phrases. In the latter, the relative clause “die... sitzen” is compressed
+into the participial phrase “sitting”, dropping auxiliaries and pronouns to better fit English syntactic
+norms. Similarly, the location and positional phrases “im Kreis” and “vor einem grofen Gebdude”
+are reordered into “in a circle in front of a large building”
+
+Lastly, for multi-clause coordination, tense adaptation, and long-range dependency tracking,
+as seen in “Acht Mdnner spielen auf der Biihne, wahrend ein Gitarrist im Scheinwerferlicht spielt”
+(Fig. Ad). The model successfully disentangles two coordinated clauses and renders them with the
+correct English conjunction “while”, while adjusting verb forms from German’s uniform “spielen”
+to “are playing” and “plays”, based on subject plurality. Finally, this ability to flexibly adapt clause
+boundaries and maintain coherence is also reflected in the “Menschen ... im Kreis sitzen” example
+(Fig. [4cp, where the model tracks relative clause dependencies and maps them onto compact English
+constructions.
+
+References
+
+Amira Abbas, Robbie King, Hsin-Yuan Huang, William J. Huggins, Ramis Movassagh, Dar
+Gilboa, and Jarrod R. McClean. On quantum backpropagation, information reuse, and
+cheating measurement collapse. In Advances in Neural Information Processing Systems,
+
+volume 36, 2023. URL |https://proceedings.neurips.cc/paper_files/paper/2023/
+hash/8c3caae2f 725c8e2a55ecd600563d172-Abstract-Conference.html
+
+Rajeev Acharya, Dmitry A. Abanin, Laleh Aghababaie-Beni, Igor Aleiner, Trond I. Andersen, Markus
+Ansmann, Frank Arute, Kunal Arya, Abraham Asfaw, Nikita Astrakhantsev, Juan Atalaya, Ryan
+Babbush, Dave Bacon, Brian Ballard, Joseph C. Bardin, Johannes Bausch, Andreas Bengtsson,
+Alexander Bilmes, Sam Blackwell, Sergio Boixo, Gina Bortoli, Alexandre Bourassa, Jenna Bovaird,
+Leon Brill, Michael Broughton, David A. Browne, Brett Buchea, Bob B. Buckley, David A. Buell,
+Tim Burger, Brian Burkett, Nicholas Bushnell, Anthony Cabrera, Juan Campero, Hung-Shen
+Chang, Yu Chen, Zijun Chen, Ben Chiaro, Desmond Chik, Charina Chou, Jahan Claes, Agnetta Y.
+Cleland, Josh Cogan, Roberto Collins, Paul Conner, William Courtney, Alexander L. Crook, Ben
+Curtin, Sayan Das, Alex Davies, Laura De Lorenzo, Dripto M. Debroy, Sean Demura, Michel
+Devoret, Agustin Di Paolo, Paul Donohoe, Ilya Drozdov, Andrew Dunsworth, Clint Earle, Thomas
+Edlich, Alec Eickbusch, Aviv Moshe Elbag, Mahmoud Elzouka, Catherine Erickson, Lara Faoro,
+Edward Farhi, Vinicius S. Ferreira, Leslie Flores Burgos, Ebrahim Forati, Austin G. Fowler, Brooks
+Foxen, Suhas Ganjam, Gonzalo Garcia, Robert Gasca, Elie Genois, William Giang, Craig Gidney,
+Dar Gilboa, Raja Gosula, Alejandro Grajales Dau, Dietrich Graumann, Alex Greene, Jonathan A.
+Gross, Steve Habegger, John Hall, Michael C. Hamilton, Monica Hansen, Matthew P. Harrigan,
+Sean D. Harrington, Francisco J. H. Heras, Stephen Heslin, Paula Heu, Oscar Higgott, Gordon
+Hill, Jeremy Hilton, George Holland, Sabrina Hong, Hsin- Yuan Huang, Ashley Huff, William J.
+Huggins, Lev B. Ioffe, Sergei V. Isakov, Justin Iveland, Evan Jeffrey, Zhang Jiang, Cody Jones,
+Stephen Jordan, Chaitali Joshi, Pavol Juhas, Dvir Kafri, Hui Kang, Amir H. Karamlou, Kostyantyn
+Kechedzhi, Julian Kelly, Trupti Khaire, Tanuj Khattar, Mostafa Khezri, Seon Kim, Paul V. Klimov,
+Andrey R. Klots, Bryce Kobrin, Pushmeet Kohli, Alexander N. Korotkov, Fedor Kostritsa, Robin
+Kothari, Borislav Kozlovskii, John Mark Kreikebaum, Vladislav D. Kurilovich, Nathan Lacroix,
+David Landhuis, Tiano Lange-Dei, Brandon W. Langley, Pavel Laptev, Kim-Ming Lau, Loick
+Le Guevel, Justin Ledford, Joonho Lee, Kenny Lee, Yuri D. Lensky, Shannon Leon, Brian J. Lester,
+Wing Yan Li, Yin Li, Alexander T. Lill, Wayne Liu, William P. Livingston, Aditya Locharla,
+Erik Lucero, Daniel Lundahl, Aaron Lunt, Sid Madhuk, Fionn D. Malone, Ashley Maloney,
+Salvatore Mandra, James Manyika, Leigh S. Martin, Orion Martin, Steven Martin, Cameron
+Maxfield, Jarrod R. McClean, Matt McEwen, Seneca Meeks, Anthony Megrant, Xiao Mi, Kevin C.
+Miao, Amanda Mieszala, Reza Molavi, Sebastian Molina, Shirin Montazeri, Alexis Morvan, Ramis
+Movassagh, Wojciech Mruczkiewicz, Ofer Naaman, Matthew Neeley, Charles Neill, Ani Nersisyan,
+Hartmut Neven, Michael Newman, Jiun How Ng, Anthony Nguyen, Murray Nguyen, Chia-Hung
+Ni, Murphy Yuezhen Niu, Thomas E. O’Brien, William D. Oliver, Alex Opremcak, Kristoffer
+Ottosson, Andre Petukhov, Alex Pizzuto, John Platt, Rebecca Potter, Orion Pritchard, Leonid P.
+Pryadko, Chris Quintana, Ganesh Ramachandran, Matthew J. Reagor, John Redding, David M.
+Rhodes, Gabrielle Roberts, Eliott Rosenberg, Emma Rosenfeld, Pedram Roushan, Nicholas C.
+Rubin, Negar Saei, Daniel Sank, Kannan Sankaragomathi, Kevin J. Satzinger, Henry F. Schurkus,
+
+13
+
+
+===== PAGE BREAK =====
+
+Christopher Schuster, Andrew W. Senior, Michael J. Shearn, Aaron Shorter, Noah Shutty, Vladimir
+Shvarts, Shraddha Singh, Volodymyr Sivak, Jindra Skruzny, Spencer Small, Vadim Smelyanskiy,
+W. Clarke Smith, Rolando D. Somma, Sofia Springer, George Sterling, Doug Strain, Jordan
+Suchard, Aaron Szasz, Alex Sztein, Douglas Thor, Alfredo Torres, M. Mert Torunbalci, Abeer
+Vaishnav, Justin Vargas, Sergey Vdovichev, Guifre Vidal, Benjamin Villalonga, Catherine Vollgraff
+Heidweiller, Steven Waltman, Shannon X. Wang, Brayden Ware, Kate Weber, Travis Weidel,
+Theodore White, Kristi Wong, Bryan W. K. Woo, Cheng Xing, Z. Jamie Yao, Ping Yeh, Bicheng
+Ying, Juhwan Yoo, Noureldin Yosri, Grayson Young, Adam Zalcman, Yaxing Zhang, Ningfeng
+Zhu, and Nicholas Zobrist. Quantum error correction below the surface code threshold. Nature,
+638(8052):920-926, December 2024. ISSN 1476-4687. doi: 10.1038/s41586-024-08449-y. URL
+
+http://dx.doi.org/10.1038/s41586-024-08449-y
+
+Martin Arjovsky, Amar Shah, and Yoshua Bengio. Unitary evolution recurrent neural networks.
+In ICML’16: Proceedings of the 33rd International Conference on International Conference on
+Machine Learning, volume 48, page 1120-1128, 2016.
+
+Frank Arute, Kunal Arya, Ryan Babbush, Dave Bacon, Joseph Bardin, Rami Barends, Rupak Biswas,
+Sergio Boixo, Fernando Brandao, David Buell, Brian Burkett, Yu Chen, Jimmy Chen, Ben Chiaro,
+Roberto Collins, William Courtney, Andrew Dunsworth, Edward Farhi, Brooks Foxen, Austin
+Fowler, Craig Michael Gidney, Marissa Giustina, Rob Graff, Keith Guerin, Steve Habegger,
+Matthew Harrigan, Michael Hartmann, Alan Ho, Markus Rudolf Hoffmann, Trent Huang, Travis
+Humble, Sergei Isakov, Evan Jeffrey, Zhang Jiang, Dvir Kafri, Kostyantyn Kechedzhi, Julian Kelly,
+Paul Klimov, Sergey Knysh, Alexander Korotkov, Fedor Kostritsa, Dave Landhuis, Mike Lindmark,
+Erik Lucero, Dmitry Lyakh, Salvatore Mandra, Jarrod Ryan McClean, Matthew McEwen, Anthony
+Megrant, Xiao Mi, Kristel Michielsen, Masoud Mohseni, Josh Mutus, Ofer Naaman, Matthew
+Neeley, Charles Neill, Murphy Yuezhen Niu, Eric Ostby, Andre Petukhov, John Platt, Chris
+Quintana, Eleanor G. Rieffel, Pedram Roushan, Nicholas Rubin, Daniel Sank, Kevin J. Satzinger,
+Vadim Smelyanskiy, Kevin Jeffery Sung, Matt Trevithick, Amit Vainsencher, Benjamin Villalonga,
+Ted White, Z. Jamie Yao, Ping Yeh, Adam Zalcman, Hartmut Neven, and John Martinis. Quantum
+supremacy using a programmable superconducting processor. Nature, 574:505—510, 2019. URL
+
+https: //www.nature.com/articles/s41586-019-1666-5
+
+Jimmy Ba, Geoffrey Hinton, Volodymyr Mnih, Joel Z Leibo, and Catalin Ionescu. Using fast weights
+to attend to the recent past. In Advances in Neural Information Processing Systems (NeurIPS),
+volume 29, 2016.
+
+Dzmitry Bahdanau, Kyunghyun Cho, and Yoshua Bengio. Neural machine translation by jointly
+learning to align and translate. In 3rd International Conference on Learning Representations
+
+(ICLR), 2015. URL https: //arxiv.org/abs/1409 .0473
+
+Johannes Bausch. Recurrent quantum neural networks. In Advances in Neural Information Processing
+Systems, volume 33, pages 1368-1379. Curran Associates, Inc., 2020.
+
+Harun Bayraktar, Ali Charara, David Clark, Saul Cohen, Timothy Costa, Yao-Lung L. Fang, Yang
+Gao, Jack Guan, John Gunnels, Azzam Haidar, Andreas Hehn, Markus Hohnerbach, Matthew
+Jones, Tom Lubowe, Dmitry Lyakh, Shinya Morino, Paul Springer, Sam Stanwyck, Igor Terentyev,
+Satya Varadhan, Jonathan Wong, and Takuma Yamaguchi. cuquantum sdk: A high-performance
+
+library for accelerating quantum science, 2023. URL https: //arxiv. org/abs/2308.01999
+
+Maximilian Beck, Korbinian Péppel, Markus Spanring, Andreas Auer, Oleksandra Prudnikova,
+Michael Kopp, Giinter Klambauer, Johannes Brandstetter, and Sepp Hochreiter. xlstm: Extended
+long short-term memory. Advances in Neural Information Processing Systems, 37:107547-107603,
+2024.
+
+Marcello Benedetti, Erika Lloyd, Stefan Sack, and Mattia Fiorentini. Parameterized quantum circuits
+as machine learning models. Quantum Science and Technology, 4(4), 2019. doi: 10.1088/
+2058-9565/ab4eb5.
+
+Yoshua Bengio, Patrice Simard, and Paolo Frasconi. Learning long-term dependencies with gradient
+descent is difficult. JEEE transactions on neural networks, 5(2):157—-166, 1994.
+
+14
+
+
+===== PAGE BREAK =====
+
+Satwik Bhattamishra, Michael Hahn, Phil Blunsom, and Varun Kanade. Separations in the represen-
+tational capabilities of transformers and recurrent architectures. Advances in Neural Information
+Processing Systems, 37:36002—36045, 2024.
+
+Roberto Bondesan and Max Welling. Quantum deformed neural networks, 2020.
+
+Yudong Cao, Gian Giacomo Guerreschi, and Alan Aspuru-Guzik. Quantum neuron: an elementary
+
+building block for machine learning on quantum computers, 2017. URL https://arxiv.org/
+abs/1711.11240
+
+M. Cerezo, Akira Sone, Tyler Volkoff, Lukasz Cincio, and Patrick J. Coles. Cost function de-
+pendent barren plateaus in shallow parametrized quantum circuits. Nature Communications,
+12(1):1791, 2019. doi: 10.1038/s41467-021-21728-w. URL
+
+Samuel Yen-Chi Chen, Shinjae Yoo, and Yao-Lung L. Fang. Quantum long short-term memory.
+arXiv preprint arXiv:2009.01783, 2020.
+
+Kyunghyun Cho, Bart van Merrienboer, Caglar Gulcehre, Dzmitry Bahdanau, Fethi Bougares, Holger
+Schwenk, and Yoshua Bengio. Learning phrase representations using rnn encoder—decoder for
+statistical machine translation. In Proceedings of the 2014 Conference on Empirical Methods
+in Natural Language Processing (EMNLP), pages 1724-1734. Association for Computational
+Linguistics, 2014. doi: 10.3115/v1/D14-1179.
+
+Jasmine Collins, Jascha Sohl-Dickstein, and David Sussillo. Capacity and trainability in recurrent
+neural networks. In International Conference on Learning Representations, 2017. URL|https:
+
+//openreview.net/forum?id=BydARw9ex
+
+Andrew M. Dai and Quoc V. Le. Semi-supervised sequence learning. In Advances in Neural
+Information Processing Systems, NIPS, 2015.
+
+M. DeCross, R. Haghshenas, M. Liu, E. Rinaldi, J. Gray, Y. Alexeev, C.H. Baldwin, J.P. Bartolotta,
+M. Bohn, E. Chertkov, J. Cline, J. Colina, D. Del Vento, J.M. Dreiling, C. Foltz, J.P. Gaebler, T.M.
+Gatterman, C.N. Gilbreth, J. Giles, D. Gresh, A. Hall, A. Hankin, A. Hansen, N. Hewitt, I. Hoffman,
+C. Holliman, R.B. Hutson, T. Jacobs, J. Johansen, P.J. Lee, E. Lehman, D. Lucchetti, D. Lykov,
+I.S. Madjarov, B. Mathewson, K. Mayer, M. Mills, P. Niroula, J.M. Pino, C. Roman, M. Schecter,
+PE. Siegfried, B.G. Tiemann, C. Volin, J. Walker, R. Shaydulin, M. Pistoia, S.A. Moses, D. Hayes,
+B. Neyenhuis, R.P. Stutz, and M. Foss-Feig. Computational power of random quantum circuits
+in arbitrary geometries. Physical Review X, 15(2), May 2025. ISSN 2160-3308. doi: 10.1103/
+
+physrevx.15.021052. URL http://dx.doi.org/10.1103/PhysRevX.15.021052
+Matthew DeCross, Eli Chertkov, Megan Kohagen, and Michael Foss-Feig. Qubit-reuse compilation
+with mid-circuit measurement and reset, 2022. URL https: //arxiv.org/abs/2210.08039
+
+Y Du, MH Hsieh, T Liu, and D Tao. The expressive power of parameterized quantum circuits. arxiv
+2018. arXiv preprint arXiv: 1810.11922, 2019.
+
+Desmond Elliott, Stella Frank, Khalil Sima’an, and Lucia Specia. Multi30K: Multilingual English-
+German image descriptions. In Proceedings of the 5th Workshop on Vision and Language,
+pages 70-74, Berlin, Germany, August 2016. Association for Computational Linguistics. doi:
+
+10.18653/v1/W16-3210. URL|https: //aclanthology. org/W16-3210/
+
+Edward Grant, Leonard Wossnig, Mateusz Ostaszewski, and Marcello Benedetti. An initializa-
+tion strategy for addressing barren plateaus in parametrized quantum circuits. Quantum, 3:
+214, December 2019. ISSN 2521-327X. doi: 10.2233 1/q-2019-12-09-214. URL
+//dx.doi.org/10.22331/q-2019-12-09-214
+
+Albert Gu and Tri Dao. Mamba: Linear-time sequence modeling with selective state spaces. arXiv
+preprint arXiv:2312.00752, 2023.
+
+Kyle Helfrich, Devin Willmott, and Qiang Ye. Orthogonal recurrent neural networks with scaled
+Cayley transform. In Jennifer Dy and Andreas Krause, editors, Proceedings of the 35th Interna-
+tional Conference on Machine Learning, volume 80 of Proceedings of Machine Learning Research,
+
+pages 1969-1978. PMLR, 10-15 Jul 2018. URL https: //proceedings.mlr.press/v80/
+
+15
+
+
+===== PAGE BREAK =====
+
+Geoffrey E Hinton and David C Plaut. Using fast weights to deblur old memories. In Proceedings of
+the ninth annual conference of the Cognitive Science Society, pages 177-186, 1987.
+
+Sepp Hochreiter and Jurgen Schmidhuber. Long short-term memory. Neural Computation, 9(8):
+1735-1780, 1997.
+
+Li Jing, Caglar Giilcehre, John Peurifoy, Yichen Shen, Max Tegmark, Marin Soljaci¢, and Yoshua
+Bengio. Gated orthogonal recurrent units: On learning to forget. Neural Computation, 31(4):765—
+
+783, 2019. doi: 10.1162/neco_a_01174. URL https://doi.org/10.1162/neco_a_01174
+
+Bobak Kiani, Randall Balestriero, Yann LeCun, and Seth Lloyd. projunn: Efficient method for
+training deep networks with unitary matrices. In Advances in Neural Information Processing
+Systems, volume 35, pages 14448-14463, 2022.
+
+Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv preprint
+arXiv: 1412.6980, 2014.
+
+Quoc V Le, Navdeep Jaitly, and Geoffrey E Hinton. A simple way to initialize recurrent networks
+of rectified linear units. In Proceedings of the International Conference on Machine Learning
+
+(ICML), pages 1133-1141, 2015.
+
+Yanan Li, Zhimin Wang, Rongbing Han, Shangshang Shi, Jiaxin Li, Ruimin Shang, Haiyong Zheng,
+Guogqiang Zhong, and Yongjian Gu. Quantum recurrent neural networks for sequential learning.
+Neural Networks, 166:148—-161, 2023.
+
+Joanna W. Lis, Aruku Senoo, William F. McGrew, Felix Ro6nchen, Alec Jenkins, and Adam M.
+Kaufman. Mid-circuit operations using the omg-architecture in neutral atom arrays, 2023. URL
+https://arxiv.org/abs/2305. 19266
+
+Thang Luong, Hieu Pham, and Christopher D. Manning. Effective approaches to attention-based
+neural machine translation. In Proceedings of the 2015 Conference on Empirical Methods in
+Natural Language Processing, pages 1412-1421, Lisbon, Portugal, September 2015. Association
+
+for Computational Linguistics. doi: 10.18653/v1/D15-1166. URL |https://aclanthology
+
+Andrew L. Maas, Raymond E. Daly, Peter T. Pham, Dan Huang, Andrew Y. Ng, and Christopher
+Potts. Learning word vectors for sentiment analysis. In Proceedings of the 49th Annual Meeting of
+the Association for Computational Linguistics: Human Language Technologies, pages 142-150,
+Portland, Oregon, USA, June 2011. Association for Computational Linguistics. URL ‘https }
+//aclanthology.org/P11-1015/
+
+Jarrod R McClean, Sergio Boixo, Vadim N Smelyanskiy, Ryan Babbush, and Hartmut Neven.
+Barren plateaus in quantum neural network training landscapes. Nature Communications, 9(1):
+
+4812, 2018. doi: 10.1038/s41467-018-07090-4. URL https://www.nature.com/articles/
+
+Tomas Mikolov. Statistical Language Models Based on Neural Networks. PhD thesis, Brno Univer-
+sity of Technology, 2012. URL https: //www.fit.vutbr.cz/research/view_pub.php?id=
+848
+
+Ke)
+
+Tomas Mikolov, Martin Karafiat, LukaS Burget, Jan Cernocky, and Sanjeev Khudanpur. Empirical
+evaluation and combination of advanced language modeling techniques. In Interspeech, 2011.
+
+MS Moreira, Gian Giacomo Guerreschi, Wouter Vlothuizen, Jorge F Marques, Jeroen van Straten,
+Shavindra P Premaratne, Xiang Zou, Hany Ali, Nandini Muthusubramanian, Christos Zachari-
+adis, et al. Realization of a quantum neural network using repeat-until-success circuits in a
+superconducting quantum processor. npj Quantum Information, 9(1):118, 2023.
+
+M.A. Norcia, W.B. Cairncross, K. Barnes, P. Battaglino, A. Brown, M.O. Brown, K. Cassella, C.-A.
+Chen, R. Coxe, D. Crow, J. Epstein, C. Griger, A.LM.W. Jones, H. Kim, J.M. Kindem, J. King,
+S.S. Kondov, K. Kotru, J. Lauigan, M. Li, M. Lu, E. Megidish, J. Marjanovic, M. McDonald,
+T. Mittiga, J.A. Muniz, S. Narayanaswami, C. Nishiguchi, R. Notermans, T. Paule, K.A. Pawlak,
+L.S. Peng, A. Ryou, A. Smull, D. Stack, M. Stone, A. Sucich, M. Urbanek, R.J.M. van de
+
+16
+
+
+===== PAGE BREAK =====
+
+Veerdonk, Z. Vendeiro, T. Wilkason, T.-Y. Wu, X. Xie, X. Zhang, and B.J. Bloom. Midcircuit qubit
+measurement and rearrangement in a yb 171 atomic array. Physical Review X, 13(4), November
+2023. ISSN 2160-3308. doi: 10.1103/physrevx.13.041034. URL
+
+Antonio Orvieto, Samuel L Smith, Albert Gu, Anushan Fernando, Caglar Gulcehre, Razvan Pascanu,
+and Soham De. Resurrecting recurrent neural networks for long sequences. In Andreas Krause,
+Emma Brunskill, Kyunghyun Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett,
+editors, Proceedings of the 40th International Conference on Machine Learning, volume 202 of
+Proceedings of Machine Learning Research, pages 26670-26698. PMLR, 23-29 Jul 2023. URL
+
+https: //proceedings.mlr.press/v202/orvieto23a.html
+
+Razvan Pascanu, Tomas Mikolov, and Yoshua Bengio. On the difficulty of training recurrent neural
+networks. In International Conference on Machine Learning, pages 1310-1318, 2013.
+
+Taylor L. Patti, Khadijeh Najafi, Xun Gao, and Susanne F. Yelin. Entanglement devised bane
+plateau mitigation. Physical Review Research, 3(3), July 2021. ISSN 2643-1564. doi:
+
+1103/physrevresearch.3.033090. URL http: //dx.doi.org/10.1103/PhysRevResearch.3. 3]
+
+033090
+
+Adrian Pérez-Salinas, David L6pez-Ntifiez, Artur Garcia-Sdez, Pol Forn-Diaz, and José I Latorre.
+One qubit as a universal approximant. Physical Review A, 104(1):012405, 2021.
+
+Arthur Pesah, M Cerezo, Samson Wang, Andrew T Sornborger, Lukasz Cincio, and Patrick J Coles.
+Absence of barren plateaus in quantum convolutional neural networks. Physical Review X, 11
+(4):041011, 2021. doi: 10.1103/PhysRevX.11.041011. URL
+
+Ben W. Reichardt, David Aasen, Rui Chao, Alex Chernoguzov, Wim van Dam, John P. Gaebler, Dan
+Gresh, Dominic Lucchetti, Michael Mills, Steven A. Moses, Brian Neyenhuis, Adam Paetznick,
+Andres Paz, Peter E. Siegfried, Marcus P. da Silva, Krysta M. Svore, Zhenghan Wang, and Matt
+Zanner. Demonstration of quantum computation and error correction with a tesseract code. arXiv
+
+preprint arXiv:2409.04628, 2024. URL https://arxiv.org/abs/2409 . 04628
+
+Stefan H. Sack, Raimel A. Medina, Alexios A. Michailidis, Richard Kueng, and Maksym Serbyn.
+Avoiding barren plateaus using classical shadows. PRX Quantum, 3(2), June 2022. ISSN 2691-
+
+3399. doi: 10.1103/prxquantum.3.020365. URL|http://dx.doi.org/10.1103/PRXQuantum
+
+3.020365
+
+Jiirgen Schmidhuber. Learning to control fast-weight memories: An alternative to dynamic recurrent
+networks. Neural Computation, 4(1):131-139, 1992.
+
+Jiirgen Schmidhuber. Reducing the ratio between learning complexity and number of time varying
+variables in fully recurrent nets. In International Conference on Artificial Neural Networks, pages
+460-463. Springer, 1993.
+
+Maria Schuld, Ryan Sweke, and Johannes Jakob Meyer. Effect of data encoding on the expressive
+power of variational quantum-machine-learning models. Physical Review A, 103(3):032430, 2021.
+
+Michat Siemaszko, Adam Buraczewski, Bertrand Le Saux, and Magdalena Stobiriska. Rapid training
+of quantum recurrent neural networks. Quantum Information Processing, 22(1):1—15, 2023.
+
+Sukin Sim, Peter D. Johnson, and Alan Aspuru-Guzik. Expressibility and entangling capability of
+parameterized quantum circuits for hybrid quantum-classical algorithms. Advanced Quantum
+Technologies, 2(12), 2019.
+
+Rushikesh Ubale, Sujan K. K., Sangram Deshpande, and Gregory T. Byrd. Toward practical
+quantum machine learning: A novel hybrid quantum Istm for fraud detection, 2025. URL https:
+//arxiv.org/abs/2505 .00137
+
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz
+Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in Neural Information
+Processing Systems (NeurIPS), pages 5998-6008, 2017. URL
+
+17
+
+
+===== PAGE BREAK =====
+
+Hanrui Wang, Yongshan Ding, Jiaqi Gu, Zirui Li, Yujun Lin, David Z Pan, Frederic T Chong, and
+Song Han. QuantumNAS: Noise-adaptive search for robust quantum circuits. In The 28th IEEE
+International Symposium on High-Performance Computer Architecture (HPCA-28), 2022.
+
+Shilu Yan, Hongsheng Qi, and Wei Cui. Nonlinear quantum neuron: A fundamental building block
+for quantum neural networks. Physical Review A, 102(5):052421, 2020.
+
+Wenbin Yu, Lei Yin, Chengjun Zhang, Yadang Chen, and Alex X. Liu. Application of quantum
+recurrent neural network in low-resource language text classification. [EEE Transactions on
+Quantum Engineering, 5:1—13, 2024a. doi: 10.1109/TQE.2024.3373903.
+
+Zhan Yu, Qiuhao Chen, Yuling Jiao, Yinan Li, Xiliang Lu, Xin Wang, and Jerry Yang. Non-asymptotic
+approximation error bounds of parameterized quantum circuits. Advances in Neural Information
+Processing Systems, 37:99089-99 127, 2024b.
+
+Wei Zi, Siyi Wang, Hyunji Kim, Xiaoming Sun, Anupam Chattopadhyay, and Patrick Rebentrost.
+Efficient quantum circuits for machine learning activation functions including constant t-depth
+relu. Phys. Rev. Res., 6:043048, Oct 2024. doi: 10.1103/PhysRevResearch.6.043048. URL
+
+https://link.aps.org/doi/10.1103/PhysRevResearch. 6.043048
+
+18

@@ -1,0 +1,1247 @@
+2510.26521v1 [cs.CL] 30 Oct 2025
+
+arXiv
+
+Hebrew Diacritics Restoration using Visual Representation
+
+Yair Elboher and Yuval Pinter
+Faculty of Computer and Information Science
+Ben-Gurion University of the Negev
+Be’er Sheva, Israel
+{yairel,uvp}@bgu.ac.il
+
+Abstract
+
+Diacritics restoration in Hebrew is a fundamen-
+tal task for ensuring accurate word pronuncia-
+tion and disambiguating textual meaning. De-
+spite the language’s high degree of ambiguity
+when unvocalized, recent machine learning ap-
+proaches have significantly advanced perfor-
+mance on this task.
+
+In this work, we present DIVRIT, a novel sys-
+tem for Hebrew diacritization that frames the
+task as a zero-shot classification problem. Our
+approach operates at the word level, selecting
+the most appropriate diacritization pattern for
+each undiacritized word from a dynamically
+generated candidate set, conditioned on the sur-
+rounding textual context. A key innovation of
+DIVRIT is its use of a Hebrew Visual Lan-
+guage Model, which processes undiacritized
+text as an image, allowing diacritic informa-
+tion to be embedded directly within the input’s
+vector representation.
+
+Through a comprehensive evaluation across var-
+ious configurations, we demonstrate that the
+system effectively performs diacritization with-
+out relying on complex, explicit linguistic anal-
+ysis. Notably, in an “oracle” setting where
+the correct diacritized form is guaranteed to
+be among the provided candidates, DIVRIT
+achieves a high level of accuracy. Furthermore,
+strategic architectural enhancements and opti-
+mized training methodologies yield significant
+improvements in the system’s overall general-
+ization capabilities. These findings highlight
+the promising potential of visual representa-
+tions for accurate and automated Hebrew dia-
+critization.
+
+1 Introduction
+
+Diacritics play a vital role in many writing systems, in-
+dicating pronunciation and distinguishing between dif-
+ferent meanings of words (Naplava et al., 2021; Gorman
+and Pinter, 2025). In Semitic scripts, which primarily
+represent consonants, the absence of these marks leads
+to many words having multiple valid interpretations
+depending on the context, and introduces significant
+lexical ambiguity (Elgamal et al., 2024). By providing
+
+Selected candidate          vans
+4
+window         =       -    ,
+embeddings |_|}        3    A          Contextualized
+ae []    e     Pa             embedding
+T ve | aol [ |     Context Encoder
+rs oT |v      WIT) Don Nar PAN) | Input sequence
+ws oT
+Locally   PN  '
+generated     raals$
+
+candidates
+
+Figure 1: Architecture of the diacritizer. A context en-
+coder (right) captures contextual information, while a
+visual candidate encoder (left) processes an aligned por-
+tion of each candidate from the candidate generator. The
+resulting embeddings are then compared in a scoring
+layer.
+
+essential grammatical information, these marks, known
+as nigqud in Hebrew, resolve this ambiguity, ensuring
+a single, intended meaning. For example, the Hebrew
+consonantal string “mlk” can be interpreted as “king”
+(melekh), “reigned” (malakh), and more, depending on
+context. Despite their usefulness, diacritics are typi-
+cally omitted in modern Hebrew writing, relying on
+readers’ familiarity to infer the correct interpretation.
+This contrasts with the linguistic complexity involved
+in restoring the correct diacritization, which demands
+both syntactic and semantic understanding.
+
+Automatic diacritization poses a significant challenge,
+especially for morphologically-rich languages like He-
+brew. Accurate automatic diacritization is important
+for both practical applications and theoretical advance-
+ments in language technology (Chen et al., 2024), con-
+tributing to improved accessibility in digital text and
+enhanced human-computer interaction. However, de-
+spite a well-defined set of Hebrew diacritization rules,
+their application to text is non-trivial, requiring the ex-
+traction of information such as gender, tense, and part of
+speech (Tsarfaty et al., 2019). This complexity makes
+purely rule-based approaches impractical, necessitat-
+ing alternative solutions, particularly machine learning-
+based approaches like neural networks. Over the years,
+neural network-based Hebrew diacritization has pro-
+gressed from hybrid to data-driven systems. Dicta’s
+Nakdan (Shmidman et al., 2020), a system combining
+
+
+===== PAGE BREAK =====
+
+deep learning with linguistic rules, offers high accu-
+racy but limited generalizability. Conversely, Nakdi-
+mon (Gershuni and Pinter, 2022) and MenakBERT (Co-
+hen et al., 2024) leverage purely data-driven, character-
+level approaches, using a Bi-LSTM and a transformer
+pretrained on Hebrew corpora, respectively, achiev-
+ing competitive performance with simplified, adaptable
+pipelines.
+
+While these systems work at the character level, pre-
+dicting each letter’s niqqud symbols at a time, Dicta’s
+approach of word-level analysis clearly works at a better-
+fitting granularity, as Hebrew morphology is mostly
+governed by word-level templates which operate be-
+yond immediate and/or unidirectional, character con-
+texts. To this end, we propose a purely data-driven
+reframing of the Hebrew diacritization task as a zero-
+shot classification problem at the word level. This en-
+tails generating a set of diacritization candidates for
+each word, with each candidate acting as a distinct class
+within this framework, calling for a zero-shot learning
+approach (ZSL; Xian et al., 2019). The diacritization
+process then becomes the selection of the most con-
+textually suitable class based on learned discriminative
+representations. Unlike character-level classification
+methods, this strategy requires representations that ef-
+fectively capture the subtle distinctions between dia-
+critized word forms, thereby necessitating the use of a
+language model capable of processing diacritized text.
+
+In this research we present DIVRIT, a Diacritizer
+with Visual Representation for Hebrew (IVRIT) text.
+We explore the use of a vision transformer (ViT) ar-
+chitecture (He et al., 2022) as a vision-language model
+(VLM) to represent diacritized Hebrew text visually.
+Pretraining on images of rendered undiacritized text
+establishes a robust visual feature space (Rust et al.,
+2023) essential for modeling diacritics as visual ele-
+ments. Since undiacritized and diacritized texts share
+the same visual dimensions, we can further train our
+model on a diacritized corpus. This allows us to train
+the VLM to extract distinct embeddings for each can-
+didate (Ye et al., 2021) and investigate its potential to
+differentiate subtle diacritization patterns through visual
+representations. This differentiation is refined through a
+scoring mechanism, where the likelihood of each can-
+didate is determined by an inner product with the con-
+textual embedding, a method well-suited for measuring
+alignment in high-dimensional spaces. The model’s
+success in selecting the best candidate directly reflects
+its ability to learn the underlying patterns and logic of
+diacritization, aligning with the principles of zero-shot
+learning where the model generalizes to unseen classes
+based on learned representations.
+
+While our system does not yet surpass Nakdimon’s
+reported word-level accuracy of 89.75% in all scenarios,
+initial results demonstrate the promise of our approach.
+In an “oracle” setting, where the correct diacritization
+pattern is guaranteed to be within the model’s candi-
+date set, our model achieves word-level accuracy of
+92.68%, highlighting its robust ability to assign high
+
+scores to correct candidates when they are present. In
+a more confined setting using a KNN-based candidate
+generator operating by character sequence alignment,
+the system reaches 87.87% accuracy. Although slightly
+below current benchmarks, this still reflects competitive
+performance. This sets the bar for visual models per-
+forming diacritization at the word level operating in a
+zero-shot learning framework, selecting from full-form
+candidates rather than predicting individual diacritics.
+These results suggest that further improvements in can-
+didate generation and training methodologies can signif-
+icantly enhance its practical effectiveness. Furthermore,
+DIVRIT is the first visual model to perform a candidate-
+ranking task since these models have been introduced
+for NLP (Salesky et al., 2021). We expect its reliance
+on visual representations to add diacritics to outperform
+previous methods especially in the environments iden-
+tified as strong suits of PIXEL models, such as data
+noised by typographical errors and adversarial character
+swapping, raw visual inputs that avoid OCR pipelines,
+and more.!
+
+2 Related Work
+
+Hebrew diacritization has evolved significantly with the
+advent of neural-based models. Nakdan, current state-
+of-the-art neural network system from Dicta (Shmidman
+et al., 2020), implements a hybrid approach, combin-
+ing deep-learning modules with manually constructed
+tables, linguistic knowledge, and dictionaries. This
+knowledge-intensive strategy demonstrates the effec-
+tiveness of leveraging linguistic expertise. However,
+the system’s dependency on language-specific rules and
+resources comes at the expense of its generalizability,
+flexibility, and high investment in linguistic engineering.
+
+Nakdimon (Gershuni and Pinter, 2022) represents
+a shift towards a purely data-driven approach. It uti-
+lizes a streamlined character-level Bi-LSTM network,
+trained directly on a diacritized Hebrew corpus, an ap-
+proach also shown effective for morphologically similar
+languages such as Arabic (Belinkov and Glass, 2015).
+Predicting diacritics at the character level, the system
+achieved competitive results, with significantly reduced
+complexity and enhanced generalizability. The results
+suggest that even without explicit linguistic knowledge,
+a well-trained deep learning model can effectively learn
+diacritization patterns, paving the way for further pure
+deep learning solutions.
+
+MenakBERT (Cohen et al., 2024) advances this direc-
+tion by employing a character-level transformer-based
+model, pretrained on a large Hebrew corpus and fine-
+tuned on diacritized texts. In contrast to Nakdimon,
+which trains directly on diacritized data and achieves
+similar results with both LSTM and transformer-based
+models trained from scratch (Klyshinsky et al., 2021),
+MenakBERT’s pretraining strategy, leveraging contex-
+tual embeddings and transfer learning, yields superior
+performance.
+
+We will release our data and code upon publication.
+
+
+===== PAGE BREAK =====
+
+Our method is general and flexible, being fully inde-
+pendent of language-specific resources and applicable
+in diverse linguistic settings. Additionally, inspired by
+ZSL principles (Socher et al., 2013), for each word, it
+generates a relatively small set of diacritization candi-
+dates specific to that word. While this strategy is similar
+in principle to Nakdan, we opt for a completely data-
+driven approach for candidate generation.
+
+Zero-shot learning (ZSL) has played a significant
+role in the advancement of NLP, with large-scale lan-
+guage models like GPT-3 demonstrating notable per-
+formance across diverse tasks without task-specific
+training (Brown et al., 2020). Specifically, zero-shot
+classification leverages the representations learned by
+pretrained models to classify categories not encoun-
+tered during training (Yin et al., 2019). Works like
+CLIP (Radford et al., 2021) and ALIGN (Li et al., 2021)
+have demonstrated the effectiveness of using vision
+and language models for ZSL classification. ViTs ex-
+tend the transformer architecture to computer vision,
+offering an alternative to conventional convolutional
+approaches (He et al., 2022) and demonstrating effec-
+tiveness across a range of vision tasks, showcasing their
+versatility (Zhou et al., 2023; Sick et al., 2025; Ren and
+Wang, 2025). Beyond core vision tasks, ViTs have been
+applied to visually-grounded NLP problems (Boren-
+stein et al., 2023; Tai et al., 2024), demonstrating ro-
+bustness in handling dialects and non-standard language
+forms (Mufioz-Ortiz et al., 2025).
+
+Adhering to the zero-shot paradigm for diacritization,
+we use a ViT to process the visual input of the candi-
+dates. For our VLM, we pretrained and employed a
+Hebrew PIXEL-based model (Rust et al., 2023), which
+utilizes the Vision Transformer Masked Autoencoder
+(ViT-MAE) architecture (He et al., 2022). PIXEL’s abil-
+ity to learn robust text representations directly from raw
+images has been demonstrated across diverse languages
+and scripts. Like in the original PIXEL architecture, our
+HEBREW-PIXEL component consists of a 12-layer ViT
+encoder and an 8-layer transformer decoder (Vaswani
+et al., 2017; Dosovitskiy et al., 2021), pretrained us-
+ing a masked image modeling objective analogous to
+BERT (Devlin et al., 2019).
+
+3 DIVRIT
+
+We present DIVRIT, a representation, model architec-
+ture and training protocol designed to leverage con-
+trastive learning principles for Hebrew diacritization.
+DIVRIT learns a shared representation space for the
+undiacritized context input and the diacritized candi-
+dates, enabling direct scoring and selection of the most
+contextually appropriate diacritic sequence.
+
+3.1 Architecture
+
+Our processing pipeline integrates a visual candidate
+encoder, based on the PLIXEL-base model (Rust et al.,
+2023), and a context encoder (see Figure 1). This
+design allows us to process diacritization candidates,
+
+which are initially generated for the input undiacritized
+word (§3.3). Each of these candidates is then rendered
+as an image and processed by the candidate encoder,
+generating candidate-specific embeddings that are sub-
+sequently used for scoring. Scoring is computed by
+comparing these candidate embeddings against a con-
+textual embedding of the undiacritized word, extracted
+by the context encoder which may have visual and/or
+textual components. Since the encoders may produce
+multiple embeddings for a single word, either due to
+their window size limitations in the visual modality or
+due to subword tokenization in textual encoders , we
+aggregate such cases into a single vector per item to
+enable simple scoring via inner product between the
+contextual word and each candidate embedding. In all
+cases, we apply mean pooling to ensure a unified repre-
+sentation, preserving information from the entire input
+span (Reimers and Gurevych, 2019). To enable direct
+comparison, both candidate and contextual embeddings
+are projected to a shared embedding space of identical
+dimensionality. In our experiments, we explored vari-
+ous architectural configurations to encourage the model
+to develop a more nuanced and effective representation
+and prediction space of diacritics.
+
+3.2. Training the Hebrew PIXEL Model
+
+To generate visual embeddings for the candidates, we
+pretrained a Hebrew PIXEL-based language model us-
+ing a masked image modeling objective, as in the orig-
+inal PIXEL. This pretraining was conducted on a cor-
+pus consisting of approximately 1.9GB of text from
+the Hebrew Wikipedia dataset and 9.8GB from the He-
+brew section of the OSCAR dataset (Ortiz Suarez et al.,
+2019). We filtered out examples with fewer than 30
+characters, to minimize the impact of potentially noisy
+or incomplete text. The model was trained for 2M steps
+with a total batch size of 128 across four 48GB Nvidia
+RTX6000 GPUs, ensuring a comparable scale of pre-
+training to the original PIXEL-base model. Due to the
+right-to-left nature of the Hebrew script, all text images
+were horizontally mirrored at the full instance level.
+This practice maintains script orientation alongside nu-
+merical sequences and interspersed left-to-right text.
+By operating on images, PIXEL naturally handles
+out-of-vocabulary words (OOVs) and bypasses the need
+for explicit vocabulary allocation. This vocabulary-free
+nature is particularly advantageous in the context of
+diacritization, as creating a vocabulary of diacritized to-
+kens would likely result in an unwieldy and semantically
+weak set of short, less-meaningful sequences. Unlike
+such token-based approaches, PIXEL learns diacritics
+directly from visual patterns in the images, preserving
+word integrity and potentially allowing the model to
+learn diacritic patterns as cohesive units. To further
+boost the model’s ability to learn diacritization patterns
+at the visual level, we conducted an additional pretrain-
+ing phase on images of diacritized Hebrew text. This
+phase continued the masked image modeling objective,
+but we reduced the masking ratio from 0.25 to 0.1 for
+
+
+===== PAGE BREAK =====
+
+anon            aanVn }
+
+anon }
+
+KNN                        Extract ||__, ‘S3non
+| SSE
+
+Word       <M onvn
+
+Retrieval       S  sanon
+t
+
+pnon ——
+
+anon —>
+
+—{
+
+Sonon —— { danvn }
+— { oy }
+—t{
+
+dann }
+
+spnvn }
+
+{ pap
+k feature
+
+vector
+
+Figure 2: KNN-based candidate generator. The figure il-
+lustrates an example of the algorithm on a specific OOV
+word (& = 5,c = 2). Similar diacritization patterns are
+colored with the same color, and the output candidate
+set shows each pattern applied to the input word. The
+green pattern is then removed to yield a c-sized candi-
+date set.
+
+patch sequence completion. This adjustment (Ye et al.,
+2021) aims to simplify Hebrew character prediction, in-
+tending to improve the model’s capacity for restoring di-
+acritics. The data for this phase was taken by the training
+dataset curated by Gershuni and Pinter (2022), compris-
+ing approximately 3.4M tokens of originally-diacritized
+Hebrew text sourced from modern Hebrew and pre-
+modern Hebrew, as well as automatically-diacritized
+texts collected without manual validation. This data was
+also used for supervised training of the diacritization
+task itself.
+
+3.3 Candidate Generation
+
+While the other diacritizers utilize model embeddings
+to directly predict or refine diacritization, our approach
+distinguishes itself by incorporating a candidate gen-
+eration mechanism. Dicta’s Nakdan utilizes learned
+representations and human-curated linguistic resources
+to identify and refine a set of plausible diacritizations,
+whereas Nakdimon and MenakBERT employ a min-
+imalist, neural-only character-by-character prediction
+approach that allows them to generate any potential dia-
+critization sequence. In contrast, we first generate can-
+didates for each word using a corpus-driven mechanism,
+and subsequently employ our architecture to score and
+select the most contextually-appropriate option from
+this generated set.
+
+To generate a set of candidates, we employ a straight-
+forward and efficient component based on the k-nearest
+neighbors (KNN) algorithm (Figure 2). This algorithm
+identifies a specified number of similar words from the
+training data and then compiles a candidate set whose
+size is capped at a maximum value. The KNN algorithm
+is configured with a parameter & to determine the num-
+ber of similar words considered, and c which defines the
+maximal size of the returned candidate set. The process
+involves an initial step of mapping each undiacritized
+form present in the diacritized corpus to a frequency-
+sorted list of its observed diacritization patterns. Given
+an undiacritized input word w, the generator uses KNN
+to find the top k most similar words (in their undia-
+critized form) in the corpus that are of the same length
+|w|. Similarity is computed based on character-level
+matching at fixed positions, following established string
+
+KNN-based Candidates Generator Recall
+
+0.96 4
+
+0.95 4
+
+0.94 4
+
+0.93 4
+
+0.92 4
+
+0.91
+
+Coverage rate
+
+0.90 4
+
+0.89 +
+
+0.88 4
+
+0.87 4
+
+1       2       3       4       5       6       7       8
+Num. of candidates
+Figure 3: Coverage rate per candidate set size, i.e. the
+
+fraction of times the correct candidate appears in the
+KNN- generated set of each size.
+
+similarity techniques that account for both edit distance
+and positional alignment (Levenshtein, 1966; Yujian
+and Bo, 2007) and leveraging the root-template mor-
+phological characteristics of Semitic languages. Next,
+the generation algorithm combines the frequency-sorted
+pattern lists of these neighbors, preserving the order.
+Subsequently, the generator applies each of these dia-
+critical patterns to the input word while removing repe-
+titions, creating a set of candidates, and returns the top
+c candidates.
+
+Our candidate generator serves a dual purpose, acting
+both as a training aid and as a practical component in
+real-world applications. To evaluate its potential in the
+latter setting, we investigated the influence of candidate
+set size on performance. The coverage rate, also referred
+to as recall, is defined as the proportion of test words
+for which the correct diacritization appears among the
+candidates generated by our KNN-based method. As
+expected, larger candidate sets improve coverage but
+also increase the potential for error. Figure 3 illustrates
+this trade-off, exhibiting an elbow-shaped curve that
+suggests a candidate set size between three and four
+would strike a favorable balance.
+
+4 Experiments
+
+We evaluate our system’s performance by comparing it
+against Dicta, Nakdimon, and MenakBERT. Given our
+data-driven methodology, the comparisons with Nakdi-
+mon and MenakBERT, which also employ data-driven
+approaches, are particularly relevant and provide in-
+sight for understanding our system’s strengths and weak-
+nesses.
+
+We assess our system over a test set comprised of
+20K tokens collected from various Modern Hebrew
+sources (Gershuni and Pinter, 2022) using four stan-
+dard metrics: word-level accuracy (WOR), character-
+level accuracy (CHA), diacritic-level decision accuracy
+(DEC) and word-level vocalization preservation (VOC).
+
+
+===== PAGE BREAK =====
+
+System                             DEC CHA WOR’ VOC
+MAJORITY BASELINE 93.79 90.01 84.87 86.19
+KNN BASELINE          96.20 94.09 87.09 87.39
+NAKDIMON                     97.91 96.37 89.75 91.64
+MENAKBERT              98.82 97.95 94.12 95.22
+DIVRIT (Oracle)          98.36 97.42 92.68 94.69
+DIVRIT (KNN-based) 96.85 95.03 87.87 90.38
+DICTA                             98.94 98.23 95.83 95.93
+
+Table 1: Performance comparison of Hebrew diacritization systems. Results are presented on the test set in three
+categories: baselines, purely data-driven systems, and systems powered by manually-curated linguistic knowledge.
+DIVRIT variants operate over two candidates. All results in all tables are over a single run.
+
+DEC evaluates the correctness of individual diacritical
+decisions, which may be more fine-grained than the
+character level: in addition to vowel marks, most char-
+acters may also carry a central dot (dagesh) that has
+morphological and phonetic implications, and one letter
+must be marked by a distinguishing dot to denote a shin
+pronunciation from a sin. VOC measures word-level
+vocalization preservation, remaining agnostic to several
+redundancies in vowel representations for modern pro-
+nunciation (e.g., the a sound is marked by three distinct
+vowel diacritics).
+
+In addition to comparison against existing diacritiza-
+tion packages, we implement two baselines: the first
+is a majority class prediction baseline, determined by
+the most frequent diacritization pattern for each undia-
+critized word in the training dataset, equivocating if it
+does not appear there (which counts as an incorrect pre-
+diction). The second baseline is obtained by using the
+KNN-based candidate generation to produce a single-
+candidate set per input word (k = 1). This serves as
+a majority baseline with robustness to OOV words by
+assigning the most frequent diacritization of the closest
+in-vocabulary word. Despite being more sophisticated,
+this KNN-based baseline uses no parameterized learn-
+ing and no context, providing a better reference point
+for interpreting the effectiveness of the different models’
+learning and contextual understanding.
+
+4.1 Experimental Setup
+
+We evaluate DIVRIT’s performance across several dis-
+tinct experimental setups, each designed to probe dif-
+ferent architectural choices and training methodologies.
+Each of these setups leverages a pretrained candidate
+encoder alongside a context encoder to generate dia-
+critized output. The candidate encoder, based on the
+PIXEL-BASE model (Rust et al., 2023), is responsi-
+ble for processing each diacritization candidate. The
+context encoder provides a contextual embedding of
+the undiacritized word. To determine the optimal con-
+figuration for these components, we conducted several
+preliminary evaluations.
+
+To explore the role of the context encoder in our archi-
+tecture, we tested two encoder variants: first, we used
+
+an additional instance of the Hebrew PIXEL model as
+the context encoder, creating a fully vision-based archi-
+tecture. In this setup it is possible to uniquely align the
+representation space across both candidate and context
+inputs, mapping them into a common embedding space,
+a concept used in models like CLIP. This design entirely
+bypasses reliance on subword tokenization, a process
+known to be ill-fitted for nonconcatenative languages
+like Hebrew (Gazit et al., 2025). In an initial evaluation
+of this setup, where the candidate encoder was trained di-
+rectly on the classification task without prior diacritized
+pretraining, we observed no discernible learning. This
+was evidenced by the model’s stagnant 50% accuracy
+in two-candidate selection and near-identical scoring
+of pairs, strongly suggesting a failure to attend to dia-
+critic patterns. Furthermore, even after optimizing the
+candidate encoder’s pretraining (as detailed below), per-
+formance with the fully vision-based context encoder
+plateaued below 80% word-level accuracy over two can-
+didates.
+
+To overcome these limitations in both candidate and
+context encoding, we developed a second variant of
+the model, where the context encoder is instantiated
+by a text-based ALEPHBERTGIMMEL-SMALL Hebrew
+language model (Gueta et al., 2023), and the visual
+candidate encoder is employed following additional pre-
+training. We found that pretraining the candidate en-
+coder on unmasking diacritized images for an additional
+200K steps yielded the best performance gain, presum-
+ably because it helps the model learn diacritic patterns
+and establish more robust diacritic representations. The
+200K-step pretraining proved optimal, as increasing it to
+400K steps provided a slight degradation of 0.3 percent-
+age points in word-level accuracy. Consequently, for all
+our main experiments, we chose to utilize this 200K-step
+pretraining for the candidate encoder, and the context
+encoder was instantiated by the ALEPHBERTGIMMEL-
+SMALL model, which demonstrated superior contextual
+understanding compared to the vision-based alternative.
+Following these architectural and pretraining selections,
+the full DIVRIT architecture was trained for an addi-
+tional 240K steps on the classification objective using
+multiclass cross-entropy loss, with each step batching
+
+
+===== PAGE BREAK =====
+
+Experiment Setup                         FT Steps (K) DEC CHA WOR VOC
+Basic                                                                140             97.91 96.68 90.54 93.74
+Extended Finetuning                                240           98.17 97.08 91.45 94.38
+Auxiliary Bag-of-diacritics                            140             98.16 97.05 91.41 94.44
+Auxiliary Pos. Encoding                     140         97.62 96.23 89.17 92.67
+Balanced Data                                                140             97.30 95.65 86.00 91.78
+RTL images + Extended Finetuning          240          97.59 96.15 88.60 92.30
+
+Table 2: Performance across various experimental setups, evaluated on the development set for two-candidate
+
+selection.
+Experiment Setup                         FT Steps(K) DEC CHA WOR VOC
+Basic                                                     140           94.24 90.79 73.55 82.19
+Extended Finetuning                                             240               94.48 91.21 74.16 82.51
+Auxiliary Bag-of-diacritics                            140             94.15 90.82 71.49 79.49
+Auxiliary Pos. Encoding                          140          94.74 91.68 76.56 83.24
+Balanced Data                                     140          93.41 89.60 67.25 78.10
+RTL Images + Extended Finetuning          240          96.64 94.67 84.93 89.39
+
+Table 3: Three-candidate selection results.
+
+32 examples across two GPUs.
+
+To address potential imbalances in the frequency of
+different words in the training data, the sampling of un-
+diacritized words for training iterations was based on a
+normalized ratio determined by the function f (freq) =
+freq?’”, where freq represents the frequency of that
+word in the training data, and the exponent value is
+inspired by seminal findings regarding context sam-
+pling (Mikolov et al., 2013; Levy et al., 2015). All
+model hyperparameter values and training regimes were
+taken as the defaults from the cited models. For the
+PIXEL model, We used the PangoCairo renderer, and
+the Noto Sans Hebrew font from the Google Noto Sans
+fonts font collection. We pre-processed the data to be
+chunked into sentences following a ‘.’ character or after
+the first line break following 200 characters.
+
+4.2 Results
+
+We evaluated our system under two primary evaluation
+schemes. In the Oracle setting, the correct diacritization
+was guaranteed to appear among the provided candi-
+dates, thereby isolating evaluation of the model’s ability
+to distinguish among valid alternatives based on context
+from the abilities of our (fairly naive) candidate genera-
+tor, which was used to fill the candidate set to size k. In
+contrast, in the KNN-based setting candidates were gen-
+erated using the nearest-neighbor search described in
+the previous section, without ensuring inclusion of the
+gold label. This setting reflects the real-world inference
+scenario and tests the system’s robustness to imperfect
+candidate generation. Importantly, while the candidate
+generation algorithm proved beneficial for training, our
+system’s modularity allows for its replacement with
+other candidate generation mechanisms.
+
+Table | presents the evaluation results for DIVRIT’s
+
+best setup, as detailed in Section 4.1, alongside those of
+the other methods. DIVRIT operates well among the
+ranks of similarly data-driven systems. Moreover, both
+evaluation variants pass both baselines on all metrics,
+indicating the potential of visual representations for in-
+forming Hebrew diacritics. The Oracle setup greatly
+outperforms NAKDIMON, especially on word-level met-
+rics, and is on par with MENAKBERT at the character-
+level metrics. Surprisingly, despite its reliance on in-
+dividual character segmentation for in-word represen-
+tation, MENAKBERT excels on word-level metrics in
+our evaluation.” Finally, the gap between the two setups
+highlights the room left to cover by improving candidate
+generation, which is our top priority for future work.
+
+4.3 System Component Analysis
+
+To understand the contribution of each component to
+our best-performing setup, we conducted a series of
+ablation studies over the development set provided by
+Gershuni and Pinter (2022). These involved systemat-
+ically removing or modifying key parts of the training
+pipeline described in Section 4.1. The results for two-
+candidate KNN selection are presented in Table 2, and
+for three-candidate selection in Table 3.
+
+Number of Candidates Comparing the overall per-
+setup numbers in Table 2 with those in Table 3, it is
+clear that in the current setup, the increase in coverage
+of correct diacritic combinations afforded by the extra
+neighbor added to the candidate set (see Figure 3) does
+not offset the deficiencies in the system’s scoring mech-
+anism. While attempts to improve candidate generation
+
+We note that we did not implement either of the two data-
+driven character-level prediction systems and are relying on
+their own reporting.
+
+
+===== PAGE BREAK =====
+
+are key to DIVRIT’s performance, increasing the num-
+ber of candidates appears to be detrimental or at least
+insufficient.
+
+Finetuning Duration The duration of finetuning sig-
+nificantly impacted the model’s ability to select the cor-
+rect candidate, though its effect varied across different
+experimental configurations. For our primary config-
+uration, which we call Basic, our initial finetuning of
+140K steps achieved 90.54% word-level accuracy when
+choosing between two candidates. Extending this to
+240K steps further improved accuracy to 91.45% in the
+same two-candidate scenario.
+
+However, even with these gains from longer fine-
+tuning, we found the model’s performance remained
+sensitive to the total number of candidates presented.
+While longer finetuning provided benefits, the improve-
+ment was modest as the number of candidates increased.
+When selecting from three candidates, accuracy only im-
+proved from 73.55% to 74.16%, even with the extended
+finetuning. This limited generalization capability sug-
+gests the model might be learning diacritization patterns
+in a rather loose or context-dependent way, rather than
+acquiring a robust understanding of the underlying dia-
+critization principles.
+
+Auxiliary Tasks Building upon the Basic setup, we
+explored the incorporation of an auxiliary task to further
+enhance performance. In this setup, our primary task
+remained the prediction of the correct diacritization, us-
+ing a cross-entropy loss. To improve the discriminative
+representation of diacritics in the output embeddings
+for the diacritization candidates from the VLM, we aug-
+mented our cross-entropy loss with a secondary loss
+term derived from an auxiliary task, namely, prediction
+of the bag of diacritics present in an input image.
+
+The final loss was computed as the sum of the pri-
+mary diacritization loss and a bag-of-diacritics binary
+prediction loss, which was normalized by the number of
+candidates and weighted to ensure it did not outweigh
+the contrastive component:
+
+L(w,C, ce) = CELoss (P(c|w), one_hot(cet)) +
+
+Neands
+0.5                                                                                                 (1)
+N                    BCELoss (Yyaiac (Ci), Yrarget_diac (Cz) 5
+cands    i=l
+
+where w is the input undiacritized word, C’ is the
+set Of Neands diacritized candidates for w, and Cg
+is the ground truth candidate. Yydiac(c;) represents
+the predicted bag of diacritics for candidate c;, and
+Ytarget_diac (Ci) represents the target bag of diacritics for
+candidate c;.
+
+While the Bag-of-Diacritics auxiliary task led to a
+slight improvement in two-candidate selection accu-
+racy, from 90.54% to 91.41%, and faster convergence,
+it did not achieve the intended generalization. This was
+demonstrated by a decline in performance when select-
+ing from three candidates, where accuracy decreased
+from 73.55% to 71.49% with its introduction.
+
+However, longer finetuning does not always guar-
+antee improved performance, so the exact finetuning
+steps for each setup are detailed in the tables. In this
+auxiliary task setup, extending the duration to 240K
+steps significantly decreased accuracy to 82.45% for
+two-candidate selection and 63.19% for three-candidate
+selection. This suggests that while auxiliary tasks might
+guide the model towards certain beneficial representa-
+tions, they can also impose constraints on the flexibility
+of the embedding space. Consequently, we shifted our
+auxiliary task to predict both the diacritics themselves
+and their corresponding positions within the image em-
+beddings, hypothesizing that this Auxiliary Pos. Encod-
+ing setup would embed more detailed information about
+the diacritic patterns. Its performance for two-candidate
+selection was 89.17%, a slight decrease compared to
+both the Basic setup and the Bag-of-Diacritics auxiliary
+task. However, for three-candidate selection, this setup
+achieved 76.56% accuracy. This represents a notable
+improvement in generalization compared to both those
+setups, demonstrating that a better representation of the
+diacritics can indeed lead to better generalization of
+diacritical patterns.
+
+Balanced Data To investigate the impact of potential
+bias towards the most frequent diacritization, we intro-
+duced a Balanced Data training setup as an alternative
+to our standard frequency-based sampling. This setup
+capped the effective training frequency of the most com-
+mon diacritization pattern for each word. Specifically,
+its frequency was limited to be no more than the com-
+bined frequency of all its alternative diacritization pat-
+terns (i.e., 50% of all occurrences). This ensures a more
+equitable representation of all forms during training,
+preventing the model from disproportionately learning
+the most frequent pattern and thereby allowing rarer
+alternatives to be adequately learned and distinguished.
+However, this approach did not yield any performance
+improvements. For two-candidate selection, the model
+achieved only 86.0% accuracy, and for three-candidate
+selection, performance dropped to 67.25% accuracy.
+This degradation suggests that artificially manipulating
+the frequency distribution of diacritic patterns might
+have disrupted the model’s ability to effectively lever-
+age contextual information provided by the context en-
+coder. This could occur by hindering its capacity to
+learn the more nuanced and naturally-occurring relation-
+ships between words and their diacritizations, which are
+typically reflected in a natural frequency hierarchy.
+
+RTL images Given that diacritics are often comprised
+of simpler, symmetric components (dots, horizontal and
+vertical lines) compared to the more complex shape
+of Hebrew letters, mirroring the candidate images in
+our RTL Images setup was hypothesized to provide a
+superior initial visual representation for them, thereby
+emphasizing diacritic features to impact model perfor-
+mance. while for two-candidate selection this variant
+achieved an accuracy of 88.60%, for the more chal-
+lenging three-candidate selection it demonstrated a no-
+
+
+===== PAGE BREAK =====
+
+ticeably improved generalization, reaching an impres-
+sive 84.93% accuracy. This distinctive performance can
+be explained by the way vision models process input.
+While they generally prioritize larger visual features,
+the mirroring applied to the images in this setup might
+have enhanced the distinctiveness of the relatively sim-
+pler, symmetric diacritic components compared to the
+more complex Hebrew letters. Thus, on one hand, this
+processing could significantly enhance the model’s abil-
+ity to distinguish diacritics, but on the other hand, it
+might simultaneously lead to a loss of holistic infor-
+mation about the full Hebrew words. This suggests a
+nuanced trade-off between emphasizing fine-grained
+diacritic features and preserving comprehensive word
+representation within image-based encoding.
+
+5 Conclusion
+
+We presented DIVRIT, a novel approach for Hebrew
+diacritization that effectively combines visual language
+models with contextual embeddings. Our system ad-
+dresses diacritization as a candidate selection problem,
+where we directly score and select the correct diacritized
+word from a set of alternatives by analyzing combined
+image and contextual embeddings, unlike other ap-
+proaches that rely on embeddings for subsequent de-
+coding or sequential prediction. This approach, the first
+of its kind for visual text processing models, combines
+information from PIXEL for image-based diacritic can-
+didate understanding and from ALEPHBERTGIMMEL
+for contextual cues, demonstrating robust performance,
+particularly in the Oracle mode, as well as benefits from
+adding a contrastive learning objective.
+
+Adapting the VLM to the specific task by pretraining
+it on diacritized text images proved beneficial, enhanc-
+ing the representation of diacritics in the candidate en-
+coder. Through a series of detailed ablation studies, we
+elucidated the crucial factors contributing to effective
+diacritization. We found that finetuning duration signifi-
+cantly impacts performance, with 240K steps proving
+optimal for our primary setup. Our exploration of auxil-
+iary tasks showed that while this technique could lead
+to improved generalization through more informative
+embeddings, it also presented challenges that hindered
+overall performance, underscoring the complexities of
+multi-task learning.
+
+Future work will focus on developing better candidate
+generation algorithms, aiming to extend the model’s
+ability to utilize its discriminative capacities. We will
+also further refine the integration of visual and contex-
+tual information, building on the promising evidence
+from our RTL images experiment that better general-
+ization is indeed achievable. To examine the utility of
+ViTs for diacritization more comprehensively, we also
+aim to apply this methodology to other diacritics-rich
+languages such as Arabic and Vietnamese, including the
+potential for sourcing diacritics from various types of
+data (Elgamal et al., 2024) and incorporating even more
+modalities in the system (Shatnawi et al., 2024).
+
+Acknowledgements
+
+This research was supported by grant no. 2022215 from
+the United States—Israel Binational Science Foundation
+(BSF), Jerusalem, Israel.
+
+Limitations
+
+DIVRIT is a stepping-stone on the road to truly
+structure-agnostic visual diacritization, but it’s not quite
+there yet. It still relies on a data-driven candidate genera-
+tion method, and the best context encoder formation we
+found is still text-based. Being developed over the He-
+brew diacritization task, application to other languages
+may prove nontrivial, for example given Arabic’s mul-
+tiple representations for individual characters. This is
+not an issue for Unicode-based encodings (which treat
+all forms of a character as the same) and is not a se-
+rious issue for visual Hebrew, where only five letters
+exhibit a mild form of this behavior. Finally, we note
+that our experiments were performed over a modest
+setup limited by access to GPUs. Given more resources,
+we might have been able to achieve better performance
+with a larger architecture for both encoder models, with
+a longer pre-training process, and with more runs that
+allow comprehensive hyperparameter tuning.
+
+References
+
+Yonatan Belinkov and James Glass. 2015. Arabic di-
+acritization with recurrent neural networks. In Pro-
+ceedings of the 2015 Conference on Empirical Meth-
+ods in Natural Language Processing, pages 2281-
+2285, Lisbon, Portugal. Association for Computa-
+tional Linguistics.
+
+Nadav Borenstein, Phillip Rust, Desmond Elliott, and Is-
+abelle Augenstein. 2023. PHD: Pixel-based language
+modeling of historical documents. In Proceedings of
+the 2023 Conference on Empirical Methods in Natu-
+ral Language Processing, pages 87-107, Singapore.
+Association for Computational Linguistics.
+
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+Gretchen Krueger, Tom Henighan, Rewon Child,
+Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens
+Winter, and 12 others. 2020. Language models are
+few-shot learners. In Advances in Neural Information
+Processing Systems, volume 33, pages 1877-1901.
+Curran Associates, Inc.
+
+Wei-Rui Chen, Ife Adebara, and Muhammad Abdul-
+Mageed. 2024. Interplay of machine translation, dia-
+critics, and diacritization. In Proceedings of the 2024
+Conference of the North American Chapter of the
+Association for Computational Linguistics: Human
+Language Technologies (Volume 1: Long Papers),
+pages 7559-7601, Mexico City, Mexico. Association
+for Computational Linguistics.
+
+
+===== PAGE BREAK =====
+
+Ido Cohen, Jacob Gidron, and Idan Pinto. 2024.
+Menakbert — hebrew diacriticizer. arXiv preprint
+arXiv:2410.02417.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. BERT: Pre-training of
+deep bidirectional transformers for language under-
+standing. In Proceedings of the 2019 Conference of
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies, Volume 1 (Long and Short Papers), pages
+4171-4186, Minneapolis, Minnesota. Association for
+Computational Linguistics.
+
+Alexey Dosovitskiy, Lucas Beyer, Alexander
+Kolesnikov, Dirk Weissenborn, Xiaohua Zhai,
+Thomas Unterthiner, Mostafa Dehghani, Matthias
+Minderer, Georg Heigold, Sylvain Gelly, Jakob
+Uszkoreit, and Neil Houlsby. 2021. An image
+is worth 16x16 words: Transformers for image
+recognition at scale. Preprint, arXiv:2010.11929.
+
+Salman Elgamal, Ossama Obeid, Mhd Kabbani, Go In-
+oue, and Nizar Habash. 2024. Arabic diacritics in the
+wild: Exploiting opportunities for improved diacriti-
+zation. In Proceedings of the 62nd Annual Meeting
+of the Association for Computational Linguistics (Vol-
+ume 1; Long Papers), pages 14815-14829, Bangkok,
+Thailand. Association for Computational Linguistics.
+
+Bar Gazit, Shaltiel Samidman, Avi Shmidman, and Yu-
+val Pinter. 2025. Splintering nonconcatenative lan-
+guages for better tokenization. In Findings of the As-
+sociation for Computational Linguistics: ACL 2025,
+pages 22405-22417, Vienna, Austria. Association for
+Computational Linguistics.
+
+Elazar Gershuni and Yuval Pinter. 2022. Restoring
+Hebrew diacritics without a dictionary. In Find-
+ings of the Association for Computational Linguis-
+tics: NAACL 2022, pages 1010-1018, Seattle, United
+States. Association for Computational Linguistics.
+
+Kyle Gorman and Yuval Pinter. 2025. Don‘t touch my
+diacritics. In Proceedings of the 2025 Conference
+of the Nations of the Americas Chapter of the Asso-
+ciation for Computational Linguistics: Human Lan-
+guage Technologies (Volume 2: Short Papers), pages
+285-291, Albuquerque, New Mexico. Association for
+Computational Linguistics.
+
+Eylon Gueta, Avi Shmidman, Shaltiel Shmidman,
+Cheyn Shmuel Shmidman, Joshua Guedalia, Moshe
+Koppel, Dan Bareket, Amit Seker, and Reut Tsarfaty.
+2023. Large pre-trained models with extra-large vo-
+cabularies: A contrastive analysis of hebrew bert mod-
+els and a new one to outperform them all. Preprint,
+arXiv:2211.15199.
+
+Kaiming He, Xinlei Chen, Saining Xie, Yanghao Li, Pi-
+otr Dollar, and Ross Girshick. 2022. Masked autoen-
+coders are scalable vision learners. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 16000-16009.
+
+Edward Klyshinsky, Olga Karpik, and Alexander Bon-
+darenko. 2021. A comparison of neural networks ar-
+chitectures for diacritics restoration. In Recent Trends
+in Analysis of Images, Social Networks and Texts,
+pages 235-245. Springer.
+
+Vladimir I. Levenshtein. 1966. Binary codes capable of
+correcting deletions, insertions, and reversals. Soviet
+Physics Doklady, 10(8):707—710.
+
+Omer Levy, Yoav Goldberg, and Ido Dagan. 2015. Im-
+proving distributional similarity with lessons learned
+from word embeddings. Transactions of the Associa-
+tion for Computational Linguistics, 3:211—225.
+
+Junnan Li, Ramprasaath Selvaraju, Akhilesh Gotmare,
+Shafiq Joty, Caiming Xiong, and Steven Chu Hong
+Hoi. 2021. Align before fuse: Vision and language
+representation learning with momentum distillation.
+In Advances in Neural Information Processing Sys-
+tems, volume 34, pages 9694-9705. Curran Asso-
+ciates, Inc.
+
+Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg S Cor-
+rado, and Jeff Dean. 2013. Distributed representa-
+tions of words and phrases and their compositionality.
+In Advances in Neural Information Processing Sys-
+tems, volume 26. Curran Associates, Inc.
+
+Alberto Mufioz-Ortiz, Verena Blaschke, and Barbara
+Plank. 2025. Evaluating pixel language models on
+non-standardized languages. In Proceedings of the
+31st International Conference on Computational Lin-
+guistics, pages 6412-6419, Abu Dhabi, UAE. Asso-
+ciation for Computational Linguistics.
+
+Jakub Naplava, Milan Straka, and Jana Strakova. 2021.
+Diacritics restoration using bert with analysis on
+czech language. Prague Bulletin of Mathematical
+Linguistics, 116(1):27-42.
+
+Pedro Javier Ortiz Suarez, Benoit Sagot, and Laurent
+Romary. 2019. Asynchronous pipelines for process-
+ing huge corpora on medium to low resource in-
+frastructures. In Proceedings of the Workshop on
+Challenges in the Management of Large Corpora
+(CMLC-7), pages 9-16, Cardiff, UK. Leibniz-Institut
+fiir Deutsche Sprache.
+
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sas-
+try, Amanda Askell, Pamela Mishkin, Jack Clark,
+Gretchen Krueger, and Ilya Sutskever. 2021. Learn-
+ing transferable visual models from natural language
+supervision. In Proceedings of the 38th International
+Conference on Machine Learning, volume 139 of
+Proceedings of Machine Learning Research, pages
+8748-8763. PMLR.
+
+Nils Reimers and Iryna Gurevych. 2019. Sentence-
+BERT: Sentence embeddings using Siamese BERT-
+networks. In Proceedings of the 2019 Conference on
+Empirical Methods in Natural Language Processing
+and the 9th International Joint Conference on Natu-
+ral Language Processing (EMNLP-IJCNLP), pages
+3982-3992, Hong Kong, China. Association for Com-
+putational Linguistics.
+
+
+===== PAGE BREAK =====
+
+Qiang Ren and Junli Wang. 2025. Irrelevant patch-
+masked autoencoders for enhancing vision transform-
+ers under limited data. Knowledge-Based Systems,
+310:112936.
+
+Phillip Rust, Jonas F. Lotz, Emanuele Bugliarello, Eliz-
+abeth Salesky, Miryam de Lhoneux, and Desmond
+Elliott. 2023. Language modelling with pixels. In
+The Eleventh International Conference on Learning
+Representations.
+
+Elizabeth Salesky, David Etter, and Matt Post. 2021.
+Robust open-vocabulary translation from visual text
+representations. In Proceedings of the 2021 Confer-
+ence on Empirical Methods in Natural Language Pro-
+cessing, pages 7235-7252, Online and Punta Cana,
+Dominican Republic. Association for Computational
+Linguistics.
+
+Sara Shatnawi, Sawsan Algahtani, and Hanan Aldar-
+maki. 2024. Automatic restoration of diacritics for
+speech data sets. In Proceedings of the 2024 Con-
+ference of the North American Chapter of the Asso-
+ciation for Computational Linguistics: Human Lan-
+guage Technologies (Volume 1: Long Papers), pages
+4166-4176, Mexico City, Mexico. Association for
+Computational Linguistics.
+
+Avi Shmidman, Shaltiel Shmidman, Moshe Koppel, and
+Yoav Goldberg. 2020. Nakdan: Professional Hebrew
+diacritizer. In Proceedings of the 58th Annual Meet-
+ing of the Association for Computational Linguistics:
+System Demonstrations, pages 197-203, Online. As-
+sociation for Computational Linguistics.
+
+Leon Sick, Dominik Engel, Pedro Hermosilla, and Timo
+Ropinski. 2025. Attention-guided masked autoen-
+coders for learning image representations. In 2025
+IEEE/CVF Winter Conference on Applications of
+Computer Vision (WACV), pages 836-846.
+
+Richard Socher, Milind Ganjoo, Christopher D Man-
+ning, and Andrew Ng. 2013. Zero-shot learning
+through cross-modal transfer. In Advances in Neural
+Information Processing Systems, volume 26. Curran
+Associates, Inc.
+
+Yintao Tai, Xiyang Liao, Alessandro Suglia, and Anto-
+nio Vergari. 2024. PIXAR: Auto-regressive language
+modeling in pixel space. In Findings of the Associa-
+tion for Computational Linguistics: ACL 2024, pages
+14673-14695, Bangkok, Thailand. Association for
+Computational Linguistics.
+
+Reut Tsarfaty, Shoval Sadde, Stav Klein, and Amit
+Seker. 2019. What‘s wrong with Hebrew NLP? and
+how to make it right. In Proceedings of the 2019
+Conference on Empirical Methods in Natural Lan-
+guage Processing and the 9th International Joint Con-
+ference on Natural Language Processing (EMNLP-
+IJCNLP): System Demonstrations, pages 259-264,
+Hong Kong, China. Association for Computational
+Linguistics.
+
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Us-
+zoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser,
+and Illia Polosukhin. 2017. Attention is all you need.
+
+In Advances in Neural Information Processing Sys-
+tems, volume 30.
+
+Yongqin Xian, Christoph H. Lampert, Bernt Schiele,
+
+and Zeynep Akata. 2019. Zero-shot learning—a com-
+prehensive evaluation of the good, the bad and the
+ugly. IEEE Transactions on Pattern Analysis and
+Machine Intelligence, 41(9):2251—2265.
+
+Qinyuan Ye, Belinda Z. Li, Sinong Wang, Benjamin
+
+Bolte, Hao Ma, Wen-tau Yih, Xiang Ren, and Madian
+Khabsa. 2021. On the influence of masking policies
+in intermediate pre-training. In Proceedings of the
+2021 Conference on Empirical Methods in Natural
+Language Processing, pages 7190-7202, Online and
+Punta Cana, Dominican Republic. Association for
+Computational Linguistics.
+
+Wenpeng Yin, Jamaal Hay, and Dan Roth. 2019. Bench-
+
+marking zero-shot text classification: Datasets, eval-
+uation and entailment approach. In Proceedings of
+the 2019 Conference on Empirical Methods in Nat-
+ural Language Processing and the 9th International
+Joint Conference on Natural Language Processing
+(EMNLP-IJCNLP), pages 3914-3923, Hong Kong,
+China. Association for Computational Linguistics.
+
+Li Yujian and Liu Bo. 2007. A normalized levenshtein
+
+distance metric. IEEE Transactions on Pattern Anal-
+ysis and Machine Intelligence, 29(6):1091-1095.
+
+Lei Zhou, Huidong Liu, Joseph Bae, Junjun He, Dim-
+
+itris Samaras, and Prateek Prasanna. 2023. Self pre-
+training with masked autoencoders for medical im-
+age classification and segmentation. In 2023 [EEE
+20th International Symposium on Biomedical Imag-
+ing (ISBI), pages 1-6.

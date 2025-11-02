@@ -1,0 +1,3423 @@
+arXiv:2510.24345v1 [cs.CL] 28 Oct 2025
+
+LongWeave: A Long-Form Generation Benchmark Bridging Real-World
+Relevance and Verifiability
+
+Zikai Xiao’, Fei Huang” , Jianhong Tu2, Jianhui Wei!, Wen Ma!, Yuxuan Zhou’,
+Jian Wu!, Bowen Yu, Zuozhu Liu’, Junyang Lin”
+
+'Zhejiang University, ?Qwen Team, Alibaba Group
+zuozhuliu@intl.zju.edu.cn, junyang.1jy@alibaba-inc.com
+
+Abstract
+
+Generating long, informative, and factual
+outputs remains a major challenge for Large
+Language Models (LLMs). Existing bench-
+marks for long-form generation typically
+assess real-world queries with hard-to-verify
+metrics or use synthetic setups that ease
+evaluation but overlook real-world intricacies.
+In this paper, we introduce LongWeave, which
+balances real-world and verifiable assessment
+with Constraint-Verifier Evaluation (CoV-Eval).
+CoV-Eval constructs tasks by first defining
+verifiable targets within real-world scenarios,
+then systematically generating corresponding
+queries, textual materials, and constraints
+based on these targets. This ensures that tasks
+are both realistic and objectively assessable,
+enabling rigorous assessment of model
+capabilities in meeting complex real-world
+constraints. LongWeave supports customizable
+input/output lengths (up to 64K/8K tokens)
+across seven distinct tasks. Evaluation on 23
+LLMs shows that even state-of-the-art models
+encounter significant challenges in long-form
+generation as real-world complexity and output
+length increase. Our codes are available at
+https://github.com/ZackZikaiXiao/LongWeave.
+
+1 Introduction
+
+Large Language Models (LLMs) have significantly
+enhanced their capabilities to process long inputs
+(Yang et al., 2024a, 2025b; Grattafiori et al., 2024;
+Team et al., 2023) through architectural design
+(Dao, 2024) and data engineering (Fu et al., 2024;
+Gao et al., 2024). However, achieving robust long-
+sequence generation remains highly challenging
+(Que et al., 2024; Bai et al., 2024b). Several re-
+search efforts have attempted to optimize LLMs
+for long-form output generation (Pham et al., 2024;
+Bai et al., 2024b; Yang et al., 2024b; Xiong et al.,
+
+*Co-first authors contribute equally to this work.
+"Work done during an internship at Qwen Team.
+“Corresponding authors.
+
+Task Categories
+ME Structured Data Analysis HM Document Processing MMMM Coding
+GE Instruction Following MMM Article Writing
+
+Suixiy epod
+
+—— Qwen2.5-72B               sse++ 03-mini              — ~~ GPT-40-1120
+—*-~ lama4-17b-maverick ——Deepseek-R1 = --*--Qwen2-5-7B
+—-- Gemini-2.0-flash           —*- Llama-3.1-70B
+
+Figure 1: The performance across the seven tasks in
+LongWeave. For better visualization, performance
+scores have been normalized to a range of 0.3 to 0.7.
+
+2025). However, the generated content often lacks
+adequate informativeness, comprehensiveness, and
+factuality (Qi et al., 2024; Pradeep et al., 2024;
+Song et al., 2024). The inherent complexity of
+long-form sequences further complicates accurate
+assessment of these qualities, highlighting the ne-
+cessity for more reliable evaluation benchmarks.
+
+Long-form generation with real-world queries is
+typically evaluated using similarity metrics (e.g., a-
+nDCG, Self-BLEU) or LLM-as-a-Judge (Bai et al.,
+2024b). While straightforward to implement, di-
+rect evaluation struggles with the inherent long-
+sequence complexity. To address this, another line
+of work breaks long-text evaluation into a set of ver-
+ifiable sub-tasks, which can include factual claims
+(e.g., a statement like "the Earth orbits the Sun")
+or aspects (e.g., completeness, logical consistency).
+Checklists are constructed through expert-curated
+
+
+===== PAGE BREAK =====
+
+Compare with a Fixed Reference
+
+Static Benchmark
+(Reference Texts,
+Fixed Q8A, etc.)
+
+1
+1
+1
+Source Material         +       Model Generation
+1
+1
+1
+Comparator
+
+Examples
+
+- Similarity Metrics (vs. Reference Text)
+
+Open-Ended Tasks
+
+~
+4    Source Material |———>| Model Generation  GS
+Human / LLM
+Q      Verifies Output
+
+Examples
+- LLM-as-a-Judge (LongWriter-Bench)
+
+Design Tasks with Built-in Verifier
+
+Material & Constraint
+1
+Model Generation
+
+Example
+- Procedural Simulation (e.g., LongProc)
+(vs. synthetic, deterministic correct trace)
+
+- LLM-Generated Checklist
+
+- Synthetic QA (vs. Fixed Answer)
+
+- Human-Made Checklist (HelloBench)
+
+e@ Unsuitable for Long Generation Evaluation
+
+e@ Subjective & Low Reliability
+
+- LongWeave - (Ours)
+(vs. Balances realism & verifiability )
+
+@ Objective, Verifiable
+
+Figure 2: Three evaluation paradigms for long-form generation. LongWeave is grounded in real-world scenarios
+and based on objective, verifiable scoring with built-in ground truth, reducing subjectivity and inconsistencies.
+
+guidelines (Tan et al., 2024; Que et al., 2024) or
+automated methods leveraging LLMs to extract
+claims from outputs for factual verification via
+search engines (Song et al., 2024; Wei et al., 2024;
+Samarinas et al., 2025) or fixed databases (Samari-
+nas et al., 2025). A critical challenge lies in op-
+timizing the degree of specificity scope: overly
+broad checklists produce vague claims that hinder
+verification, while overly detailed ones tend to over-
+complicate verification processes by attempting to
+cover all corner cases.
+
+To enhance verifiability, some approaches use
+synthetic data rather than real-world data-for in-
+stance, combining short questions from datasets
+like MMLU (Liu et al., 2024c) into longer ones,
+and then checking each segment individually.
+Other benchmarks conduct procedural simulation
+or utilize objective question-answering (QA) tasks
+where fixed answers are associated with precise
+constraints to limit the response scope (Wt et al.,
+2025; Ye et al., 2025). Though these methods sim-
+plify verification, they generally sacrifice realism
+in real-world scenarios.
+
+To bridge real-world relevance with verifiabil-
+ity, we implement decomposition at the verification
+stage through a new Constraint- Verifier Evalua-
+tion (CoV-Eval) mechanism, as illustrated in Fig-
+ure 2. Rather than extracting checklists from raw
+materials, which is error-prone and hard to control,
+CoV-Eval reverses the test construction process:
+it begins with predefined verifiable checklist ob-
+jectives (Verifiers) grounded in real-world tasks,
+then synthesizes corresponding inference queries
+(including Constraints and materials). The Con-
+straint acts as a constrained input that causally
+guides models toward generating the predefined
+Verifier, enabling measurable verification and eval-
+
+uation. Each Constraint- Verifier (CV) pair in CoV-
+Eval maintains a deterministic one-to-one relation-
+ship under structurally defined rules, systematically
+linked to source materials. CoV-Eval contains a
+series of CV pairs, where each pair is linked to
+the corresponding material. These pairs can take
+various forms, such as a question (C) and answer
+(V) in QA tasks, or a triplet (C) and corresponding
+sentence (V) in knowledge-to-text generation, as
+discussed in Section 2.3.
+
+Based on CoV-Eval, we introduce Long Weave,
+a new benchmark evaluating five challenge sce-
+narios of long-form generation through seven real-
+world relevant tasks (Figure 1). LongWeave sup-
+ports customizable input lengths (up to 64K tokens)
+and output lengths of 1K, 2K, 4K, and 8K tokens,
+with adjustable difficulty settings for each task as
+detailed in Table 1.
+
+Our evaluation of 23 LLMs on Long Weave re-
+veals critical limitations in long-form generation:
+even top models (DeepSeek-R1) reach a perfor-
+mance ceiling of 54.56%, with performance declin-
+ing for 8K-token outputs (Figure 1). Furthermore,
+models exhibit input-output disconnect; while sup-
+porting inputs up to 64K tokens, they fail to effec-
+tively synthesize inputs into coherent long-form
+responses. Expanding input context windows (e.g.,
+to 1M tokens) does not fundamentally solve long-
+generation challenges and may even degrade perfor-
+mance. Moreover, large-scale reasoning-oriented
+LLMs consistently outperform general-purpose
+counterparts, but often suffer from failure to ter-
+minate the reasoning phase, leading to truncated
+outputs. Our main contributions are:
+
+¢ We introduce the long-form generation bench-
+mark LongWeave, with CoV-Eval that
+bridges real-world relevance with verifiability.
+
+
+===== PAGE BREAK =====
+
+Table 1: Comparison between long-context benchmarks. ‘Open-ended’ indicates whether the task allows for
+diverse, creative responses. ‘Deterministic’ means the task produces step-by-step, logically structured outputs. Our
+Constraint-Verifier Evaluation (CoV-Eval) is a constrained open-ended evaluation that synthetically constructs tasks
+to ensure real-world relevance. Color highlights indicate strengths (green) or challenges (orange). The length refers
+to the number of tokens under the cll100k tokenizer. The V* symbol denotes that the characteristic is present in a
+
+subset of the benchmark’s tasks.
+
+Benchmark                                         Input Len Output Len Open-ended Deterministic              Evaluator
+Benchmarks for Long Input
+
+LongBench (Bai et al., 2024a)                         ~16k               ~100                     Vx                         Vx*                               Similarity
+
+RULER (Hsieh et al., 2024)                   ~128k          ~100               x                   v                         Rules
+
+HELMET (Yen et al., 2025)                         ~128k             ~100                   v*                       V*                      LLM-as-a-Judge
+
+InfiniteBench (Zhang et al., 2024)           Infinite          ~100               x                   v                          Rules
+
+Benchmarks for Long Generation
+
+LongWriter-Bench (Bai et al., 2024b)      ~100           ~5k               Vv                   x                  LLM-as-a-Judge
+LongGenBench[1] (Liu et al., 2024c)        ~1k            ~4k               x                   v                     Similarity
+LongGenBench[2] (Wu et al., 2025)         ~100           ~8k               v                   v                 LLM-as-a-Judge
+Hello Bench (Que et al., 2024)                 ~300           ~8k               v                   x                  LLM-as-a-Judge
+LongProc (Ye et al., 2025)                      ~32k           ~8k               x                   v                        Rules
+LongWeave                                                                 64k                     8k                         v*                         v*                Constraint- Verifier Pairs
+
+¢ We design seven tasks, with long input sizes
+(up to 64K tokens), long output requirements
+(1-8K), and varying difficulty levels.
+
+¢ Evaluation of 23 LLMs reveals critical limita-
+tions and highlights future directions in long-
+form generation and evaluation.
+
+2 The LongWeave Benchmark
+
+In this section, we first introduce the overall
+pipeline of LongWeave, followed by a detailed for-
+mulation of our Constraint-Verifier Evaluation and
+a description of the individual tasks.
+
+2.1 Pipeline of LongWeave
+
+As shown in Figure 3, the Long Weave pipeline con-
+sists of three steps: Construction, Evaluation, and
+Scoring. In Construction, task-specific attributes
+are systematically sampled through deterministic
+rule-based algorithms to generate perfectly aligned
+triples: (1) raw material, (2) constraint, and (3)
+verifier. The LLM processes the material and con-
+straints during Evaluation to produce a response
+that meets constraints. Finally, in the scoring phase,
+the output is compared to the target and then ag-
+gregated to calculate the total score. Finally, in
+Scoring, the output is compared to the verifier us-
+ing a scoring function and aggregated to calculate
+the total score.
+
+2.2 Constraint-Verifier-Based Evaluation
+(CoV-Eval)
+
+Formulation of Basic Evaluation. We formulate
+long-form constrained generation as the task where
+
+an LLM, denoted as £, must produce an output
+sequence Ogen. The input consists of a potentially
+lengthy raw material X;ay, and task-specific in-
+struction Itask, which specifies criteria for the target
+output’s length | Ogen |, content accuracy, struc-
+tural formatting, and logical coherence. The gener-
+ation process is modeled as:
+
+Ogen = L(Xtaw; Ttask)            (1)
+
+The primary challenge lies in ensuring Ogen ad-
+heres to all facets of Jtask, especially as the input
+and output lengths increase, and as [task becomes
+more complex.
+
+Data Construction Stage of CoV-Eval. To ensure
+the benchmark is both realistic and verifiable, we
+introduce a construction process that jointly gener-
+ates the raw material X,ay, the constraint C’, and
+the corresponding Verifier V. The entire construc-
+tion process is formalized as:
+
+(Xraw,C,V) — foen(@), where @~O (2)
+
+The process is driven by a Generator (fgen)—a set
+of task-specific, deterministic, rule-based scripts,
+which can be seen in the bottom part of Figure 3.
+The generator’s behavior is controlled by structured
+Attribute Seeds (@), which are sampled from a
+predefined attribute space O and specify properties
+like material scale, reasoning complexity, and con-
+straint strictness. CoV-Eval combines deterministic
+generation with explicit attribute control, guaran-
+tees that every Constraint—Verifier pair is grounded
+in its material, and can be automatically verified.
+
+Evaluation Stage. The input instruction incorpo-
+rates both the material and the constraint, while
+
+
+===== PAGE BREAK =====
+
+Task Generator
+
+LongLeave
+_       Pipeline        7)
+
+7
+
+ra
+
+Attribute Seeds @               (Xraws CV) — figen (8)                                              Instructions
+Trask       "You are business analyst. Your goal is to write a sales       SS
+                                                  performance report according to Sales Transaction Table.”
+Output ~ 8k
+
+</
+
+Vv
+
+Task Generator f ge
+
+Code Fixes
+
+Attribute Seeds of Excel Analysis task
+
+bottom_rep_bias: 'EMP020'                               |
+
++ he
+
+C : Constraint
+
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+Genaration                           {
+
+g
+a
+ie
+
+>             a®%a                   ra)         overall_target: 'exceed’    growth: 'positive'
+Gye size    a. @                                top rep, bias: 'EMP019'
+-                 5600       eae                               top_product_bias: "PROD-H04'
+Task-based Instructions : Ttask                  Biography  { Evaluation
+Generation
+iy                                             Sales Transaction Table                                                         \
+es                   OrderID, ...,  SalespersonID, .., Amount                               é
+.                                          =>                           >    .               >    .                                         cm]    q
+Matera cay                                                 x         ORD-001, .., EMPO0O7,        . 8500.00               =              gp  5 o)  rom
+reagan                              RAW (ORD-002, _...._EMPO019.       w,  120000.00             =             LLM Judge Tasks rule Length rule |
+KV Dict                     ORD-003, ...,. EMP012,      , 4500.00
+
+b Compute score
+
+\
+
+|
+
+}
+
+}
+
+}
+
+}
+
+}
+
+}
+
+}
+
+}
+
+LZ                                            }
+}
+
+}
+
+}
+
+~         |
+FSM Simulation
+}
+
+}
+
+}
+
+|
+
+1
+
+!
+
+]
+
+|
+
+1 ot
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+dA
+
+| fea   e)         Constraint (C)                @            Verifier (V)
+                                                  {       Ea         | |"Wholwas the top sales representative by      [Osmo es he nee the team with                      S=Score ( Qen » T)
+News Writing                  {                      | revenue and what was their contribution?) | USD 1,093,253 in sales (21.0% of total)."
+NULL LL7X                                     | Excel Analysis) \                                                                   faire
+
+The rule-based generator produces monthly sales transactions and structured "Constraint—Verifier" pairs jointly .
+
+1. Scenario Sampling
+Randomized Attribute Seeds establish the reporting scenario.
+
+Input: Random Seeds                  Sampling                 Output: Attribute Dictionary
+
+<>                    gf For each attribute, randomly                        Overall target: exceed
+pp | lect one option from its list                  ‘Top Salesperson:|EMPOI9
+O                     Top product: Product011
+
+Top Salesperson: EMP007, EMPOL9 ++»
+_/
+
+Top
+Salesperson4  >>    1. Make EMP019 more likely to be selected @ouble)
+EMP019               2. Make EMPO19’s individual transactions larger(1-1.3))
+
+2. Transaction Generation
+
+Synthetic transactions are created in accordance with the sampled scenario.
+
+Input: Attribute Dictionary Transaction Generator            Output: Transation Table
+
+DN
+
+SalespersonID Amount
+
+For each transaction item synthesis:
+EMP007
+
+3. Multi-Dimensional Analysis
+
+Transaction is rule-based analyzed across multiple perspectives to yield statistical indicators.
+
+Output: Statistical Indicators
+
+Total sales: 43,900 USD
+
+4. Constraint-Verifier Pairs Construction
+
+© Constraint 1
+© Verifier 1
+
+Template of Overall Total
+C1: "What is the totalsales this month?"
+Vi: "The total sales amount is {TotalSales}.”
+
+Statistical Indicators
+
+xO                                 “By         son                          EMP019: 22,100 USD (50.3%)                Total sales:
+900 U        >
+==|                  [Sales gazpo = )°( Amount where Salesperson = EMP019)}           EMPO007: 8,500 USD (19.4%)                   43,00 USD                                                 salesperson          .             (-)   Constraint 2
+By Product                       Product011: 17,500 USD (60.1%)              EMPOL9:                                      person this month?                       -
+Sales p; = S( Amount where Product = Pj)                                                           22,100 USD (50.3%)                                                          °                        Verifier 2
+/
+
+Figure 3: Illustration of the LONGLEAVE evaluation pipeline. Attribute seeds define task scenarios, and the task
+generator creates long-form generation tasks paired with constraint—verifier sets. Model outputs are then evaluated
+by matching against verifiers with length and instruction-following checks.
+
+the output is evaluated based on whether it cor-
+rectly reflects the verifier V associated with the
+constraint C’. Specifically, the generation process
+is modeled as shown in Eq. (1): Specifically, un-
+der CoV-Eval, the generation process is updated as
+shown in Eq. (3):
+
+Ogen = L(Xtaw; Ltask, C),             (3)
+
+then the quality S of Ogen is quantified by a
+task-specific scoring function Score, as shown in
+Eq. (4):
+
+(4)
+LongWeave evaluates LLMs by measuring S
+
+across diverse tasks that vary in input/output
+lengths and task complexity.
+
+S' = Score(Ogen, V).
+
+2.3 Tasks
+
+We now introduce each task, where the Con-
+straint—Verifier pair varies by task. We indicate
+Material as X;ay, Constraint as C’, and Verifier as
+V. We use rule-based scripts to generate Xjaw, C
+and V. For AP Style News Writing, we use LLM
+to generate news topics and statements. For Para-
+graph Reordering, original texts are from QreCC
+documents (Anantha et al., 2021).
+
+Code Fixing. This task requires LLMs to fix
+Python code with Flake8 style violations (line
+length, indentation) while ensuring the code re-
+mains runnable. We design the code polluter to
+inject Flake8 violations into a randomly generated
+runnable Python code, forming a polluted code
+(Xtaw). The LLM is prompted to fix the code. The
+part code required repair is C’. The repaired code
+can be automatically checked by Flake8 toolkit(V).
+
+KG to Text Biography Generation (BioG). This
+task evaluates LLMs’ ability to generate coher-
+ent and factual biographies based on given knowI-
+edge graph (KG) triples. The designed knowledge
+graph generator creates a large set of task relation-
+ships around a central person, then extracts triples
+(subject-predicate-object) and corresponding sen-
+tences starting from the nearest nodes. The evalu-
+ated model needs to incorporate all triples (C) into
+a fluent narrative within the specified word count.
+The verifier (V) is a rule-based natural language
+statement derived from these triples. The model is
+evaluated on its ability to accurately integrate all
+triples into the generated text, with penalties for
+missing or fabricated information.
+
+CSV Sales Report Analysis (SR). This task eval-
+
+
+===== PAGE BREAK =====
+
+Table 2: Long Weave Tasks: A summary of the tasks, outlining their names, abbreviations, core challenges, important
+configuration settings, and evaluation metrics. Metric types are color-coded as described in the table’s legend. Red
+refers to LLM-as-a-Judge metrics. Blue indicates length scores. Purple represents other rule-based metrics.
+
+Task Name                   Abbrev. Challenge                Configuration                          Metrics
+Code Fixing with               CF         Coding                   violation_prob = 0.85                Runnability
+Flake8 Compliance                                              error_lines x gen_len            Style score
+length score
+KG to Text Biography       BioG       Structured Data        triple_count « gen_len             Coverage Rate.
+Generation                                  Analysis
+CSV Sales Report              SR         Structured Data        record_count x gen_len           Coverage Rate
+Analysis                                    Analysis                target_count « gen_len           Correctness Rate
+AP Style News                NW        Article Writing        fact_counts x gen_len             Coverage Rate
+Writing                                                                  ap_stylebook_rules                   Style Score
+KV Dictionary                KVG      Tnstruction       entry_count x gen_len            Existence Score
+Generation                                 Following              key_length = 32                      Length score
+value_length = 32                    Position score
+State Machine                 SMS       Instruction              num_states = 3                         Step Match Ratio
+Simulation                                    Following               input_size = 3
+output_size = 3
+step_length «x gen_len
+Paragraph Reordering         PR        Document               para_length « gen_len            Kendall’s Tau.
+Processing
+
+uates LLMs’ ability to generate a sales report and
+answer predefined, specific questions based on a
+transaction table. We designed a sales report gen-
+erator that synthesises the transaction table (X;aw),
+while generating natural language questions (C’)
+and corresponding answers (V). Evaluation fo-
+cuses on both coverage and accuracy of the an-
+swers.
+
+AP Style News Writing (NW). This task evalu-
+ates LLMs’ ability to write a news article following
+the Associated Press Stylebook (AP Style) (Gold-
+stein, 1998). Given a news topic (X;aw), GPT-40-
+2024-11-20 generates correct fact statements (V)
+together with corresponding flawed statements (C’)
+that violate AP Style rules. The evaluated LLM
+is then required to write an article on the topic,
+integrating all statements in their correct form.
+KV Dictionary Generation (KVG). This task, the
+inverse of KV Retrieval in (Hsieh et al., 2024), eval-
+uates LLMs’ ability to generate a dictionary string
+with a target key-value pair placed at the correct
+index, following formatting rules (e.g., keys in up-
+percase with underscores); the query specifying the
+key-value pair and index is the Constraint (C’), and
+a rule-based script verifies placement and format-
+ting as the Verifier (V).
+
+State Machine Simulation (SMS). This task re-
+quires simulating state transitions of a finite state
+machine (FSM) (Lee and Yannakakis, 1996) step
+by step. Here, the transition table serves as the raw
+
+material (X;aw), the initial state and input string
+constitute the Constraint (C’), and an FSM valida-
+tion script acts as the Verifier (V) by checking the
+generated sequence against the correct state tran-
+sitions and signals. Models are evaluated by their
+match ratio and overall accuracy in reproducing all
+steps without errors.
+
+Paragraph Reordering (PR). This task requires
+LLMs to reorder shuffled paragraphs (C) into the
+coherent sequence (V). The material consists of
+randomly sampled paragraphs, with the constraints
+being the shuffled order and the verifier being the
+correct sequence. Evaluation uses Kendall’s Tau to
+measure the consistency of the predicted order (Liu
+et al., 2020; Shen and Baldwin, 2021).
+
+2.4 Input Length Statistic
+
+Generative tasks with long input contexts are crit-
+ical yet underexplored. To reduce hallucinations,
+users often provide extensive context for generating
+complex outputs. Unlike prior benchmarks capped
+at 1k tokens(Bai et al., 2024b; Wu et al., 2025; Liu
+et al., 2024c; Que et al., 2024), LongWeave sup-
+ports up to 64k-token inputs, enabling evaluation
+in real-world scenarios like structured file analysis
+and document processing. We provide the input
+length distribution of LongWeave in Figure 4.
+
+
+===== PAGE BREAK =====
+
+1750
+
+1812.
+Category
+1500                     mm Overall
+ChronoWeave/News_Writing
+longeval/Code_Fixing
+1250                            longeval/Gen_KV_Dictionary
+1200                                    t= longeval/KG_2_Text
+longeval/Paragraph_Ordering
+longeval/Sales_Report_Generation
+i= longeval/State_Machine
+476
+|  | °
+4k    8k
+
+662
+500                 538
+0         me
+0.5k       1k       2k
+
+Figure 4: Input length distribution of LongWeave
+
+Number of Samples
+2 8
+
+400             400
+
+Input Length
+
+2.5 Output Length Control
+
+LongWeave controls target output length through
+a multi-faceted strategy. First, the scale and com-
+plexity of input materials—such as the number of
+data records or code lines—are procedurally gen-
+erated to be proportional to each target length tier
+(1K, 2K, 4K, 8K tokens). Second, prompts provide
+models with explicit instructions specifying the de-
+sired output length. Finally, the evaluation protocol
+enforces these constraints by directly penalizing
+length deviations.
+
+2.6 Evaluation Metrics
+
+The evaluation metrics include LLM-as-a-Judge
+for CoV-Eval, length-related metrics, and others.
+Each task’s final score is the harmonic mean of sub-
+metrics, ensuring that poor performance in one area
+cannot be offset by better performance in another.
+LLM-as-a-Judge use LLM-as-a-Judge to check
+whether verifiers, corresponding to defined con-
+straints, are accurately reflected in the model’s out-
+put. These include style, factual coverage, and
+question answering. The Style Score measures ad-
+herence to Flake8 standards, penalizing unresolved
+violations. The Factual Coverage Rate tracks the
+proportion of knowledge graph triples in the text,
+while the Answer Coverage Rate measures the pro-
+portion of answered analytical questions. The Cor-
+rectness Rate calculates answer accuracy, and the
+Factual Statement Coverage Rate tracks recall of
+required factual statements. The AP Style Score
+quantifies adherence to AP Stylebook guidelines.
+Length Score is used to test whether the model out-
+puts according to the required length. The implicit
+length score is applied when truncation occurs af-
+ter exceeding the length, while the explicit length
+score is used in CF and KVG, where the length
+score is treated as a sub-score.
+
+Rule-based metrics rely on deterministic code to
+
+verify correctness, such as code runnability, exis-
+tence and placement of target key—value pairs, and
+Kendall’s Tau for paragraph reordering.
+
+3 Experiments
+
+3.1 Models and Inference Setup
+
+We evaluated a range of LLMs using Long-
+Weave, comprising proprietary and commercial
+API-accessed models, open-source models, and
+reasoning models. The long-generation mod-
+els assessed include LongWriter-glm4-9B (GLM
+et al., 2024; Bai et al., 2024b). The open-
+source models include the Llama-3-series, Llama-4-
+series (Grattafiori et al., 2024), Phi-4-mini-instruct,
+Qwen?2.5-series (3B, 7B, 14B, 72B, QwQ-Plus)
+(Yang et al., 2024a), and the newer Qwen3 series
+(4B, 8B, 14B-Think/Non-Think, 32B-Think/Non-
+Think) (Yang et al., 2025a). Additionally, we evalu-
+ated DeepSeek-V3 (Liu et al., 2024a). The commer-
+cial models include GPT-40-2024- 11-20 (Achiam
+et al., 2023), Gemini-2.0-flash (Team et al., 2023),
+and Qwen-long. Specialized reasoning models,
+such as 03-mini-2025-01-31 and DeepSeek-R1
+(Guo et al., 2025), were also included in the evalu-
+ation. The open-source model uses VLLM deploy-
+ment on A100.
+
+3.2 Task Configurations
+
+Long Weave evaluates LLMs across seven distinct
+tasks, each with four variants targeting output
+lengths of 1k, 2k, 4k, and 8k tokens. For each
+variant, 200 test samples are used, resulting in
+a total of 5,600 samples per model. We primar-
+ily used Qwen2.5-72B-Instruct for LLM-as-a-
+Judge evaluations. To control output length, we ad-
+just the configuration as illustrated by the "gen_len"
+configurations in Table 2. Furthermore, Long-
+Weave supports task difficulty control through ad-
+justments to input complexity (e.g., key_length in
+KVG), the strictness of constraints (e.g., AP style-
+book rules in NW), and structural requirements of
+the target output (e.g., step_length, para_length).
+
+3.3. Main Results
+
+The results are summarized in Table 3. In the ta-
+ble, we have divided all the models into standard
+models and reasoning models. We have listed the
+average performance across seven tasks at four dif-
+ferent input lengths, as well as the overall average
+performance across all tasks at four lengths.
+
+
+===== PAGE BREAK =====
+
+Table 3: Model performance summary (task-average and length-average scores). The highest model performance
+
+for each task and score is bolded, and for the overall performance, models in the top 5 are bolded.
+
+Task scores                                                                Length scores                       Overall
+Model                        CF     BioG     SR     NW  KVG SMS     PR      Ik      2k      4k      8k      Avg
+LongWriter-gim4-9B            29.67 67.27 18.23 14.62 448 3.68 13.99 24.55 23.11 20.69 18.48 21.71
+Phi-4-mini-Instruct              0.02 69.86 10.50 18.30 3.62 3.25 39.51 23.64 20.27 20.58 18.40 20.72
+Llama3-1-8B-Instruct         46.76 60.66 13.93 20.29 15.97 3.82 52.46 40.11 34.75 27.13 20.25 30.56
+Llama3-1-70B-Instruct          58.45 69.36 20.04 24.08 40.35 6.43 60.26 53.58 46.92 33.85 25.07 39.85
+Llama4-scout-17B-16e-Instruct. 33.24. 76.38 «24.47 28.25. 33.32 6.20. 67.88 48.65 37.55 37.22 30.72 38.53
+Llama4-17b-128e-Instruct        64.63 84.09 22.94 27.96 55.11 9.84 91.51 55.81 54.93 50.61 42.12 50.87
+Qwen2.5-3B-Instruct             6.33 66.42 9.82 20.27 20.82 2.85 47.05 30.64 28.16 24.76 21.33 26.22
+Qwen2.5-7B-Instruct         26.09 73.16 14.91 21.27 1964 4.94 56.45 38.13 33.77 27.19 24.60 30.92
+Qwen2.5-14B-Instruct           49.48 80.94 19.33 23.80 22.80 5.72 76.18 47.60 42.97 36.07 32.35 39.75
+Qwen2.5-72B-Instruct                  60.43 84.41 24.48 31.76        8.84 13.77 73.67 51.67 48.69 40.99 34.29 43.91
+Qwen3-4B               28.36 73.29 17.89 18.19 24.87 11.87 47.02 44.28 35.92 27.18 19.18 31.64
+Qwen3-8B                    45.92 76.88 18.98 18.90 17.70 13.40 67.50 46.86 40.08 34.06 27.17 37.04
+Qwen3-14B              59.10 79.00 21.96 22.12 33.88 18.45 86.43 56.87 49.34 42.28 34.91 45.85
+Qwen3-32B                      63.44 79.77 24.95 21.46 44.36 16.18 83.71 59.71 52.68 44.57 33.82 47.70
+DeepSeek-V3             59.43 80.62 23.25 27.11 33.25 11.47 91.12 56.30 51.61 43.19 35.34 46.61
+Qwen-long               35.78 77.65 24.87 26.67 27.78 12.68 78.88 49.50 44.03 39.15 29.78 40.62
+GPT-40-2024-11-20              40.60 82.72 27.20 28.96 42.82 9.16 64.58 56.18 50.30 37.65 25.03 42.29
+Gemini-2.0-flash               56.93 88.58 28.22 29.91 48.94 13.46 86.68 60.44 56.17 49.20 35.75 50.39
+~ DeepSeek-R1-Distill-Qwen-7B- 0.00 «47.19 «4.77 «11:76 5.62 «2.39 30.50 «18.63 13.437 14.21” 12:14 ~ 14.60 ~
+DeepSeek-R1-Distill-Qwen-32B 54.14 66.65 22.25 21.31 14.54 8.86 73.70 45.06 39.59 35.74 29.01 37.35
+Qwen3-14B-Think              45.41 78.71 28.59 23.86 42.92 10.64 89.30 52.33 49.96 43.96 36.30 45.64
+Qwen3-32B-Think              59.69 83.64 35.67 20.86 52.40 13.89 88.38 57.71 56.89 49.54 38.45 50.65
+DeepSeek-R1                                 70.10 86.16 24.62 30.56 60.14 19.60 90.73 63.86 59.25 52.85 42.28 54.56
+QwQ-plus-2025-03-05             57.22 80.71 26.66 25.66 40.96 26.10 85.04 62.40 51.82 44.20 37.21 48.91
+03-mini-2025-01-31                 38.76 89.30 28.06 24.21 43.51 33.06 78.88 62.06 56.12 43.04 30.66 47.97
+wens ab       °                      Table 4: Distribution of failure patterns across 1,400
+wee      Qwen3-32B     ;
+a                                               Stent sp             analyzed samples, grouped by category.
+2                                      =
+& 40                  Qwen?:5-14B   . weet     Liama-3.1-70B
+2,                    Qiwei3-§B        wee                                               Failure Pattern                            Count Share
+E                        -
+o 35                       ae                                                              .             .
+<     Qwen3-4B pectin                                     Instruction-following errors
+B 30      ea Hes an                                             Selective instruction execution      375 30.4%
+a       ama3-1-                                                      .       we
+g QwenF 5-38                                               Stepwise deviation              172 14.0%
+e
+25                                                                                         Incomplete factual coverage            156) =12.7%
+Teneoner oe                                                            Length control issues                      153. 12.4%
+3B                10B             30B               100B                      -          ;
+Model Size (Billion Parameters)                                     Numerical errors
+Calculation failures                        123 10.0%
+Figure 5: Performance of different model sizes               Content problems
+Fabricated facts                                  27       2.2%
+Redundancy / looping                   17      1.4%
+Existing models struggle in long form genera-       Reasoning-specific failures
+Failure to terminate reasoning         210 17.0%
+
+tion. Frontier proprietary models demonstrate the
+best performance. DeepSeek-R1, Gemini-2.0-flash,
+and 03-mini-2025-01-31 achieve nearly 60% per-
+formance at 1k length, but when generating 8k,
+the performance drops to around 40%. GPT-40-
+2024-11-20 only achieves 42.99% while it tends to
+generate short responses.
+
+Increasing model size can improve long genera-
+tion quality. Llama4-17b-128e achieves the best
+performance due to having the largest number of
+parameters. The three smallest models, Phi-4-mini,
+Qwen-2.5-3B, and Qwen3-4b, all perform below
+30%. We visualize the relationship between model
+size and corresponding performance in Figure 5,
+where the regression curve shows a positive corre-
+lation between the two.
+
+Performance of Reasoning Models on Long-
+Sequence Generation. The very large reasoning
+
+models (e.g., DEEPSEEK-R1) perform strongly
+on long-sequence generation tasks (Table 3). In
+contrast, smaller reasoning models often fail to ter-
+minate the reasoning phase, repeatedly generating
+large chunks of the input, which leads to truncation.
+
+Performance Degradation when Input Context
+is Long. As shown in Table 3, the quality of long
+outputs deteriorates significantly with longer in-
+puts. This is especially evident in tasks like Sales
+Report Analysis and writing AP-style News Arti-
+cles, which require handling long materials and de-
+tailed guidelines. Despite this challenge, managing
+both long inputs and outputs is crucial for practical
+applications. By incorporating more relevant infor-
+mation into the input window, hallucinations can be
+
+
+===== PAGE BREAK =====
+
+Table 5: Performance comparison across different tasks under varying sample sizes. Values represent mean
+performance metrics with standard deviations (format: mean + .¢q).
+
+Task
+
+Number of Samples
+
+20                   40                   60                   80                   100
+
+120                       140                       160                       180                      200
+
+CF   36.2342.72 35.3l+2.80 35.8842.50 36.1242.30 37.41+0.65 36.6540.55 36.4540.45 36.37+40.50 36.82+40.32 36.97+0.28
+
+60.42+0.16 61.21+0.18 61.1040.20 61.1540.18 61.0340.28 61.0840.25 61.20+0.23 61-4840.30 61.3540.28 61.14+40.41
+
+SR   13.1640.25 12.2640.30 12.60+40.28 12.80+40.24 183.81l+40.29 18.50+0.22 13.60+0.18 13.86+0.20 14.0540.16 14.13+0.14
+
+NW     20.03+0.01
+
+SMS 3.19+0.07  3.6640.10 3.6010.09 3.63+0.08
+
+19.0640.10 19.40+40.15 19.50+40.18 19.75+40.20 19.85+40.13 19.90+0.16 19.37+0.30 19.55+0.35 19.62+0.48
+14.5541.47 13.8041.50 14.0041.40 14.3041.20 15.2940.17 14.60140.30 14.8040.25 14.2040.30 14.9540.45 15.20+0.68
+3.69-+40.03
+
+3.70+40.02 3.7440.02 3.7440.02 3.78+40.02 3-81+0.01
+
+PR   54.67+0.13  58.02+0.20 58.1040.15 58.1540.12 57.23+40.86 57.90+0.30 58.10+0.75 58.02+40.10 59.20+0.15 60.05+0.12
+
+Overall 28.92+40.30 29.04+0.35 29.10+0.40 29.30+0.35 29.80+0.01 29.60+0.10 29.80+0.15 29.69+0.10 30.05+0.12 30.1340.11
+
+minimized, offering a key direction for optimizing
+long-sequence generation models.
+
+3.4 Failure Pattern
+
+To better understand where models fail, we ana-
+lyzed 1,400 samples across seven tasks and four
+target lengths (1k, 2k, 4k, and 8k; 200 samples
+per task and 50 per length). Outputs were gener-
+ated with Qwen3-32B in think mode (without think-
+ing budgets). Failure types were first labeled with
+GPT-5-2025-@8-@7 and then manually checked.
+We observed eight common failure patterns, which
+we group into four categories (Table 4).
+
+Instruction-following errors are the most com-
+mon. Selective instruction execution (30.4%)
+means models handle the easy parts of a prompt
+but ignore the harder constraints. Stepwise devi-
+ations (14.0%) show that the ability to follow in-
+structions gets worse as the output becomes longer.
+Incomplete factual coverage (12.7%) often hap-
+pens in structured tasks like BIOG, where some
+required facts are dropped. Length control issues
+(12.4%) also appear, with outputs not matching the
+requested length.
+
+Numerical errors (10.0%) mostly occur in quan-
+titative tasks like SR, where models miscalculate
+percentages, averages, or growth rates. These er-
+rors suggest that reliable number handling may
+require tool support.
+
+Content problems include fabricated facts (2.2%),
+where models add unsupported information, and re-
+dundancy or looping (1.4%), where outputs repeat
+content or drift into filler text.
+
+Reasoning-specific failures are unique to reason-
+ing models. In 17.0% of cases, the reasoning phase
+did not stop: models produced very long “thinking”
+traces, often repeating large chunks of the input,
+leaving too little budget for the final answer and
+causing truncation.
+
+Table 6: Evaluation of LLM-as-Judge Stability in CoV-
+Eval using Different Scoring Models
+
+Scoring Models
+Qwen-2-5 Qwen2.5 Qwen-2-5
+
+DeepSeek- —93-         4o-
+
+Tasks                 V3          Mini 1120        72B            32B            14B
+CF            51.64     45.2 40.96     46.76       3.53        0.76
+BioG             59.86      59.87 60.13      60.66        58.01        57.88
+SR             13.52      13.6 11.7     13.93       13.7       21.71
+NW            19.95      10.4 28.88     20.29       10.39       10.67
+Total Score      31.75      30.14 31.27      30.56        23.27        24.04
+
+4 Analysis
+
+4.1 Stability of the Benchmark
+
+To assess the stability of the benchmark, we con-
+ducted multiple experiments using the Llama-3.1-
+8B model with varying sample sizes (20-200), as
+shown in Table 5. We found that as the sample size
+increased, the total score gradually stabilized, and
+the variance decreased from 0.3 to 0.11. Once the
+sample size exceeded 100, the results converged
+within a margin of 0.15. For the official evaluation,
+we used 200 samples to ensure the stability of the
+benchmark’s total score.
+
+4.2 Stability of LLM-as-a-Judge
+
+For the CF, BioG, SR, and NW tasks, we used the
+Qwen-2.5-72B model as an LLM judge. To test the
+reliability, we used other LLMs as evaluators. The
+Llama-3.1-8B model was tested as the evaluated
+model on 100 samples with different evaluation
+models. As shown in Table 6, the results revealed a
+performance fluctuation variance of 0.45 for mod-
+els like DeepSeek-V3, GPT-40-2024-11-20, and
+03-mini-2025-01-31.
+
+4.3 Output Length Distribution
+
+During inference, we provided the models with re-
+quired word counts and analyzed the output word
+lengths, categorizing them into four ranges: be-
+low Ik, 1k-2k, 2k-4k, and 4k-8k, as shown in
+
+
+===== PAGE BREAK =====
+
+Meta-Llama-3.1-70B.                                                                                            DS-R1-Distill-Qwen-32B
+
+Meta-Llama-3.1-8B                                                                                                                         DS-R1-Distill-Qwen-7B
+Deepseck-RI
+Deepseek-V3
+
+03-mini-2025-01-31
+gemini-2.0-flash
+gpt-4o-2024-11-20
+qwq-plus-2025-03-05
+
+LongWriter-gim4-9b
+
+1931.0
+
+3000,
+
+2500
+
+2000
+
+1500
+
+1000
+
+2k                     4k
+Required Generation Length
+
+qwen-long
+
+Phi-4-mini
+
+2k                  4k
+Required Generation Length
+
+Figure 6: The heatmap visualizes the actual output lengths across four target length settings (1k, 2k, 4k, and 8k
+tokens). Each row represents the model, while the column corresponds to the length.
+
+Figure 6. It was observed that, with the excep-
+tion of the 03-mini, other reasoning models tend to
+generate shorter outputs after processing. In con-
+trast, smaller open-source models tend to generate
+longer outputs, despite their overall performance
+scores not being as high, indicating that output
+quality is not directly correlated with length. No-
+tably, the Qwen-3 series demonstrates better length-
+following ability compared to the Qwen-2.5.
+
+4.4 Increasing the Context Window Does Not
+Necessarily Improve Long Generation
+
+We compared the performance of the Qwen2.5-14B
+and 7B models with a 1M context window version,
+as shown in Figure 7, there was little difference in
+overall scores: long-input models performed better
+than standard models at 1K, 2K, and 4K lengths
+but showed decreased performance at 8K when
+generating ultra-long sequences. It indicates that
+although long input models and long generation
+models share the same model structure, the perfor-
+mance is inconsistent due to the training data.
+
+90
+80                                                                                  ME Qwen2.5-14B
+
+MM Qwen?2.5-14B-1M
+70                                                           ME Qwen2.5-7B
+
+60                       ME Qwen?.5-7B-IM
+: ee Overall Score
+A 40
+
+30
+20
+10
+
+       a a
+CF BioG SR NW KVG SMS_~ PR
+
+Figure 7: Input length distribution of LongWeave
+
+5 Conclusion
+
+Evaluating long, constrained LLM outputs is chal-
+lenging. We introduce LongWeave, featuring CoV-
+Eval to bridge real-world relevance with objective
+
+verifiability. This suite spans seven tasks across five
+domains with customizable input/output lengths.
+Our evaluation of 23 LLMs using LongWeave
+demonstrates that even top models falter for long
+generations, with performance degrading signifi-
+cantly as length rises; reasoning models, however,
+navigate these challenges more effectively. Long-
+Weave thereby provides a precise instrument to
+diagnose these systemic issues and guide the devel-
+opment of truly capable long-form generation.
+
+Limitations
+
+While LongWeave and CoV-Eval contain several
+limitations that should be acknowledged: High
+Cost for Inference. The nature of LongWeave, in-
+volving long input materials (up to 64K tokens) and
+the generation of long outputs (up to 8K tokens), in-
+herently makes evaluating a wide range of models
+computationally expensive. High Cost LLM-as-
+a-Judge. Several tasks within LongWeave rely on
+large LLMs (e.g., Qwen2.5-72B-Instruct) as judges,
+which adds significant computational overhead and
+cost. Limited Coverage of Creative Tasks. Long-
+Weave currently focuses on factual accuracy and
+structural correctness, but it could be expanded to
+better assess creative tasks.
+
+Acknowledgments
+
+This work is supported by the National Key R&D
+Program of China (Grant No. 2024YFC3308304),
+the "Pioneer" and "Leading Goose" R&D Program
+of Zhejiang (Grant No. 2025C01128), the National
+Natural Science Foundation of China (Grant No.
+62476241), the Natural Science Foundation of Zhe-
+jiang Province, China (Grant No. LZ23F020008),
+the Zhejiang Zhejiang Key Laboratory of Medical
+Imaging Artificial Intelligence.
+
+
+===== PAGE BREAK =====
+
+References
+
+Josh Achiam, Steven Adler, Sandhini Agarwal, Lama
+Ahmad, Ilge Akkaya, Florencia Leoni Aleman,
+Diogo Almeida, Janko Altenschmidt, Sam Altman,
+Shyamal Anadkat, et al. 2023. Gpt-4 technical report.
+arXiv preprint arXiv:2303.08774.
+
+Raviteja Anantha, Svitlana Vakulenko, Zhucheng Tu,
+Shayne Longpre, Stephen Pulman, and Srinivas
+Chappidi. 2021. Open-domain question answering
+goes conversational via question rewriting. Proceed-
+ings of the 2021 Conference of the North American
+Chapter of the Association for Computational Lin-
+guistics: Human Language Technologies.
+
+Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu,
+Jiankai Tang, Zhidian Huang, Zhengxiao Du, Xiao
+Liu, Aohan Zeng, Lei Hou, Yuxiao Dong, Jie Tang,
+and Juanzi Li. 2024a. LongBench: A bilingual, mul-
+titask benchmark for long context understanding. In
+Proceedings of the 62nd Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 3119-3137, Bangkok, Thailand.
+Association for Computational Linguistics.
+
+Yushi Bai, Jiajie Zhang, Xin Lv, Linzhi Zheng, Siqi
+Zhu, Lei Hou, Yuxiao Dong, Jie Tang, and Juanzi
+Li. 2024b. Longwriter: Unleashing 10,000+ word
+generation from long context Ilms. arXiv preprint
+arXiv:2408.07055.
+
+Aydar Bulatov, Yuri Kuratov, Yermek Kapushev, and
+Mikhail S Burtsev. 2023. Scaling transformer to
+1m tokens and beyond with rmt. arXiv preprint
+arXiv:2304. 11062.
+
+Yukang Chen, Shengju Qian, Haotian Tang, Xin Lai,
+Zhijian Liu, Song Han, and Jiaya Jia. 2024. Longlora:
+Efficient fine-tuning of long-context large language
+models. In The International Conference on Learn-
+ing Representations (ICLR).
+
+Tri Dao. 2024. FlashAttention-2: Faster attention with
+better parallelism and work partitioning. In Jnter-
+
+national Conference on Learning Representations
+(ICLR).
+
+Jiayu Ding, Shuming Ma, Li Dong, Xingxing Zhang,
+Shaohan Huang, Wenhui Wang, and Furu Wei. 2023.
+Longnet: Scaling transformers to 1,000,000,000 to-
+kens. In Proceedings of the 10th International Con-
+ference on Learning Representations.
+
+Razvan-Gabriel Dumitru, Minglai Yang, Vikas Yadav,
+and Mihai Surdeanu. 2025. Copyspec: Accelerating
+Ilms with speculative copy-and-paste without com-
+promising quality. arXiv preprint arXiv:2502.08923.
+
+Yao Fu, Rameswar Panda, Xinyao Niu, Xiang Yue, Han-
+naneh Hajishirzi, Yoon Kim, and Hao Peng. 2024.
+Data engineering for scaling language models to
+128K context. In Proceedings of the 41st Interna-
+tional Conference on Machine Learning, volume 235
+of Proceedings of Machine Learning Research, pages
+14125-14134. PMLR.
+
+Tianyu Gao, Alexander Wettig, Howard Yen, and
+Danqi Chen. 2024. How to train long-context
+language models (effectively). arXiv preprint
+arXiv:2410.02660.
+
+Team GLM, Aohan Zeng, Bin Xu, Bowen Wang, Chen-
+hui Zhang, Da Yin, Dan Zhang, Diego Rojas, Guanyu
+Feng, Hanlin Zhao, et al. 2024. Chatglm: A family
+of large language models from glm-130b to glm-4 all
+tools. arXiv preprint arXiv:2406. 12793.
+
+Norm Goldstein. 1998. The Associated Press Style-
+book and Libel Manual. Fully Updated and Revised.
+ERIC.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten,
+Alex Vaughan, et al. 2024. The llama 3 herd of mod-
+els. arXiv preprint arXiv:2407.21783.
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song,
+Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma,
+Peiyi Wang, Xiao Bi, et al. 2025. Deepseek-r1: In-
+centivizing reasoning capability in llms via reinforce-
+ment learning. arXiv preprint arXiv:2501.12948.
+
+Cheng-Ping Hsieh, Simeng Sun, Samuel Kriman, Shan-
+tanu Acharya, Dima Rekesh, Fei Jia, Yang Zhang,
+and Boris Ginsburg. 2024. Ruler: What’s the real
+context size of your long-context language models?
+arXiv preprint arXiv:2404.06654.
+
+David Lee and Mihalis Yannakakis. 1996. Principles
+and methods of testing finite state machines-a survey.
+Proceedings of the IEEE, 84(8):1090-1123.
+
+Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang,
+Bochao Wu, Chengda Lu, Chenggang Zhao, Chengqi
+Deng, Chenyu Zhang, Chong Ruan, et al. 2024a.
+Deepseek-v3 technical report. arXiv preprint
+arXiv:2412.19437.
+
+Hao Liu, Matei Zaharia, and Pieter Abbeel. 2024b.
+Ringattention with blockwise transformers for near-
+infinite context. In The Twelfth International Confer-
+ence on Learning Representations.
+
+Sennan Liu, Shuang Zeng, and Sujian Li. 2020. Evalu-
+ating text coherence at sentence and paragraph levels.
+In Proceedings of the Twelfth Language Resources
+and Evaluation Conference, pages 1695-1703, Mar-
+seille, France. European Language Resources Asso-
+ciation.
+
+Xiang Liu, Peijie Dong, Xuming Hu, and Xiaowen Chu.
+2024c. LongGenBench: Long-context generation
+benchmark. In Findings of the Association for Com-
+putational Linguistics: EMNLP 2024, pages 865-
+883, Miami, Florida, USA. Association for Compu-
+tational Linguistics.
+
+Chau Minh Pham, Simeng Sun, and Mohit Iyyer. 2024.
+Suri: Multi-constraint instruction following for long-
+form text generation. Preprint, arXiv:2406. 19371.
+
+
+===== PAGE BREAK =====
+
+Ronak Pradeep, Nandan Thakur, Shivani Upadhyay,
+Daniel Campos, Nick Craswell, and Jimmy Lin. 2024.
+Initial nugget evaluation results for the trec 2024
+rag track with the autonuggetizer framework. arXiv
+preprint arXiv:2411.09607.
+
+Zehan Qi, Rongwu Xu, Zhijiang Guo, Cunxiang Wang,
+Hao Zhang, and Wei Xu. 2024. long?rag: Evaluat-
+ing long-context & long-form retrieval-augmented
+generation with key point recall. In Findings of the
+Association for Computational Linguistics: EMNLP
+2024, pages 4852-4872, Miami, Florida, USA. Asso-
+ciation for Computational Linguistics.
+
+Shanghaoran Quan, Tianyi Tang, Bowen Yu, An Yang,
+Dayiheng Liu, Bofei Gao, Jianhong Tu, Yichang
+Zhang, Jingren Zhou, and Junyang Lin. 2024. Lan-
+guage models can self-lengthen to generate long texts.
+arXiv preprint arXiv:2410.23933.
+
+Haoran Que, Feiyu Duan, Liqun He, Yutao Mou,
+Wangchunshu Zhou, Jiaheng Liu, Wenge Rong,
+Zekun Moore Wang, Jian Yang, Ge Zhang, et al.
+2024. Hellobench: Evaluating long text generation
+capabilities of large language models. arXiv preprint
+arXiv:2409. 16191.
+
+Chris Samarinas, Alexander Krubner, Alireza Salemi,
+Youngwoo Kim, and Hamed Zamani. 2025. Beyond
+factual accuracy: Evaluating coverage of diverse fac-
+tual information in long-form text generation. arXiv
+preprint arXiv:2501.03545.
+
+Aili Shen and Timothy Baldwin. 2021. A simple yet
+effective method for sentence ordering. In Proceed-
+ings of the 22nd Annual Meeting of the Special In-
+terest Group on Discourse and Dialogue, pages 154—
+160, Singapore and Online. Association for Compu-
+tational Linguistics.
+
+Yixiao Song, Yekyung Kim, and Mohit Iyyer. 2024.
+VeriScore: Evaluating the factuality of verifiable
+claims in long-form text generation. In Findings
+of the Association for Computational Linguistics:
+EMNLP 2024, pages 9447-9474, Miami, Florida,
+USA. Association for Computational Linguistics.
+
+Haochen Tan, Zhijiang Guo, Zhan Shi, Lu Xu, Zhili
+Liu, Yunlong Feng, Xiaoguang Li, Yasheng Wang,
+Lifeng Shang, Qun Liu, and Lingi Song. 2024. Prox-
+yQA: An alternative framework for evaluating long-
+form text generation with large language models. In
+Proceedings of the 62nd Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 6806-6827, Bangkok, Thailand.
+Association for Computational Linguistics.
+
+Gemini Team, Rohan Anil, Sebastian Borgeaud, Jean-
+Baptiste Alayrac, Jiahui Yu, Radu Soricut, Johan
+Schalkwyk, Andrew M Dai, Anja Hauth, Katie
+Millican, et al. 2023. Gemini: a family of
+highly capable multimodal models. arXiv preprint
+arXiv:2312.11805.
+
+Xiaonan Wang, Bo Shao, and Hansaem Kim. 2025. To-
+ward reliable vIm: A fine-grained benchmark and
+
+framework for exposure, bias, and inference in ko-
+rean street views. arXiv preprint arXiv:2506.03371.
+
+Jerry Wei, Chengrun Yang, Xinying Song, Yifeng Lu,
+Nathan Zixia Hu, Jie Huang, Dustin Tran, Daiyi Peng,
+Ruibo Liu, Da Huang, Cosmo Du, and Quoc V Le.
+2024. Long-form factuality in large language models.
+In The Thirty-eighth Annual Conference on Neural
+Information Processing Systems.
+
+Yuhao Wu, Ming Shan Hee, Zhiqiang Hu, and Roy
+Ka-Wei Lee. 2025. Longgenbench: Benchmark-
+ing long-form generation in long context LLMs. In
+The Thirteenth International Conference on Learning
+Representations.
+
+Ruibin Xiong, Yimeng Chen, Dmitrii Khizbullin,
+Mingchen Zhuge, and Jiirgen Schmidhuber. 2025.
+Beyond outlining: Heterogeneous recursive planning
+for adaptive long-form writing with language models.
+arXiv preprint arXiv:2503.08275.
+
+An Yang, Anfeng Li, Baosong Yang, Beichen Zhang,
+Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao,
+Chengen Huang, Chenxu Lv, Chujie Zheng, Dayi-
+heng Liu, Fan Zhou, Fei Huang, Feng Hu, Hao Ge,
+Haoran Wei, Huan Lin, Jialong Tang, Jian Yang,
+Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi
+Yang, Jing Zhou, Jingren Zhou, Junyang Lin, Kai
+Dang, Keqin Bao, Kexin Yang, Le Yu, Lianghao
+Deng, Mei Li, Mingfeng Xue, Mingze Li, Pei Zhang,
+Peng Wang, Qin Zhu, Rui Men, Ruize Gao, Shixuan
+Liu, Shuang Luo, Tianhao Li, Tianyi Tang, Wenbiao
+Yin, Xingzhang Ren, Xinyu Wang, Xinyu Zhang, Xu-
+ancheng Ren, Yang Fan, Yang Su, Yichang Zhang,
+Yinger Zhang, Yu Wan, Yuqiong Liu, Zekun Wang,
+Zeyu Cui, Zhenru Zhang, Zhipeng Zhou, and Zihan
+Qiu. 2025a. Qwen3 technical report. arXiv preprint
+arXiv:2505.09388.
+
+An Yang, Baosong Yang, Beichen Zhang, Binyuan
+Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayi-
+heng Liu, Fei Huang, Haoran Wei, Huan Lin, Jian
+Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang,
+Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang,
+Keming Lu, Keqin Bao, Kexin Yang, Le Yu, Mei
+Li, Mingfeng Xue, Pei Zhang, Qin Zhu, Rui Men,
+Runji Lin, Tianhao Li, Tingyu Xia, Xingzhang Ren,
+Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang,
+Yu Wan, Yuqiong Liu, Zeyu Cui, Zhenru Zhang, and
+Zihan Qiu. 2024a. Qwen?2.5 technical report. arXiv
+preprint arXiv:2412.15115.
+
+An Yang, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei
+Huang, Haoyan Huang, Jiandong Jiang, Jianhong
+Tu, Jianwei Zhang, Jingren Zhou, Junyang Lin, Kai
+Dang, Kexin Yang, Le Yu, Mei Li, Minmin Sun,
+Qin Zhu, Rui Men, Tao He, Weijia Xu, Wenbiao
+Yin, Wenyuan Yu, Xiafei Qiu, Xingzhang Ren, Xin-
+long Yang, Yong Li, Zhiying Xu, and Zipeng Zhang.
+2025b. Qwen2.5-1m technical report. arXiv preprint
+arXiv:2501.15383.
+
+Minglai Yang, Ethan Huang, Liang Zhang, Mihai Sur-
+deanu, William Wang, and Liangming Pan. 2025c.
+
+
+===== PAGE BREAK =====
+
+How is Ilm reasoning distracted by irrelevant context?
+an analysis using a controlled benchmark. arXiv
+preprint arXiv:2505.18761.
+
+Ruihan Yang, Caiqi Zhang, Zhisong Zhang, Xinting
+Huang, Sen Yang, Nigel Collier, Dong Yu, and
+Deqing Yang. 2024b. Logu: Long-form genera-
+tion with uncertainty expressions. arXiv preprint
+arXiv:2410. 14309.
+
+Xi Ye, Fangcong Yin, Yinghui He, Joie Zhang, Howard
+Yen, Tianyu Gao, Greg Durrett, and Danqi Chen.
+2025. Longproc: Benchmarking long-context lan-
+guage models on long procedural generation. arXiv
+preprint arXiv:2501.05414.
+
+Howard Yen, Tianyu Gao, Minmin Hou, Ke Ding,
+Daniel Fleischer, Peter Izsak, Moshe Wasserblat, and
+Danqi Chen. 2025. Helmet: How to evaluate long-
+context language models effectively and thoroughly.
+In International Conference on Learning Representa-
+tions (ICLR).
+
+Peitian Zhang, Zheng Liu, Shitao Xiao, Ninglu Shao,
+Qiwei Ye, and Zhicheng Dou. 2025. Long context
+compression with activation beacon. In The Thir-
+teenth International Conference on Learning Repre-
+sentations.
+
+Xinrong Zhang, Yingfa Chen, Shengding Hu, Zihang
+Xu, Junhao Chen, Moo Hao, Xu Han, Zhen Thai,
+Shuo Wang, Zhiyuan Liu, and Maosong Sun. 2024.
+coBench: Extending long context evaluation beyond
+100K tokens. In Proceedings of the 62nd Annual
+Meeting of the Association for Computational Lin-
+guistics (Volume 1: Long Papers), pages 15262—
+15277, Bangkok, Thailand. Association for Compu-
+tational Linguistics.
+
+A Appendix
+
+A.1 Related Work
+
+Long Input and Output Models Recent advance-
+ments in LLMs have significantly improved long-
+context input processing through techniques such
+as efficient attention (e.g., Flash Attention (Dao,
+2024), Ring Attention (Liu et al., 2024b)), sparse
+attention methods (e.g., shifted sparse attention
+in LongLoRA (Chen et al., 2024), dilated atten-
+tion (Ding et al., 2023)), and memory mechanisms
+like recurrent caching (Zhang et al., 2025; Bulatov
+et al., 2023). For long output generation, methods
+like Suri (Pham et al., 2024) have explored multi-
+constraint instruction following, while Long Writer
+(Bai et al., 2024b) introduced AgentWrite to enable
+ultra-long outputs by decomposing tasks into sub-
+tasks. Additionally, the Self-Lengthen framework
+(Quan et al., 2024) iteratively expands initial out-
+puts, training models to generate longer responses
+without requiring auxiliary data. These innovations
+
+enable LLMs to handle both long inputs and gener-
+ate extended outputs, with parallel efforts focused
+on improving inference efficiency (Dumitru et al.,
+2025).
+
+Long Generation Benchmarks Long generation
+benchmarks typically rely on similarity-based met-
+rics like a-nDCG and SelfBLEU, or LLM-as-a-
+Judge approaches (Que et al., 2024; Bai et al.,
+2024b), which struggle with longer texts due to
+their complexity. An alternative is to decom-
+pose evaluation into atomic statements, either ex-
+tracted automatically using search engines or fixed
+databases for factual accuracy (Song et al., 2024;
+Wei et al., 2024; Samarinas et al., 2025), or manu-
+ally designed through expert discussions (Tan et al.,
+2024) or checklists (Que et al., 2024). However,
+these methods face verification challenges due to
+broad or trivial claims from automated extraction
+and incompleteness from manual design. To ad-
+dress this, objective tasks, such as MMLU (Liu
+et al., 2024c) and procedural verification, provide
+more controlled evaluations but often misalign with
+real-world scenarios. While they support up to 4k
+tokens, they remain limited for longer texts, high-
+lighting the need for more fine-grained and special-
+ized benchmarks across different domains (Wang
+et al., 2025; Yang et al., 2025c).
+
+A.2. Answer Length
+
+Our analysis of generated output lengths, detailed
+in Table 7, reveals discrepancies between instructed
+and actual token counts across all evaluated mod-
+els. Key findings are as follows: First, most mod-
+els exhibit poor adherence to explicit length con-
+straints, with the deviation increasing for longer
+targets (4k and 8k tokens). Second, distinct pat-
+terns emerge based on model type. Reasoning-
+oriented models (DeepSeek-R1) and certain propri-
+etary models (GPT-40) consistently produce out-
+puts substantially shorter than requested. In con-
+trast, the Qwen3 series demonstrates more effective
+length control than its predecessor, Qwen2.5. Cru-
+cially, we find no direct correlation between output
+length and overall task performance. Verbosity
+does not equate to higher quality, as many models
+that generate longer text achieve lower scores on
+our benchmark’s core metrics.
+
+A.3 AP Style Criteria
+
+In our AP Style News Writing task, we assess a
+model’s proficiency in adhering to complex, real-
+world stylistic guidelines from the Associated Press
+
+
+===== PAGE BREAK =====
+
+Table 7: Average output length for each model across
+four target length settings, highlighting models’ adher-
+ence to length constraints.
+
+Model Name                                                     1k             2k             4k             8k
+
+DeepSeek-R1-Distill-Qwen-32B        874.2    271.8 1404.6 1585.3
+DeepSeek-R1-Distill-Qwen-7B         430.5    731.6 1931.0 1809.3
+LongWriter-glm4-9B                  791.0 2156.1 2895.6 3277.4
+Meta-Llama-3-70B Instruct             662.1    504.6 2180.7 2613.9
+Meta-Llama-3-8B Instruct              155.8    592.0 2119.5 2520.0
+Phi-4-mini-instruct                                   2088.7 2594.3 2649.3 2606.7
+Qwen?2.5-14B-Instruct                 360.8 2188.8 2744.8 2987.2
+Qwen2.5-14B-Instruct (1M)            913.2    477.3, 1678.4 2092.7
+Qwen2.5-3B Instruct                   130.8    558.7. 1938.7 2178.6
+Qwen2.5-72B Instruct                                242.9        831.2 2341.0 2515.5
+Qwen2.5-7B Instruct                  069.8    669.7. 2193.4 2351.4
+Qwen2.5-7B Instruct (1M)             933.1    370.8 1666.8 2087.3
+DeepSeek-R1                         559.3    746.5 1078.0 1558.4
+SeepSeek-V3                        674.7    120.3 1405.2 1696.3
+Gemini-2.0-flash                                         700.2        139.4 1748.9 2385.3
+GPT-40-2024-08-06                                         442.8         541.3         636.4         739.4
+GPT-40-2024-11-20                                    649.5        802.6        917.0        947.9
+Llama-4-maverick-17b-128e-instruct    779.1     160.0 1331.5 1780.2
+Llama-4-scout-17b-16e-instruct         953.6    484.9 1888.5 2318.0
+03-mini-2025-01-31                                  1057.0 2136.4 2958.8 2948.1
+Qwen-long                                                   647.4        952.8 1364.4 1733.8
+Qwen3-14b                          727.8 2208.0 2836.7 3750.7
+Qwen3-32b                          655.3    354.9 2411.2 3278.3
+Qwen3-4b                                                    658.5        436.0 2455.8 3227.5
+Qwen3-8b                           670.2    552.8 2666.7 3635.0
+QwQ-plus-2025-03-05                606.0    857.4 1263.6 1654.2
+
+(AP) Stylebook. To ensure an objective and verifi-
+able evaluation, we moved beyond holistic review
+and focused on verifiable rules. The creation of our
+test cases was guided by ten distinct categories of
+AP Style rules, as detailed in Figure 8. For each
+category, we generated Constraint-Verifier pairs
+where the Constraint is a factual statement deliber-
+ately crafted to violate a specific rule (e.g., writing
+"7 apples" instead of "seven apples"). The corre-
+sponding Verifier is the same statement, corrected
+to be fully compliant with AP style. The model is
+then tasked with incorporating the factual informa-
+tion from the incorrect Constraint into its generated
+article, but in the stylistically correct form.
+
+A.4_ Details of sample construction
+
+CSV Sales Report Analysis (SR): The methodol-
+ogy facilitates the generation of synthetic transac-
+tional sales data intrinsically correlated with corre-
+sponding analytical conclusions. The process com-
+mences with the definition of foundational sales
+scenario parameters, including sales region, tar-
+get fiscal period, currency, overarching sales tar-
+gets, and antecedent period sales figures, along-
+side a predefined corpus of sales representatives,
+product lines, and operational cities. A pivotal as-
+pect involves the stochastic injection of predefined
+systemic biases during each operational instance;
+these biases may pertain to overall target achieve-
+ment (e.g., exceeding, meeting, or missing targets),
+growth trajectory (positive, neutral, or negative),
+
+the anomalous performance of specific sales repre-
+sentatives or products, and variations in new cus-
+tomer acquisition rates. These stochastically deter-
+mined biases subsequently modulate the synthesis
+of individual transactional records. Attributes of
+each transaction, such as sales representative as-
+signment, product selection, customer provenance
+(new versus existing), and critically, the final trans-
+action value, are probabilistically influenced by the
+afore-mentioned biases. This ensures that the gen-
+erated dataset not only achieves a specified volume
+but also exhibits inherent, bias-driven characteris-
+tics across multiple dimensions, thereby providing
+a feature-rich foundation for subsequent analytical
+procedures. Upon completion of data synthesis,
+the resultant structured dataset is subjected to a
+multi-dimensional analytical engine. This engine
+emulates real-world business intelligence reporting
+by performing comprehensive quantitative aggre-
+gations and inferential processing across diverse
+facets, including overall performance metrics (e.g.,
+total sales versus target, period-over-period growth,
+average transaction value), sales representative ef-
+ficacy (e.g., top and bottom performers, target at-
+tainment distributions), product performance (e.g.,
+leading revenue generators, category contributions),
+geographical sales distribution, and customer seg-
+ment analysis (e.g., new versus existing customer
+value, key account contributions). Key metrics
+and identified trends derived from this analysis are
+then articulated as concise, natural language analyt-
+ical conclusions. To enhance utility and stimulate
+further inquiry, each conclusion is systematically
+paired with a relevant analytical query, designed to
+prompt deeper investigation into the causal factors
+underpinning the observed phenomena. The system
+culminates in the delivery of two principal outputs:
+the raw, granular transactional dataset (typically in
+CSV format), which serves as the evidentiary basis
+for analysis, and a structured compendium (typi-
+cally in JSON format) containing metadata, key
+performance indicators, and a curated, prioritized
+set of "conclusion-query" pairings, offering directly
+consumable insights for simulated business report-
+ing. This integrated pipeline underscores a design
+philosophy centered on the coherent synthesis of
+data with its analytical interpretation.
+
+Code Fixing with Flake8 Compliance (CF): The
+system employs a generative methodology to syn-
+thesize Python source code exhibiting a high den-
+sity of nuanced linting violations, intended to serve
+as challenging test instances for static analysis tools
+
+
+===== PAGE BREAK =====
+
+Table 8: Configuration of large language models, their backends and decoding parameters provided by different
+
+suppliers
+Provider Backend     Model              Decoding Parameters
+vLLM            Meta-Llama-3.1-8B-Instruct / Meta-       temperature: Q.7, top_p: 0.8,
+Meta                       Llama-3.1-70B-Instruct                 max_tokens: 8192, stream: False
+Alivun Dashscope   llama-4-scout-17b-16e-instruct           temperature: @.7, max_tokens:
+y         P                                       8192, stream: True
+llama-4-maverick-17b-128e-instruct        temperature: @.7, max_tokens:
+8192, stream: True
+gpt-40-2024-11-20                      temperature: Q.7, max_tokens:
+OpenAlI   OpenAI API                             8192, stream: True
+o03-mini-2025-01-31                     temperature: @.7, max_tokens:
+8192, stream: True
+gpt-40-mini-2024-07-18                 temperature: @.7, max_tokens:
+8192, stream: True
+OpenAI API     gemini-2.0-flash                temperature: @.7, max_tokens:
+Google
+8192, stream: True
+vLLM            gemma-3-12b-it / gemma-3-27b-it        temperature: @.7, max_tokens:
+8192, stream: False
+Zhipu AI vLLM            Long Writer-glm4-9b                   max_tokens: 8192, stream: False
+Microsoft vLLM            Phi-4-mini-instruct                    max_tokens: 8192, stream: False
+DeepSeek  Aliyun Dashscope deepseek-v3 / deepseek-r1          temperature: @.7, max_tokens:
+8192, stream: True
+vLLM        DeepSeek-R1-Distill-Qwen-32B       max_tokens: 8192, stream: False
+vLLM           Qwen?2.5-14B-Instruct-1M               max_tokens: 8192, stream: False
+Aliyun Dashscope qwen-long                           temperature: Q.7, max_tokens:
+8192, stream: True
+Alibaba
+vLLM        Qwen2.5-3B/7B/14B/72B-Instruct      temperature: Q.7, top_p: 0.8,
+max_tokens: 8192, stream: False
+vLLM            qwen3-14b-r                         temperature: Q.7, top_p: 0.8,
+max_tokens: 32768, stream: False
+Aliyun Dashscope qwen3-14b                           temperature: Q.7, top_p: 0.8,
+max_tokens: 8192
+vLLM            qwen3-32b                           temperature: Q.7, top_p: 0.8,
+max_tokens: 8192, stream: False
+Aliyun Dashscope qwen3-8b / qwen3-14b / qwen3-32b     temperature: @.7, max_tokens:
+8192, stream: True
+Aliyun Dashscope QwQ-plus / qwen-max series         temperature: Q.7, top_p: 0.8,
+
+presence_penalty: 1.5, max_tokens:
+8192, stream: True
+
+
+===== PAGE BREAK =====
+
+"Category 1”: "Number Usage",
+
+"Scoring_Criteria": "- Number writing rules:\n 1-9 should be written in words; 10 and above should use Arabic numerals.\n Always use
+Arabic numerals for ages, amounts, percentages, dates, and times.\n- Ordinal numbers:\n Do not use 'st', 'nd', 'rd', or 'th'.\n- Plural forms:\n
+Do not add an apostrophe to plural numbers (¢.g., '7s').",
+
+"Incorrect_Examples": "- 'I have 7 apples.'\n- "The event is on the 3rd day.'\n- 'She is twenty-five years old.'\n- 'All 7’s rolled.'"",
+"Correct_Examples": "- 'I have seven apples.'\n- "The event is on the third day.'\n- 'She is 25 years old.'\n- 'All 7s rolled."
+
+"Category 2”: "Punctuation",
+"Scoring_Criteria": "- Quotation marks:\n Periods and commas always go inside quotation marks.\n- Oxford comma:\n Avoid using the
+Oxford comma in lists.\n- Space rules:\n Use only one space after a period.\n- Colons:\n Capitalize the first letter after a colon only if it starts
+
+a complete sentence or is a proper noun.",
+
+"Incorrect_Examples": "- He said, 'Let’s go'.\n- Red, white, and blue.\n- This is a sentence. Another one follows.\n- 'The following: rules.'",
+
+"Correct_Examples": "- He said, 'Let’s go.'\n- Red, white and blue.\n- This is a sentence. Another one follows.\n- "The following: Rules."
+
+"Category 3”: "Dates and Times",
+"Scoring_Criteria": "- Date rules:\n Do not use ordinal indicators like 'Ist'.\\n Abbreviate months as Jan., Feb., Aug., Sept., Oct., Nov., Dec.
+\n- Time rules:\n Use a.m./p.m. format and omit ':00' for whole hours.\n Write 'midnight' and 'noon' instead of '12 a.m.' or 12 p.m."",
+
+"Incorrect_Examples": "- "The event is on July 3rd.'\n- 'It starts at 8:00 p.m.'\n- 'Meet me at 12 p.m."",
+
+"Correct_Examples": "- 'The event is on July 3.'\n- 'It starts at 8 p.m.'\n- 'Meet me at noon."
+
+"Category 4”: "Addresses and Locations",
+
+"Scoring_Criteria": "- Street address rules:\n Abbreviate 'Ave.', 'Blvd.', 'St.' but spell out 'Road'.\n- State name rules:\n Abbreviate state
+names after city names (except Alaska, Hawaii, Idaho, etc.).\n- Direction rules:\n Use lowercase for directions like 'north' and 'south'.",
+"Incorrect_Examples": "-'1600 Pennsylvania Avenue'\n- "Nashville, Tennessee'\n- 'We went to the East last year.'",
+"Correct_Examples": "- '1600 Pennsylvania Ave.'\n- 'Nashville, Tenn.'\n- 'We went east last year."
+
+"Category 5”: "Titles and Positions",
+"Scoring_Criteria": "- Title rules:\n Capitalize formal titles before a person's name; use lowercase after the name or when used alone.\n
+Avoid courtesy titles like Mr., Mrs., Ms.\n- Gender-neutral language:\n Use gender-neutral terms (e.g., 'police officer’ instead of 'policeman’).",
+"Incorrect_Examples": "- ‘President Joe Biden visited.'\n- 'Joe Biden, President, spoke.'\n- "The policeman arrived.",
+
+"Correct_Examples": "- 'President Joe Biden visited.'\n- 'Joe Biden, the president, spoke.'\n- 'The police officer arrived."
+
+"Category 6”: "Media References",
+
+"Scoring_Criteria": "- Reference rules:\n Add quotation marks around titles of articles, books, movies, songs, etc.\n Do not use quotation
+marks for newspaper ot magazine names; capitalize them.\n Use website titles instead of URLs.\n- Reference format:\n Provide full
+information on first mention; simplify subsequent mentions.",
+
+m
+
+"Incorrect_Examples": "- 'I read the New York Times today.'\n- 'Check out www.google.com.'\n- ‘According to the study."",
+"Correct_Examples": "- 'I read The New York Times today.'\n- 'Check out Google.'\n- 'According to the study by Smith et al."
+
+"Category 7”: "Capitalization Rules",
+"Scoring_Criteria": "- Proper nouns:\n Capitalize specific names (e.g., places, institutions).\n- Seasons and directions:\n Only capitalize
+seasons/directions in specific cases (e.g., "Winter Olympics').\n- Abbreviations:\n Follow capitalization rules for abbreviations.",
+"Incorrect_Examples": "- "The River flows north.'\n-'We went to the East last year.'\n- "The study was conducted in the Summer."",
+
+"Correct_Examples": "- 'The river flows north.'\n- 'We went east last year.'\n- 'The study was conducted in the summer."
+
+"Category 8”: "Technical Terms",
+"Scoring_Criteria": "- Technical terms:\n Spell technical terms correctly (e.g., ‘email’, 'smartphone’).\n Capitalize brand names like
+"iPhone'.\n Write 'website' as one word and 'web page' as two words.\n- Spelling:\n Ensure accurate spelling of technical terms.",
+"Incorrect_Examples": "- 'I sent an E-mail.'\n- 'Check out my new Iphone.'\n- 'Visit our Webpage."",
+
+"Correct_Examples": "- 'I sent an email.'\n- 'Check out my new iPhone.'\n- 'Visit our web page."
+
+"Category 9”: "Clarity and Brevity",
+"Scoring_Criteria": "- Brevity:\n Avoid long or complex sentences.\n- Readability:\n Use simple language suitable for general audiences.
+\n- Consistency:\n Maintain consistent style throughout the text.",
+"Incorrect_Examples": "- "The aforementioned individual arrived at the location.'\n- "This is a highly technical subject matter.'",
+
+"Correct_Examples": "- 'The person arrived at the site.'\n- "This is a technical topic."
+
+"Category 10”: "Overall Consistency",
+"Scoring_Criteria": "- Consistency:\n Maintain consistent style for numbers, punctuation, capitalization, etc.\n- Style:\n Avoid mixing
+styles (e.g., APA, Chicago).\n- Structure:\n Ensure logical flow and clear paragraph transitions.",
+"Incorrect_Examples": "- Mixed number formats (e.g., 'seven' and '8')\n- Inconsistent punctuation (e.g., 'quote.' vs. 'quote.')\n- Large jumps
+between paragraphs.",
+"Correct_Examples": "- Unified number formats.\n- Consistent punctuation.\n- Smooth paragraph transitions."
+
+Figure 8: Generation and Evaluation Rules for Constraints in the News Writing Task. Ten dimensions, each
+containing rules, positive examples, and error cases that guided the creation of verifiable test instances.
+
+
+===== PAGE BREAK =====
+
+and code quality assessment. The generation pro-
+cess is initiated by establishing global configuration
+parameters, including stylistic targets (e.g., line
+length) and complexity constraints (e.g., maximum
+nesting depth, function length), alongside lexical re-
+sources such as curated lists of nouns, verbs, and ad-
+jectives for constructing semantically plausible, al-
+beit potentially misleading, identifiers. A core com-
+ponent is a dynamic scope management system,
+which tracks variable definitions and usage across
+nested lexical contexts. This enables the generation
+of syntactically valid code where identifier-related
+violations, such as improper naming conventions
+(e.g., N-series violations from flake8-naming) or
+unused variables (F841), are contextually embed-
+ded. Identifier generation itself is a probabilistic
+process, designed to stochastically introduce devia-
+tions from Python Enhancement Proposal 8 (PEP
+8) style guidelines, while also attempting to create
+names that might subtly obscure their true purpose
+or shadow existing identifiers in parent scopes. The
+synthesis of executable code blocks and function
+bodies is orchestrated through a weighted, proba-
+bilistic selection of diverse code constructs. These
+constructs range from simple assignments and print
+statements to complex control flow structures like
+conditional statements and loops. Each construct
+generator is imbued with the capability to intro-
+duce specific categories of violations. For instance,
+conditional statement generators might create ex-
+plicit boolean comparisons (SIM21x) or if-else pat-
+terns amenable to ternary expressions (SIM108).
+Loop generators may produce unconventional iter-
+ator variable names or inefficient comprehensions
+(C4xx series from flake8-comprehensions). Fur-
+thermore, generators for function definitions are
+specifically designed to introduce more complex
+issues, such as mutable default arguments (BO06
+from flake8-bugbear) or function calls within de-
+fault argument expressions (B008), often obfus-
+cated by the presence of other parameters and non-
+trivial function bodies. Whitespace and formatting
+violations (E-series and W-series) are pervasively
+introduced at various granularities, from inconsis-
+tent spacing around operators and after commas to
+improper blank line usage and trailing whitespace.
+The system also synthesizes a sequence of inter-
+dependent functions, simulating a rudimentary pro-
+gram flow (e.g., data loading, validation, analysis,
+reporting), which are ultimately orchestrated within
+a main execution block. This structural coherence
+provides a more realistic backdrop for the embed-
+
+ded violations, moving beyond isolated infractions
+to scenarios requiring more holistic refactoring.
+The overall probability of introducing a violation is
+a configurable parameter, allowing for control over
+the density of infractions, with the system actively
+aiming to make these violations less trivial to au-
+tomatically or manually remediate by intertwining
+them with functional, albeit flawed, program logic.
+The final output is a runnable Python script, replete
+with these intentionally challenging, multi-category
+linting issues.
+
+KG to Text Biography Generation (BioG): sys-
+tem synthesizes rich, protagonist-centric know]-
+edge graphs (KGs) and subsequently translates
+salient subgraphs into natural language narra-
+tives. The generative process for each KG com-
+mences with the instantiation of a unique protag-
+onist, whose attributes, including socio-economic
+background and a randomly assigned character
+archetype (e.g., Scientist, Artist, Entrepreneur), are
+stochastically determined. These initial conditions
+significantly influence the subsequent probabilistic
+expansion of the KG. The protagonist’s lifespan
+and historical era are also established to ensure
+temporal coherence for related entities and events.
+The KG is then incrementally constructed through
+an iterative expansion process originating from the
+protagonist. At each step, existing nodes are se-
+lected for expansion based on their proximity to
+the protagonist and predefined archetypal relation-
+ship propensities. New nodes, representing persons,
+organizations, places, creative works, or events, are
+generated with contextually relevant attributes, or
+existing nodes are connected, adhering to a set
+of permissible relationship types defined within a
+structured map. This map also dictates the likeli-
+hood of specific relationships based on the source
+node’s type and, for persons, their current life phase
+(e.g., Childhood, Education, MidCareer). Attribute
+generation for new entities, such as names, job
+titles, or event descriptions, leverages procedural
+generation techniques and controlled randomness,
+often influenced by the protagonist’s established
+background and archetype to foster narrative con-
+sistency. Temporal plausibility is rigorously main-
+tained by ensuring that dates associated with re-
+lationships and events align with the lifespans of
+involved entities. Once a KG reaches a target size
+or expansion limits, a focused subgraph is extracted.
+This subgraph typically comprises nodes within a
+specified graph distance from the protagonist, rep-
+resenting the most narratively relevant portion of
+
+
+===== PAGE BREAK =====
+
+the larger KG. This subgraph then serves as the di-
+rect input for the text generation phase. Each node
+attribute (excluding the primary name) and each
+relationship within this subgraph, along with sig-
+nificant attributes of these relationships (e.g., roles,
+dates, specific details like degree or investment
+amount), are systematically converted into individ-
+ual descriptive sentences using predefined, tem-
+plated linguistic patterns. These patterns map struc-
+tural KG elements (subject-predicate-object triples,
+or subject-attribute-value) to natural language con-
+structs. The system’s output for each generated KG
+is multi-faceted, including the full KG data, the
+extracted subgraph data, and the derived natural
+language sentences, typically stored in structured
+JSON files. Optionally, visualizations of both the
+full KG and the subgraph can be produced using
+graph layout algorithms. Finally, as an aggrega-
+tive step, the natural language sentences generated
+from all individual KGs within a single execution
+run are compiled into a consolidated dataset, facili-
+tating larger-scale analysis or downstream natural
+language processing tasks. This methodology em-
+phasizes the creation of datasets where structured
+knowledge and its textual manifestation are coher-
+ently and traceably linked, grounded in simulated
+sociological and temporal contexts.
+
+AP Style News Writing (NW): The system under
+discussion is designed to rigorously evaluate a large
+language model’s (LLM) proficiency in generating
+news reports that conform to the Associated Press
+(AP) style guidelines. This evaluation is predicated
+on the model’s ability to synthesize a coherent nar-
+rative based on a given news topic query, integrate a
+series of predefined factual statements, and adhere
+to a specified target word count, all while meticu-
+lously applying AP style conventions. The process
+of generating verifiable test data, specifically the
+factual statements, is a critical precursor to the eval-
+uation. These statements are meticulously crafted
+to serve as direct inputs that the LLM must incorpo-
+rate into its generated news article. Crucially, each
+statement is designed to test a specific facet of the
+AP style guide; thus, many are intentionally formu-
+lated to violate these rules. For instance, a state-
+ment might employ incorrect number usage (e.g.,
+writing out "eleven" instead of using the numeral
+"11"), misuse punctuation (e.g., including an Ox-
+ford comma), or improperly format dates, times, or
+titles. Accompanying each such potentially flawed
+statement in the test dataset is its corresponding
+correct AP style expression and a clear rationale
+
+explaining the nature of the original stylistic error.
+This structured approach ensures that each state-
+ment serves as a verifiable unit for assessing the
+LLM’s capacity for rule-based stylistic correction.
+The construction of the prompt provided to the
+generative LLM is a multi-component process. It
+begins with the query, which defines the overarch-
+ing news topic, often suggesting a narrative struc-
+ture or specific angles to be explored. To this, the
+complete AP style rubric—a comprehensive guide
+detailing rules across numerous categories with il-
+lustrative examples—is appended. A key element
+of the prompt is a curated list of the aforementioned
+factual statements. These statements, presented in
+their original, potentially non-compliant form, are
+explicitly designated as mandatory inclusions for
+the generated article. The prompt also specifies the
+target word count, imposing a length constraint on
+the LLM’s output. This careful assembly of the
+prompt creates a challenging scenario where the
+LLM must not only generate fluent and relevant
+content based on the query but also actively en-
+gage with the AP style guide to identify and rectify
+the stylistic infelicities within the provided state-
+ments as they are woven into the narrative. The
+verifiability of the task lies in the direct comparison
+of the model’s treatment of these embedded state-
+ments against their known correct AP style forms,
+all within the context of the broader news writing
+assignment.
+
+A.5 Evaluation Efficiency
+
+Given the scale of our evaluation (23 models across
+5,600 samples), understanding these efficiency as-
+pects is crucial.
+
+For this analysis, we utilized two nodes, each
+equipped with 8 NVIDIA A100 GPUs (totaling 16).
+One node was dedicated to deploying the evaluator
+model, Qwen2.5 72B, while the other hosted the
+model under test, Llama3.1 8B. To establish a clear
+baseline, we measured performance in a single-
+threaded mode. We recorded the inference and
+evaluation times for a single sample across seven
+distinct tasks, varying the input context length at
+four levels: 1k, 2k, 4k, and 8k tokens.
+
+The results of this single-threaded performance
+analysis are presented in Table 9. As shown, the
+evaluation time can be a significant component
+of the total processing time, particularly for tasks
+like News Writing (NW), which involve complex
+rubric-based assessments. For tasks such as Knowl-
+edge Graph (KVG) and Sales Message (SMS), the
+
+
+===== PAGE BREAK =====
+
+Table 9: Efficiency analysis of the evaluation pipeline. Each value represents the time in seconds to process a single
+sample in single-threaded mode. The analysis was conducted using Qwen2.5 72B as the evaluator and Llama3.1 8B
+
+as the model being tested.
+
+Metric (Input Length)         CF  BioG       SR         NW KVG      SMS       PR
+Inference (1k)                  29.72 20.58 16.29       45.10 139.20 134.95 35.99
+Evaluation (1k)                  731       9.38 4.54       87.04       0.00       0.00 0.01
+Inference (2k)                  28.86 16.49 24.63       22.44 129.35 133.46 23.75
+Evaluation (2k)                  5.34       2.42 8.89 120.05       0.00       0.00 0.00
+Inference (4k)                  41.12 121.53 16.04       32.95 161.03 146.42 31.42
+Evaluation (4k)                  2.54 20.13 12.17 155.70       0.00       0.00 0.01
+Inference (8k)                106.56 33.62 36.04       32.91 193.31 149.92 90.09
+Evaluation (8k)                  5.49 30.32 12.96 1439.32       0.00       0.00 0.01
+
+evaluation is nearly instantaneous as it relies on
+simple keyword matching. The full names for the
+task abbreviations can be found in Table 2 of the
+main paper.
+
+To optimize efficiency in our main experiments,
+we employed parallel processing. For inference,
+we used 16 parallel threads. For the evaluation
+stage, we utilized 5 parallel threads with appropri-
+ate batch sizes tailored to the task (e.g., a batch
+size of 5 for Sales Report and Knowledge Graph
+tasks, and 10 for AP Style News). The evaluation
+pipeline ran on eight A100 GPUs, while inference
+was performed either on a separate set of eight
+A100 GPUs for local models or via API calls for
+proprietary models. This parallelized setup signifi-
+cantly reduced the overall wall-clock time required
+for our large-scale benchmark.
+
+A.6 Additional Data Examples
+
+To provide a concrete understanding of the tasks
+within the LongWeave benchmark, this section
+presents illustrative examples of the input prompts
+used during evaluation. These examples showcase
+the structure of the input materials, the detailed
+instructions, and the specific constraints that mod-
+els must follow. The figures below cover all seven
+tasks: KG to Text Biography Generation (Figure 9);
+Code Fixing (Figure 10 and 11); AP Style News
+Writing, which includes the topic, factual state-
+ments, and style rubric (Figure 12,13, and14); Para-
+graph Reordering (Figure 15); State Machine Sim-
+ulation and KV Dictionary Generation (Figure 16);
+and CSV Sales Report Analysis, which details the
+data and questions (Figure 17 and 18). Collectively,
+
+these examples demonstrate the diversity of chal-
+lenges posed by LongWeave and provide insight
+into the practical implementation of CoV-Eval.
+
+A.7 Details of Task Generator
+
+To ensure transparency and reproducibility, all test
+samples in LongWeave are synthetically generated
+through rule-based pipelines. The generation pro-
+cess for each task, illustrated in Figures 19 to 25,
+follows a consistent three-stage process. First,
+Attribute Sampling defines the core parameters
+and complexity of each task instance. Second,
+Joint Generation uses these attributes to procedu-
+rally create the aligned triad of Material (Xraw),
+Constraint (C), and Verifier (V). Finally, the
+third stage in each figure provides a concrete ex-
+ample of the generated Material, Constraint,
+and Verifier.
+
+
+===== PAGE BREAK =====
+
+Example of Task: KG to Text Biography Generation Generation (BioG)
+
+Model Input
+
+Role: Biographer / Content Write
+
+Task: Write a coherent and readable biography about the entity associated with the slug '00006_ambassador_cathy_allen’.
+Your biography must be based exclusively on the factual statements provided below in Subject-Predicate-Object (Triple)
+format. Combine the facts naturally into a narrative.
+
+Input Facts (Triples):
+
+e A Manifesto for Incubate Impactful E-Markets - authored by - Ambassador Cathy Allen
+e A Manifesto for Incubate Impactful E-Markets - publication year - 1874
+
+e Ambassador Cathy Allen - participated in - Major Promotion (1821)
+
+e Ashley Bell - birth year - 1961
+
+e Barry Ballard - birth year - 1979
+
+e Barry Ballard - job - Merchandiser, retail
+
+e Barry Ballard - socioeconomic background - Middle Class
+
+Writing Style:
+Produce a well-structured paragraph or paragraphs. Ensure smooth transitions between facts where possible. The tone
+should be informative and neutral.
+
+Required Content:
+Ensure that the core information from each of the input triples is included in your generated biography.
+
+Length Specifications (TARGET WORD COUNT):
+e The biography should be around 1024 words. Strive for this length, but prioritize covering all facts accurately.
+
+You may now begin writing the biography based on the provided triples around 1024 words:
+
+LLM-as-a-Judge
+eval_prompt = f£"""
+
+**Task:** Evaluate if the core factual information conveyed by each numbered ‘Target Sentence' below
+
+is accurately and adequately covered or represented, either directly or semantically, within the
+provided 'Generated Biography Text’.
+
+**Generated Biography Text:**
+--- START BIOGRAPHY ---
+{biography text}
+
+--- END BIOGRAPHY ---
+
+**Target Sentences (Facts to find):**
+
+{numbered_sentences}
+
+**Evaluation Criteria:**
+
+For each numbered target sentence (from 1 to {batch_size}), determine if its essential factual
+statement is present in the 'Generated Biography Text'. Exact wording is not required, but the core fact
+must be included in the biography. Judge based *only* on the presence of the information, not the
+
+writing style or fluency. Answer 'true' if the fact is present, 'false' otherwise.
+
+**Qutput Format: **
+Respond ONLY with a single JSON list containing boolean values (true/false), corresponding *in
+order* to the numbered Target Sentences (1 to {batch_size}). The list must have exactly {batch_size}
+
+elements. Do not include any explanations or other text outside the JSON list.
+
+**Example Output (if batch_size was 3):**
+
+[true, false, true]
+
+**Your JSON Output:**
+
+Figure 9: An illustrative example for the KG to Text Biography Generation (BioG) task.
+
+
+===== PAGE BREAK =====
+
+Example of Task: Code Fixing with Flake8 Compliance (CF)
+
+Model Input
+Role: Python Developer
+
+Task: You are given a Python code file that may contain syntax errors or violate style guidelines. Your goal is to fix the code
+so that it isrunnable and complies with the following coding standards:
+
+FLAKE8 CATEGORIES TO CHECK:
+
+e E/ W- pycodestyle
+Basic PEP 8 formatting errors (E) and warnings (W), such as inconsistent indentation (E111), extra spaces (E221), or line
+length violations (E501).
+
+e F- Pyflakes
+Potential runtime issues, e.g., undefined names (F821) or unused imports/variables (F401).
+
+e B- flake8-bugbear
+Code patterns prone to bugs or pitfalls, like modifying a list while iterating (BO07) or using mutable default arguments
+(BO08).
+
+e N- pep8-naming
+Naming convention violations, such as function names not in snake_case (N802) or class names not in CamelCase
+(N801).
+
+e SIM - flake8-simplify
+Suggestions to simplify and streamline code, for instance redundant if x == True checks (SIM102) or favoring
+dict.get over manual key checks (SIM108).
+
+e C4 - flake8-comprehensions
+Best practices around comprehensions: avoid unnecessary list() wrappers (C400) or use dict comprehensions instead of
+dict() calls with generator expressions (C401).
+
+Input Python Code:
+--- START OF CODE ---
+
+def LoadDataSource(source_path):
+™"Retrieve and parse input stream.
+print(‘Parse Data:',sourcepath)
+raw_data_struct = [
+
+{
+‘handle':-35,
+‘id’ : "ID_100',
+"fetch':'OtSAP5Bn0',
+"generate_log':False,
+"save':False
+
+},
+
+def MainEntryPoint():
+InputDataset=LoadDataSource(’./data/source.json')
+filtered_data=ValidateRecords(InputDataset)
+computed_metrics=CalculateStats(filtered_data)
+print_summary_report(computed_metrics)
+UpdateGlobalState() # Modify global state
+unusedRecord=None
+LongVariableName838 = 'result status product status event cache record log state result id user report status cach’
+CalculateStats_1(update_global_flag) # Call existing func
+
+if name == "main"
+MainEntryPoint()
+]
+
+Figure 10: An illustrative example for the Code Fixing (CF) task (Part 1/2).
+
+
+===== PAGE BREAK =====
+
+Example of Task: Code Fixing with Flake8 Compliance (CF)
+LLM-as-a-Jude
+
+eval_prompt = f£"""
+**Task:** Evaluate if 'FIXED CODE' is a relevant and complete code response to the ‘ORIGINAL CODE'.
+
+**Evaluation Criteria:**
+
+1. **Content Relevance (Answering the Request) :**
+
+*   **Relevant (true):** The 'FIXED CODE' directly attempts to modify, fix, or refactor the provided
+"ORIGINAL CODE'. It addresses the implicit request to correct or improve the original snippet.
+
+oS   **Not Relevant (false):** The 'FIXED CODE' does not address the original code. It might be
+unrelated code, a refusal, a question, an explanation *instead* of code, or generic template/placeholder
+
+code not adapted to the original.
+
+2. **Code Completeness (Providing Full Code) :**
+oS   **Complete (true):** The 'FIXED CODE' provides a full, runnable (or intended to be runnable)
+Python code snippet that represents the proposed modification or fix. It's not just a fragment, comment,
+or instruction.
+oS   **Incomplete (false):** The 'FIXED CODE' is not a complete code solution. It might be:
+o   Only an explanation or commentary about the fix.
+*   A code fragment (e.g., only a single corrected line without context).
+o   Instructions on how to fix the code (e.g., "You should change line 5 to...").
+
+o   An empty response or placeholder like "# [Your corrected code here]".
+**Overall Judgment: **
+Return “true” ONLY IF BOTH criteria (Content Relevance AND Code Completeness) are met. Otherwise, return
+
+~false>.
+
+**ORIGINAL CODE: **
+XXX
+
+**FIXED CODE: **
+
+XXX
+
+**Output:** Respond ONLY with JSON: {{"is_relevant_and_complete": true/false}}
+
+Figure 11: An illustrative example for the Code Fixing (CF) task (Part 2/2).
+
+
+
+===== PAGE BREAK =====
+
+Example of Task 6: AP Style News Writing (NW)
+
+Model Input (Part 1)
+
+Write a news report titled 'BioLumina Forests: A Bold Experiment in Genetic Engineering and Environmental Restoration.’
+Cover:
+
+1. The Project : Introduce the fictional nation of 'Aurora' and its groundbreaking 'BioLumina Forest Initiative,’ which uses
+genetically modified plants to emit natural light, reduce energy consumption, and combat climate change.
+
+2. The Science: Explain how fluorescent proteins from deep-sea organisms are used to create glowing trees that absorb
+CO2, purify air, and glow softly at night, creating a surreal, dreamlike environment.
+
+3. Controversy : Highlight debates over potential ecological risks, including disruption of native species, unintended
+consequences for food chains, and concerns about over-reliance on technological fixes.
+
+4. Pilot Results : Discuss early successes in degraded areas—improved air quality and tourism—but note declines in local
+wildlife populations, raising questions about habitat impact.
+
+5. Philosophical Reflection : Explore the broader implications of using advanced technology to restore nature—does it
+represent progress or hubris? Ils humanity truly ready to manage such interventions responsibly?
+
+Creative Details: Use elements like ‘Aurora,’ 'BioLumina Forest,’ and vivid imagery of glowing landscapes to craft an engaging
+narrative balancing hope with caution.
+
+You MUST strictly adhere to the AP News Style guidelines provided below.
+Your article will be evaluated on two equally-weighted dimensions: (1) Recall** of ALL required information, and (2)
+Compliance with the AP Style rules.**
+
+IMPORTANT: Each AP Style category includes example sentences that violate its rules. Rewrite and include all of
+them in your article, following AP Style and keeping their meaning. Missing or uncorrected items will reduce your
+score.
+
+=== CLARITY AND BREVITY ===
+Scoring Criteria:
+
+e Brevity:
+
+Avoid long or complex sentences.
+e Readability:
+
+Use simple language suitable for general audiences.
+e Consistency:
+
+Maintain consistent style throughout the text.
+
+Incorrect Examples:
+
+e ‘The aforementioned individual arrived at the location.’
+e ‘This is a highly technical subject matter.’
+
+Correct Examples:
+
+e ‘The person arrived at the site.’
+e ‘This is a technical topic."
+
+Content Requirements for ‘Clarity and Brevity’: Include and Rewrite EACH of the following statements to comply
+with the ‘Clarity and Brevity’ AP Style guidelines detailed above.
+
+1. The BioLumina Forest Initiative, launched by the fictional nation of Aurora, uses genetically modified plants to emit
+natural light, reduce energy consumption, and combat climate change.
+
+2. The glowing trees, created by inserting fluorescent proteins from deep-sea organisms, not only absorb CO2 but also
+purify the air, creating a surreal, dreamlike landscape that glows softly at night.
+
+3. While the BioLumina project has shown early success in improving air quality and boosting tourism, it has also raised
+concerns about declines in local wildlife populations.
+
+4. Critics argue that the project could disrupt local ecosystems by introducing genetically modified species, potentially
+upsetting the balance of food chains.
+
+5. In addition to its environmental benefits, the glowing trees offer an innovative solution to reducing energy use, but they
+also spark debates on the ethics of genetic engineering.
+
+6. The BioLumina Forest project represents a bold attempt to blend environmental restoration with cutting-edge
+technology, but its long-term effects on biodiversity remain uncertain.
+
+Figure 12: An illustrative example for the AP Style News Writing (NW) task (Part 1/3).
+
+
+
+===== PAGE BREAK =====
+
+Example of Task 6: AP Style News Writing (NW)
+
+Model Input (Part 2)
+
+7. Supporters of the initiative believe it could provide a model for sustainable development, but critics worry it may bea
+technological fix that overshadows deeper ecological issues.
+
+8. As the project expands, the need for careful oversight grows, as many question whether humanity is ready to manage
+such large-scale genetic interventions in nature.
+
+9. While the BioLumina initiative holds promise, it brings to light the ongoing struggle between technological progress and
+the need for responsible environmental stewardship.
+
+10. Ultimately, the future of the BioLumina Forests depends on finding a balance between technological innovation and
+
+environmental conservation, a challenge that requires global cooperation and careful planning.
+
+=== PUNCTUATION ===
+
+Scoring Criteria:
+
+e Quotation marks:
+Periods and commas always go inside quotation marks.
+e Oxford comma:
+Avoid using the Oxford comma in lists.
+e Space rules:
+Use only one space after a period.
+e Colons:
+
+Capitalize the first letter after a colon only if it starts a complete sentence or is a proper noun.
+Incorrect Examples:
+
+e He said, 'Let’s go’.
+
+e Red, white, and blue.
+
+e This is a sentence. Another one follows.
+e ‘The following: rules.’
+
+Correct Examples:
+
+e He said, 'Let’s go.'
+
+e Red, white and blue.
+
+e This is a sentence. Another one follows.
+e ‘The following: Rules."
+
+Content Requirements for ‘Punctuation’: Include and Rewrite EACH of the following statements to comply with the
+‘Punctuation’ AP Style guidelines detailed above.
+
+11. The nation of Aurora unveiled its BioLumina Forest Initiative, a project that uses glowing trees to reduce energy
+consumption and combat climate change.
+
+12. Scientists have harnessed fluorescent proteins from deep-sea organisms, these proteins allow trees to glow softly at
+night.
+
+13. Critics argue that the project could disrupt native species, harm food chains, and create an over-reliance on technology.
+
+14. Early results show improved air quality and increased tourism, however, local wildlife populations have declined.
+
+15. The glowing forests of Aurora are described as surreal dreamlike environments that captivate visitors.
+
+16. Does this bold experiment represent progress or hubris? The answer remains unclear.
+
+17. Aurora's BioLumina Forests emit light absorb CO2, and purify the air all at once.
+
+18. Local residents report mixed feelings about the initiative, some praise its innovation while others fear ecological risks.
+
+19. Tourists flock to see the glowing landscapes, they describe them as otherworldly and awe-inspiring.
+
+20. The philosophical debate centers around whether humanity can responsibly manage such interventions, the stakes are high.
+
+Length Specifications:
+e TARGET WORD COUNT: Aim foraround 1024 words.
+
+Begin writing your ~1024-word AP-style article below:
+
+Figure 13: An illustrative example for the AP Style News Writing (NW) task (Part 2/3).
+
+
+===== PAGE BREAK =====
+
+Example of Task 6: AP Style News Writing (NW)
+Model Output
+
+The nation of Aurora unveiled its BioLumina Forest Initiative, a project that uses glowing trees to reduce energy
+consumption and combat climate change. The initiative, launched by the fictional country, has sparked global interest and
+controversy. Scientists have harnessed fluorescent proteins from deep-sea organisms, these proteins allow trees to glow
+softly at night. The glowing trees, created by inserting fluorescent proteins from deep-sea organisms, not only absorb CO2
+but also purify the air, creating a surreal, dreamlike landscape that glows softly at night. The BioLumina Forest Initiative,
+launched by the fictional nation of Aurora, uses genetically modified plants to emit natural light, reduce energy
+consumption, and combat climate change.
+
+Aurora, a fictional nation known for its commitment to environmental innovation, has taken a dramatic step toward
+sustainability with its BioLumina Forests. These forests, unlike any seen before, are not just green spaces but glowing ...
+
+LLM-as-a-Judge
+
+evaluation_prompt = (
+
+"Please read the article and complete the EVALUATION TASK below:\n\n"
+f"=== ARTICLE CONTENT ===\n{response}\n\n"
+
+f"=== SCORING CRITERIA FOR '{category}' ===\n"
+f"Scoring Criteria:\n{rubric[ 'Scoring_Criteria']}\n"
+f"Incorrect Examples:\n{rubric[ 'Incorrect_Examples']}\n"
+
+f"Correct Examples:\n{rubric[ 'Correct_Examples']}\n\n"
+
+“EVALUATION TASK: \n"
+
+"For each statement listed below, perform the following evaluations: \n"
+
+"1. Determine whether the statement exists in the article (verbatim or semantically equivalent).
+If it exists, extract the exact matching content from the article.\n"
+
+"2. If the statement exists, determine whether it follows the AP rules as per the scoring
+criteria.\n"
+
+"3. Provide clear reasoning for your evaluation. \n\n"
+
+"Output format (JSON) :\n"
+
+"{\n"
+
+"  {\n!
+
+'    "statement_id": "Unique ID of the statement", \n'
+
+'    "statement": "Original statement",\n'
+
+'    "matched_content": "Exact matching content from the article (or empty string if not
+found)", \n'
+
+'    "thinking": "Explanation of the evaluation process and reasoning", \n'
+
+‘    "exists_in_ article": true/false, \n'
+
+‘    "follows_rules": true/false\n'
+
+'  4,\n!
+
+"ooo \m"
+
+"}\n\n"
+
+"Do NOT include any additional text or explanations outside the JSON array.\n"
+
+"Ensure that the JSON is valid and can be directly parsed by a JSON parser.\n\n"
+"STATEMENTS TO EVALUATE: \n"
+for i, stmt in enumerate(stmts, start=1):
+evaluation_prompt += (
+£"Statement {i}: {stmt['Statement']}\n"
+
+f£"   Why This Is Incorrect: {stmt[ 'Reason_for_Deduction']}\n"
+
+£"   How It Should Be Written: {stmt[ 'Correct_Expression']}\n\n"
+
+evaluation_prompt += "Please provide the evaluation results."
+
+Figure 14: An illustrative example for the AP Style News Writing (NW) task (Part 3/3).
+
+
+
+===== PAGE BREAK =====
+
+Example of Task 7: Paragraph Reordering (PR)
+Model Input
+
+Please rearrange the following paragraphs into a logically coherent article:
+
+[[Segment 0]]
+
+In the end, implied powers was used as justification for finishing the deal. [3] Later, directly borrowing from Hamilton, Chief
+Justice John Marshall invoked the implied powers of government in the United States Supreme Court case, McCulloch v.
+Maryland. [4] In 1816, the United States Congress passed legislation creating the Second Bank of the United States. The state
+of Maryland attempted to tax the bank. The state argued the United States Constitution did not explicitly grant Congress the
+power to establish banks. In 1819, the Court decided against the state of Maryland. Chief Justice Marshall argued that
+Congress had the right to establish the bank, as the Constitution grants to Congress certain implied powers beyond those
+explicitly stated. In the case of the United States Government, implied powers are powers Congress exercises that the
+Constitution does not explicitly define, but are necessary and proper to execute the powers. The legitimacy of these
+Congressional powers is derived from the Taxing and Spending Clause, the Necessary and Proper Clause, and the
+Commerce Clause. Implied powers are those that can reasonably be assumed to flow from express powers,[5] though not
+explicitly mentioned. This theory has flown from domestic constitutional law[6] to International law,[7] and European Union
+institutions have accepted the basics of the implied powers theory. [8] 4 They implied powers into the united states.......
+
+[[Segment 1]]
+
+Language links are at the top of the page across from the title. What links hereRelated changesUpload fileSpecial
+pagesPermanent linkPage informationCite this pageWikidata item In the United States, implied powers are powers that,
+although not directly stated in the Constitution, are implied to be available based on previously stated powers. When George
+Washington asked Alexander Hamilton to defend the constitutionality of the First Bank of the United States against the
+protests[1] of Thomas Jefferson, James Madison, and Attorney General Edmund Randolph, Hamilton produced what has
+
+now become the doctrine of implied powers. [2] Hamilton argued that the sovereign duties of a government implied the
+right to use means adequate to its ends. Although the United States government was sovereign only as to certain objects, it
+was impossible to define all the means it should use, because it was impossible for the founders to anticipate all future
+exigencies. Hamilton noted that the "general welfare clause" and the "necessary and proper clause" gave elasticity to the
+Constitution. Hamilton won the argument and Washington signed the bank bill into law. Another instance of the usage of
+implied powers was during the Louisiana Purchase, where, in 1803, the United States was offered $15 million for French
+territory. James Monroe was sent by Thomas Jefferson to France to negotiate, with permission to spend up to $10 million on
+the port of New Orleans and parts of Florida. However, a deal to purchase the entirety of French territory in the United
+States for $15 million was reached, even though this exceeded the given amount of $10 million. Although the decision was
+very popular and widely praised, it was unknown whether or not Jefferson had the power to negotiate the territory without
+the permission of Congress.
+
+[[Segment 2]]
+
+A Also outside President and Congress: for the Judiciary, see Incidental or Implied Powers of Federal Courts, by Harris,
+
+Robert Jennings, Chapter II, 1 Judicial Power of the United States (1940). 4 Especially in the common law legal community: see
+Sagar Arun, Notes towards a Theory of Implied Powers in (Indian) Constitutional Law, NUJS Law Review, Vol. 7, Issue 3-4
+(2014), pp. 249-262. / International Legal Personality and Implied Powers of International Organizations, by Rama-Montaldo,
+Manuel, British Yearbook of International Law, Vol. 44, pp. 111-156 (1970). 4 Andrea Giardina, Rule of Law and Implied
+Powers in the European Communities, The Italian Yearbook of International Law, Vol. 1, pp. 99-111. Categories:
+Constitutional lawDeductive reasoningLegal doctrines and principlesHidden categories: Articles with short descriptionShort
+description matches WikidataArticles with J9U identifiersArticles with LCCN identifiers This page was last edited on 2 March
+2023, at 12:05(UTC). additional terms may apply. By using this site, you agree to the Terms of Use and Privacy Policy.
+Wikipedia® is a registered trademark of the Wikimedia Foundation, Inc. , a non-profit organization.
+
+Requirements:
+
+1. Keep the original content of paragraphs unchanged, only adjust their order
+2. Use [[Segment X]] to identify original paragraph numbers, starting from 0 up to 2.
+
+Figure 15: An illustrative example for the Paragraph Reordering (PR) task.
+
+
+
+===== PAGE BREAK =====
+
+Example of Task: State Machine Simulation (SMS)
+Model Input
+
+Your task is to simulate a state transition process based on the following rules.
+The input string for this simulation is: '2020112011201010121112012102100022202000222211212010110'.
+
+The state machine operates with the following configuration:
+
+1     Initial State: SO
+2     State Transition Rules:
+Current State | Input | Next State | Output Signal
+So      0   So     0
+So      1   S1     1
+So      2   S2     2
+S1      0   S1     1
+S1      1   S2     2
+S1      2   So     0
+S2      0   S2     2
+S2      1   So     0
+S2      2   S1     1
+
+Here is an example of a valid state transition process:
+Assume the input string is '202'. The state transition process would be as follows:
+
+Current State | Input | Next State | Output Signal
+
+so   |2  |s2   |2
+S2   10 |s2   |2
+S2   [2 |S1   |1
+
+Note: The above example is dynamically generated based on the state transition rules and the input string. The actual
+output may vary depending on the specific input string.
+
+Based on the above rules, please generate a simulated state transition process for the input string
+'2020112011201010121112012102100022202000222211212010110'.
+
+Display the current state, input, next state, and output signal for each step.
+
+Ensure that the generated process strictly adheres to the state machine rules.
+
+Important:
+
+.        must list all steps.
+Do NOT generate any code or explanatory text. 2. Do NOT use any form of truncation. You
+
+Only provide the state transition process in the following format:
+Current State | Input | Next State | Output Signal
+
+<State>    | <Char>| <NextState>| <Output>
+
+Example of Task 5: KV Dictionary Generation (KVG)
+Model Input
+
+Generate a Python dictionary with the following requirements:
+
+Total entries: 20
+
+MUST include the entry: 'DKUNULZASGUKBXPBVUNROMKQMOKMTFBC:: ‘iwidr0 1birzxfv6s 8hkdxysaoyw8ce4i'
+The special entry should be placed at index 12
+
+Other keys and values must follow these rules:
+
+o Keys must be random strings of length 32, consisting ONLY of uppercase letters (A-Z) and underscores (_)
+o Values must be random strings of length 32, consisting ONLY of lowercase letters (a-z) and digits (0-9)
+o Keys and values MUST NOT contain any special characters (e.g., /, =, $, @, :, etc.) or spaces
+
+Output ONLY the dictionary in the following format (as a single-line string):
+{tt .., 'DKUNULZASGUKBXPBVUNROMKQMOKMTFBC": 'iwidr0O 1birzxfv6s8hkdxysaoyw8ce4i', ..., '...°:'..."}
+Ensure the dictionary string is valid JSON and can be parsed by json.loads() without errors.
+
+DO NOT include any code or explanations. Only return the dictionary string.
+
+Figure 16: Illustrative examples for the State Machine Simulation (SMS) and KV Dictionary Generation (K VG).
+
+
+===== PAGE BREAK =====
+
+Example of Task: CSV Sales Report Analysis (SR)
+Model Input
+
+Role:
+
+Senior Business Analyst
+Task:
+
+You are provided with raw sales transaction data in CSV format. Your goal is to perform a detailed analysis based only on this
+data and generate a comprehensive sales performance report.
+Input Sales Data (CSV Format):
+
+OrderlD OrderDate Region City     SalespersonID SalespersonName = SalespersonTarget CustomerID CustomerName IsNewCustomer  ProductID
+ORD-
+2025-        East                                  CUST-9151-
+
+2025-04-07 ast   Philadelphia EMP008     Meghan Rodriguez 130000               Tran-Griffith   False       PROD-O01 ...
+04-          Region                                      371
+00001
+ORD-
+2025-         East                                      CUST-3153- Mull   h
+
+2025-04-29 ~*** pittsburgh  EMPOO9     Danielle Hart    93000                MILO, JEMOERID |  t       PROD-SO3 ...
+04-                     Region                                                                                277           and Sosa
+00002
+
+Analysis Structure Guidance:
+
+Please structure your sales performance report logically. Start with an overall performance summary, then delve into
+analyses of sales representative performance, product performance, and any other relevant insights identified from the data.
+Use a narrative style suitable for a management report, ensuring all insights are directly derived from the provided CSV data.
+Required Content - Address These Specific Questions:
+
+Within your structured analysis, ensure you specifically attempt to answer the following questions based only on the
+provided data:
+
+e Question 1: Who was the top sales representative by revenue and what was their contribution?
+e Question 2: What was the average deal size across all transactions?
+e Question 3: Which product generated the most revenue and what was its contribution?
+e Question 4: How many sales representatives met or exceeded their sales targets?
+e Question 5: Which product had the highest sales volume in units?
+... (and 15 more questions)
+
+Length Specifications (TARGET WORD COUNT):
+The report should be around 1024 words. The deviation from this length may affect your evaluation.
+You may now begin your analysis and write the approximately 1024 words report:
+
+Model Output
+
+In April 2025, the East Region generated $1,526,782.59 in revenue from 200 transactions, with an average
+deal size of $7,633.91. Performance varied greatly among staff: Kimberly Odonnell MD (EMP016) led with
+$195,079.78 in sales, while Jeffrey Wagner (EMPO18) was the lowest performer with $59,904.92. Only 6 of
+20 reps met their targets. The top product by revenue was the 'Network Switch Pro' ($143,438.37), with
+hardware and software being the dominant sales categories...
+
+LLM-as-a-Jude
+Task: Evaluate the 'SALES REPORT' against a list of 'Question/Target Answer' pairs.
+For each item, determine:
+
+1. Answered: Did the reportattemptto answer the specific 'Question’? (true/false)
+2. Correct: If the question was answered, does the answer provided in the report align with the ‘Target
+Answer’? (true/false). If the question was not answered, this MUST be false.
+
+Figure 17: An illustrative example for the CSV Sales Report Analysis (SR) task (Part 1/2).
+
+
+
+===== PAGE BREAK =====
+
+Example of Task: CSV Sales Report Analysis (SR)
+
+Evaluation Guidance:
+
+e Focus on thesubstanceof the question and answer, not exact wording.
+
+e ‘Answered' means the report addresses the core topic of the question, even briefly.
+
+e ‘Correct’ means the information given in the report matches themeaning of the 'Target Answer’. Minor
+phrasing differences are acceptable. Numerical values should be reasonably close if applicable.
+
+e If the report doesn't mention the topic of the question at all, 'answered' is false and ‘correct' is
+automatically false.
+
+Question/Target Answer Pairs:
+
+--- START PAIRS ---
+
+Item 1:
+
+Question: Who was the top sales representative by revenue and what was their contribution?
+Target Answer: Chris Allen (EMP014) led the team with USD 948,895 in sales (31.6% of total).
+
+Item 2:
+Question: How many sales representatives met or exceeded their sales targets?
+Target Answer: 10 out of 20 reps with targets met or exceeded their goal (10 exceeded).
+
+Item 3:
+Question: What was the average deal size across all transactions?
+Target Answer: The average deal size across 200 transactions was USD 14,993.
+
+--- END PAIRS ---
+
+SALES REPORT:
+
+--- START REPORT ---
+
+In April 2025, the East Region generated $1,526,782.59 in revenue from 200 transactions, with an average
+deal size of $7,633.91. Performance varied greatly among staff: Kimberly Odonnell MD (EMP016) led with
+$195,079.78 in sales, while Jeffrey Wagner (EMPO18) was the lowest performer with $59,904.92. Only 6 of
+20 reps met their targets. The top product by revenue was the ‘Network Switch Pro' ($143,438.37), with
+hardware and software being the dominant sales categories...
+
+--- END REPORT ---
+
+Output Format:
+Respond ONLY with a single JSON list containing exactly 5 objects. Each object must correspond in order to
+the 'Item' number above and have two keys: "answered" (boolean) and "correct" (boolean).
+
+Example Output (for 2 items):
+
+{"answered": true, "correct": true},
+{"answered": false, "correct": false}
+
+]
+
+Figure 18: An illustrative example for the CSV Sales Report Analysis (SR) task (Part 2/2).
+
+
+===== PAGE BREAK =====
+
+1. Attribute Sampling: @~ O
+
+* rubric_path: "./rubric/..."
++ data_path: "./data/News_AP_Stype/..."
++ sample_id: "AP_STYLE_WRITING/1k_7" —__—
+
+4 Provides a deterministic seed
++ evaluation_model: 'Qwen2-72B'
+
+* test_length: 1024 (words)
+
+4, Determines sampling of 2 style
+categories for this task.
+
+2. Joint Generation (fgen)
+
+A: Load & Sample Components
+1. Load topic (Query) and the rulebook (Rubric).
+
+2. Sample AP style categories based on the seed
+and ‘test_length’ from attributes (8).
+(e.g., ‘Technical Terms’, 'Clarity')
+
+3. Load pre-defined error snippets for the topic.
+
+Sampled components
+
+B: Construct Anchor (A) & Material (X_raw)
+
+The generator script assembles the Anchor:
++ Position the main topic instruction first.
+
++ For each sampled category:
+- Insert relevant rules (Scoring Criteria).
+- Insert corresponding error snippets to be fixed.
+
+This forms a structured prompt with constraints.
+
+Structured prompt data
+
+C: Synthesize Target (T)
+
+The ground-truth Target is created deterministically:
+
+1. Identify error snippets from the Anchor.
+(e.g., lowercase ‘linkedin')
+
+2. Apply rule-based corrections to generate the
+correct text fragments.
+
+3. Weave fragments into a coherent article, which
+serves as the verifiable Target (T).
+
+3. Aligned Triples: (Xtaw,C, V)
+
+Material (X_raw)
+
+Foundational Inputs
+
+Topic (Query):
+"Write a news article titled
+‘The Rise of Digital...'"
+
+Rulebook (Rubric):
+"Category": "Technical Terms"
+"Criteria": "Capitalize brand
+names like 'iPhone’'..."
+
+Constraint (C)
+
+Task-Specific Instructions
+
+=== TECHNICAL TERMS ===
+Scoring Criteria: Spell tech
+terms correctly... Capitalize
+brand names...
+
+*xContent Requirements. . .**
+
+1. ...platforms like Facebook
+and linkedin.
+
+Verifier (V)
+
+Ground-Truth Output
+
+...Digital communities emerged
+alongside the expansion of the
+internet, offering spaces...
+Platforms like Facebook and
+LinkedIn have played a pivotal
+role...
+
+Figure 19: Overview of the data generation pipeline for the AP Style News Writing (NW) task.
+
+1. Attribute Sampling: 0~ O
+
+Violation Probability: 85 .0%
+
+Controls the density of injected defects.
+
+Vocabulary (NOUNS, VERBS):
+"customer', 'process', ‘validate’...
+
+--lines: 600            |
+--output: ‘code.py'
+
+MAX_NESTING: 4
+
+MAX_FUNC_LINES: 40
+
+Define overall scale and structural
+constraints of the output code.
+
+Code Fixing with Flake8 Compliance (CF)
+
+2. Joint Generation (fgen)
+
+A: Initialization
+Initializes scope based on attributes (@).
+
+B: Atomic Code Generation
+A main loop iteratively calls sub-generators.
+
+Weighted selection of sub-generators
+
+generate_assignment()
+generate_if_statement()
+generate_redundant_comprehension() [C4xx]
+generate_mutable_default_arg func() [B006]
+
+C: Structural Orchestration
+Assembles blocks into functions.
+
+D: Finalization & Synthesis
+Applies formatting and writes to file.
+
+3. Aligned Triples: (Xtaw,C, V)
+
+Material (X_raw)
+
+import datetime
+
+defprocess_with_mutable(
+
+sree  Cet
+
+):
+if config_param > 0:
+mutable_log.append('processed')
+return mutable_log
+
+Constraint (C)
+Verification Query
+"Locate all instances of mutable
+default arguments (BO06)."
+
+Verifier (V)
+
+Ground-Truth Answer
+Line 298: mutable_log=[]
+
+Figure 20: Overview of the data generation pipeline for the Code Fixing (CF) task.
+
+
+
+===== PAGE BREAK =====
+
+1. Attribute Sampling: 6~ O
+
+Task Configuration:
+
+num records: 500
+num_conclusions: 50
+
+Randomized Biases:
+
+overall_target: ‘exceed’
+growth: ‘positive!
+
+top_rep bias: 'EMP019'
+
+bottom_rep bias: 'EMP020'
+top_product_bias: 'PROD-H04'
+
+CSV Sales Report Analysis (SR)
+
+2. Joint Generation (fgen)
+
+Step A: Synthesize Raw Material (X_raw)
+generate_sales_data()
+
+1. Generate transaction records according to the specified
+bias attributes (e.g., boosting 'EMP019' sales).
+2. Output the records as a raw CSV file.
+
+Generated CSV
+
+Step B: Analyze Data & Derive (A, T) Pair
+analyze_and_extract_pair()
+
+1. Input: The synthesized CSV data (X_raw).
+2. Analyze the data to extract a verifiable fact
+(e.g., the top-performing salesperson).
+3. This fact becomes the Target (T).
+4. Acorresponding question is set as the Anchor (A).
+5. Output: The aligned (A, T) pair.
+
+3. Aligned Triples: (X;aw,C , V)
+Material (X_raw)
+
+OrderID, ..., SalespersonID,
+ORD-001,   +, EMPOO7,
+
+., TotalSale
+-, 8500.00
+
+ORD-002,   , EMPO19,   , 120000.00
+ORD-003,    -, EMPO12,    +, 4500.00
+
+Constraint (C)
+Question:
+
+"Who was the top sales representative
+by revenue and what was their
+contribution?"
+
+Verifier (V)
+Correct Answer:
+
+"Toni Higgins (EMP019) led the
+team with USD 1,093,253 in sales
+(21.0% of total).
+
+Figure 21: Overview of the data generation pipeline for the CSV Sales Report Analysis (SR) task.
+
+1. Attribute Sampling: @~ O
+
+*num_records: Total records to generate
+
+* output_dir: Path for output files
+
++ archetype: Protagonist type (e.g., Scientist)
++ size: Target number of nodes per KG
+
+ARCHETYPES:
+
+"Scientist': {'rel_boost':
+‘Artist': {'rel_boost': ..
+‘Entrepreneur’: {'rel_boost': ...}
+
+SOCIO_ECONOMIC_BACKGROUNDS :
+'Underprivileged': {'edu_boost': ...}
+‘Middle Class': {'edu_boost': .
+‘Upper Class': {'edu_boost': ...}
+
+These configurations shape the
+narrative and sociological depth of
+the generated data.
+
+KG to Text Biography (BioG)
+
+2. Joint Generation (fgen)
+
+Step A: Synthesize Full Knowledge Graph
+
+Procedurally generates a complex and temporally
+coherent knowledge graph based on the
+sampled attributes 8.
+
+f_gen: generate_fictional_kg_rich()
+
+Full KG|(in-memory)
+
+Step B: Extract Protagonist Subgraph
+
+Extracts a local subgraph centered around the
+protagonist, serving as the sole source for all
+
+downstream outputs. f_gen: get_node_distances()
+
+Focused Subgraph}(Ground Truth)
+
+Step C: Parallel Transformation (Joint Derivation)
+
+The subgraph is processed in parallel to generate
+semantically aligned Anchor and Target pairs.
+
+Structured Extraction  Natural Language Conversion
+Generate Anchor (A) Generate Target (T)
+Converts subgraph nodes and Uses templates to convert the
+relations into structured         exact same triple information
+(S, P, O) triples.                into fluent natural language.
+f_gen: kg_to_sentences()
+f_gen: extract_triples_from_subgraph()
+
+3. Aligned Triples: (X;aw,C , V)
+Material (X_raw)
+
+The structured subgraph data.
+
+[
+
+“n1", "type": "Person",
+: "Professor Eleonora"},
+n2", "type": "Work",
+"name": "Theory of Fields"} ...
+
+1;
+"edges": [ { "source": "n1", "target": "n2",
+"relation": “authored"} ]
+
+Constraint (C)
+
+A machine-readable collection of triples directly extracted from X_raw.
+
+Subject      Predicate      Object
+Professor Eleonora authored Theory of Fields
+Professor Eleonora birth_year 1955
+
+Theory of Fields  publication_year 1992
+
+Verifier (V)
+
+Natural language text that is semantically identical to the Anchor.
+
+"sentences": [
+
+“Professor Eleonora authored the work
+‘Theory of Fields'.",
+
+"Professor Eleonora was born in 1955.",
+
+“'Theory of Fields' was published in 1992.",
+
+]
+
+Figure 22: Overview of the data generation pipeline for the KG to Text Biography (BioG) task.
+
+
+
+===== PAGE BREAK =====
+
+1. Attribute Sampling: 6 ~ ©
+
+Static Configuration
+Define initial control parameters
+
+*num_entries: 20
++ key_length: 32
++ value_length: 32
+
+Dynamic Attributes
+Deterministically sampled in ‘generate_prompt()”
+1. sample_id = Deterministic Seed
+2. Sample target position percentage:
+
+target_percent = 70%
+3. Calculate target index:
+
+target_index = round(0.7 * (20-1)) = 13
+4. Generate target key-value pair for Anchor
+
+eneration (K
+
+2. Joint Generation (fgen)
+
+Step A: Construct Anchor (A) and Target (7)
+
+1. Dynamic attributes are packaged into a
+structured Anchor (A).
+
+2. The Target (7) is implicitly defined as
+the ideal output satisfying all constraints in A.
+
+Define ssa Target
+
+:
+
+Step B: Construct Raw Material (X;aw)                     /
+
+D
+
+1. Anchor (A) is embedded into the task
+instruction (Itask)-
+
+2. Rules for background data are also included,
+forming the Raw Material (X;aw).
+
+3. The final prompt integrates X;ay, /task, and A.
+
+1
+1
+1
+'
+'
+'
+1
+'
+‘
+4
+
+3. Aligned Triples: (Xraw,C , V)
+
+Material (X_raw)
+Rules for background data (in prompt)
+- Total entries: 20
+
+- Other keys must be random strings...
+- Other values must be random strings...
+
+Constraint (C)
+
+Structured constraints to be met
+
+_'target_key': 'GX...ZA',
+“ ‘target_value': 'k9...q5',
+‘target_index': 13_
+
+Verifier (V)
+
+The ideal, ground-truth output |!
+
+{'AAAA...': 'bbbb...', |
+
+°             ,
+s. (... 12 other entrig’s ...)
+
+“S1@x...ZA': 'k9...q5",
+
+. 6 other entries ...)
+
+(
+"ZZZZ...': 'XxXxx...'}
+
+Figure 23: Overview of the data generation pipeline for the KV Dictionary Generation (K VG) task.
+
+1. Attribute Sampling: 6~ O
+
+input_path = "./data/source. json"
+num_docs = 1601
+
+seed = 42
+
+max_tokens_mapping = { ... }
+
+Documents are classified into bins based on
+character length, determining the final structure.
+
+classify_by_length():
+if len <= 6000: return "1k"
+
+raph Reorder
+
+2. Joint Generation (fgen)
+
+Step A: Raw Data Preprocessing
+
+Documents are sampled from a source dataset
+and classified by length.
+
+Step B: Paragraph Recombination & Segmentation
+Paragraphs are merged, then re-segmented based on
+*max_tokens’ to create the ordered Raw Material.
+
+Ordered Segments (X;aw)
+Step C: Joint Derivation of Anchor & Target
+From the same Raw Material (Xraw):
+
+1. Identity Transformation: The original order is
+preserved as the Target (7).
+
+2. Permutation (Shuffle): A copy is shuffled to
+generate the verifiable Anchor (A).
+
+3. Aligned Triples: (X;aw,C , V)
+Material (X_raw)
+
+Ordered base content generated from the source.
+
+Segment 1
+
+Segment 2
+
+Segment 3
+
+Constraint  (Cc)   Permutation (Shuffle)
+
+Verifiable query derived by shuffling X;aw,
+
+Segment 2
+
+Segment 3
+
+Segment 1
+
+Verifier (V)
+
+Ground-truth answer corresponding to the Anchor.
+
+Segment 1
+
+Segment 2
+
+Segment 3
+
+Figure 24: Overview of the data generation pipeline for the Paragraph Reordering (PR) task.
+
+
+
+===== PAGE BREAK =====
+
+1. Attribute Sampling
+*-num_states: Total number of states
++ input_size: Size of input alphabet
++ output_size: Size of output alphabet
++ input_string_length: Length of input string
++ sample_id: Seed for reproducible generation.
+generate_seed_from_id(id)
+
+lachine Simulation (SMS)
+
+2. Joint Generation (f gen)
+
+Step A: Generate Raw Material (X;aw)
+
+Generate the full state machine definition.
+generate_transition_table()
+
+Step B: Generate Anchor (A)
+
+Generate a prompt with a specific input.
+generate_prompt()
+
+Step C: Generate Target (T)
+
+Process the Anchor's input with the state
+machine to produce the verifiable Target.
+
+state_machine.process_input()
+
+3. Aligned Triples: (Xjaw,C, V)
+Material (X_raw)
+
+The complete definition of the state machine.
+Transition Rules: {
+"sO': {'2': {'next':'S2', ‘output':'2'} },
+
+"sats {'1': {'next':'S2', ‘output':'1'} },
++
+
+Constraint (C)
+
+The prompt containing the input string.
+Initial State: 'SQ'
+
+"Your task is to simulate a state transition..."
+“Based on the input string:'210...'"
+
+Verifier (V)
+The unique, correct trace from X;aw and A.
+
+Cur                                     Output
+
+so
+s2 | 1 |s0|2e
+
+Figure 25: Overview of the data generation pipeline for the State Machine Simulation (SMS) task.
+

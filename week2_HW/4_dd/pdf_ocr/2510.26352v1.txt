@@ -1,0 +1,1087 @@
+2510.26352v1 [cs.CL] 30 Oct 2025
+
+arXiv
+
+The Geometry of Dialogue: Graphing Language Models to Reveal Synergistic
+Teams for Multi-Agent Collaboration
+
+Kotaro Furuya’, Yuichi Kitagawa’
+
+' Research and Development Group, Hitachi, Ltd.
+1-280 Higashi-Koigakubo, Kokubunji-shi,
+Tokyo 185-8601, Japan
+kotaro.furuya.ao @hitachi.com
+
+Abstract
+
+While a multi-agent approach based on large language mod-
+els (LLMs) represents a promising strategy to surpass the
+capabilities of single models, its success is critically depen-
+dent on synergistic team composition. However, forming op-
+timal teams is a significant challenge, as the inherent opac-
+ity of most models obscures the internal characteristics nec-
+essary for effective collaboration. In this paper, we propose
+an interaction-centric framework for automatic team com-
+position that does not require any prior knowledge includ-
+ing their internal architectures, training data, or task perfor-
+mances. Our method constructs a “language model graph”
+that maps relationships between models from the semantic
+coherence of pairwise conversations, and then applies com-
+munity detection to identify synergistic model clusters. Our
+experiments with diverse LLMs demonstrate that the pro-
+posed method discovers functionally coherent groups that re-
+flect their latent specializations. Priming conversations with
+specific topics identified synergistic teams which outperform
+random baselines on downstream benchmarks and achieve
+comparable accuracy to that of manually-curated teams based
+on known model specializations. Our findings provide a new
+basis for the automated design of collaborative multi-agent
+LLM teams.
+
+Introduction
+
+Large language models (LLMs) have demonstrated remark-
+able capabilities across a wide range of natural language
+tasks, driven by advances in model scaling (Zhao et al.
+2025). However, the monolithic approach of scaling a sin-
+gle, massive model faces challenges such as hallucination
+(Maynez et al. 2020) and catastrophic forgetting (Kirk-
+patrick et al. 2017), limiting its ability to achieve robust per-
+formance across all domains. In response, a multi-agent ap-
+proach based on LLMs has emerged as a powerful paradigm
+(Tran et al. 2025). By coordinating multiple specialized or
+diverse models, this approach can mitigate the weaknesses
+of individual agents, leading to superior performance and
+robustness. For instance, a team of agents with distinct roles
+can debate to refine reasoning, reflect on solutions to miti-
+gate errors, or pool diverse knowledge to enhance reliability
+(Du et al. 2024; Chen, Saha, and Bansal 2024).
+
+However, the success of such cooperative strategies is crit-
+ically dependent on the composition of the model team (Gu
+
+et al. 2025). An effective team requires a synergistic combi-
+nation of agents matched to the task. Naively assembling
+high-performing models can stifle cognitive diversity (Li,
+Naito, and Shirado 2025), while including underperforming
+models can degrade the collective output. Thus, the central
+challenge in effective multi-agent collaboration is identify-
+ing the optimal team structure by considering the task, the
+model characteristics, and the latent relationships between
+them to realize a synergistic combination.
+
+Current research into automated team composition has
+predominantly adopted a task-driven, top-down approach to
+address this challenge (Chen et al. 2024; Liu et al. 2024;
+Song et al. 2025). These frameworks begin by analyzing the
+functional requirements of a defined task and then proceed to
+recruit or assign agents to fulfill specific roles. While power-
+ful, this task-centric approach operates on a shared principle:
+the task dictates the team’s design. Consequently, this per-
+spective naturally prioritizes task-specific agent selection,
+placing less emphasis on the underlying, latent relationships
+between models. Exploring these intrinsic synergies is es-
+sential for forming more versatile and robust collaborative
+teams.
+
+However, a significant barrier to such an understanding
+is the opacity of LLMs. Ideally, team selection would be in-
+formed by knowledge of each model’s architecture, size, and
+training data. In practice, many leading commercial mod-
+els are accessible only via APIs, which conceal their inter-
+nals. Even for open models, often only the model weights
+are released, while the complete training data remains undis-
+closed. Evaluating performance on downstream benchmarks
+is an alternative to explore model characteristics, but this
+is often impractical, requiring test data for every potential
+task and limiting applicability to novel domains. This lack
+of transparency makes it difficult to assess a model’s intrin-
+sic strengths and potential synergies with others in advance.
+
+In this paper, we propose an interaction-centric method-
+ology for automated team composition, departing from the
+task-centric paradigm. To map the latent relational structure
+among LLMs, our method generates a corpus of pairwise
+conversations and represents their interactions within a ”lan-
+guage model graph.” In this network, the semantic coherence
+between models forms edge weights. Subsequent analysis
+using community detection algorithms then identifies clus-
+ters of models with high mutual affinity, revealing promising
+
+
+===== PAGE BREAK =====
+
+:  Model Pool                                       Initial Message
+
+Let’s discuss about <topic>. Can you propose a <topic> question or concept
+that could spark deep discussions or exploration?
+
+|\oeeeh6
+
+Phase 2: Graph Construction
+
+Phase 3: Community Detection
+
+(
+
+[That’s an interesting
+point. However, ---.
+
+a. embeddings
+
+»        a                       »   f        / / Commit 3
+
+\a7®
+
+J 8             a: — &
+[ee        Community 2~SScial
+
+Community 1 Z
+
+Figure 1: Overview of the proposed method. The method consists of three main phases: (1) generating conversations between
+pairs of language models, (2) constructing a language model graph based on the embeddings of their conversations, and (3)
+
+extracting model clusters via community detection.
+
+collaborative candidates.
+Our primary contributions are:
+
+1. We propose an automatic LLM team composition frame-
+work based on inter-model conversations, which does not
+require any prior knowledge of their internal architecture,
+training data, or external test data.
+
+2. We empirically demonstrate that our graph-based method
+can identify clusters of models consistent with their latent
+characteristics.
+
+3. We validate our approach through performance evalu-
+ation on downstream benchmarks, showing that teams
+constructed from our identified clusters achieve higher
+accuracy than randomly assembled teams and approach
+the performance of manually-curated teams grouped by
+their known specializations.
+
+Methodology
+Overview
+
+Our approach is to construct a language model graph that
+represents the relationships between models and then apply
+community detection algorithms to extract clusters.
+
+This methodology is inspired by social graphs, where in-
+dividuals and relationships are modeled as nodes and edges
+to identify communities (Al Falahi, Atif, and Elnaffar 2010).
+In our paradigm, language models serve as the nodes, and
+their interactions are quantified as weighted edges. We hy-
+pothesize that models with similar knowledge and capabili-
+ties will form densely connected clusters, while poorly per-
+forming or dissimilar models will appear as isolated nodes.
+This graph-based representation allows for the selection of
+promising model ensembles for collaboration while simul-
+taneously filtering out those likely to degrade collective per-
+formance.
+
+As illustrated in Figure 1, our method comprises three
+phases. In Phase | (Conversation Generation), we system-
+atically generate pairwise conversations among a set of tar-
+get models. In Phase 2 (Graph Construction), we analyze
+the semantic content of these dialogues to compute rela-
+tionship scores, which then serve as edge weights to build
+the language model graph. Finally, in Phase 3 (Community
+Detection), we apply a community detection algorithm to
+the graph and identify clusters of models, which represent
+promising teams for collaborative tasks.
+
+Core Idea and Assumptions
+
+Before introducing the specifics of our method, we outline
+the foundational core idea of our approach. Our methodol-
+ogy is predicated on two fundamental assumptions:
+
+1. Constructive dialogues unfold within a coherent seman-
+tic space.
+
+2. Language models with similar characteristics are more
+likely to engage in constructive dialogues.
+
+The first assumption is rooted in principles of effective
+human communication, specifically the linguistic concepts
+of common ground (Brown-Schmidt and Duff 2016). Com-
+mon ground refers to the information that is mutually known
+between the discourse partners, which provides the basis for
+an efficient exchange of ideas. Productive discussions build
+upon this shared context by maintaining a logical and topical
+focus, which distinguishes a meaningful conversation from
+a random sequence of sentences. In contrast, conversations
+with misaligned topics or disparate background knowledge
+lack this shared foundation, often leading to misunderstand-
+ings and a failure to reach a constructive outcome.
+
+The second assumption posits that models with similar
+features, such as training data or architecture, can better
+
+
+===== PAGE BREAK =====
+
+“Good" conversation between similar models.
+dz                                                                               dy
+
+U2
+
+ug
+
+U4
+
+U6           Us
+
+“Poor" conversation between dissimilar models.
+
+Ug
+
+U2
+
+Uy                      Us
+
+U6
+Us
+
+>
+
+>
+
+dy
+
+dy
+
+Figure 2: Illustration of the core idea. The left panel shows a ’good” conversation between two similar models, where their
+utterances remain semantically close in the embedding space. The right panel depicts a ’poor’ conversation between two
+
+dissimilar models, where their utterances diverge significantly.
+
+interpret each other’s outputs, leading to collaborative di-
+alogue. This similarity of models provides an analogy to
+the common ground necessary for effective communication.
+Thus, similar models can share a common ground, leading
+to more consistent responses and effective communication.
+Building on these assumptions, we hypothesize that the
+quality of a conversation between two models is reflected
+in the geometric properties of their utterances in embedding
+spaces. As depicted on the left in Figure 2, a ’good” conver-
+sation between similar models is expected to trace a dense
+trajectory, with their outputs remaining in close proximity.
+In contrast on the right, a *poor” conversation between dis-
+similar models will trace a sparse and distant trajectory as
+their outputs diverge. We therefore posit that the geomet-
+ric relationships between embedded utterances can serve as
+a proxy for both conversational quality and the functional
+similarity between models. This allows us to quantify inter-
+model relationships using metrics like cosine similarity, re-
+vealing optimal collaborative groupings from their outputs
+alone, without requiring access to their internal states.
+
+Phase 1: Conversation Generation
+
+In this phase, we generate conversational data for all unique
+pairs of N language models within a given set M =
+{M,,..., My}. The set of all unique pairs is denoted by
+
+For each pair (/;, 14;) € S, a single conversation is gen-
+erated. All models operate under a common system prompt,
+Pys. One model is randomly selected to be the designated
+first speaker. The conversation begins by setting the first ut-
+terance, ui, to a predefined starting message, Pstart. Thus,
+U1 = Pstart- This initial utterance is then passed as input
+to the second model, which generates the second utterance,
+ug. From this point, the two models continue to exchange
+utterances in a turn-based manner. The dialogue continues
+for a maximum of Kyyax turns or until either model gener-
+ates a special termination token, T3,.,. A turn is defined as
+a sequence of two utterances, one from each model.
+
+The resulting conversation for a pair (/;, M;) is recorded
+as a chronologically ordered sequence of utterances, C;,; =
+(u1,U2,...,uz), where L is the total number of utterances
+exchanged. For the subsequent analysis, we only consider
+complete turns, which are pairs of consecutive utterances
+(U2k-1, Uk) fork > 1.
+
+Phase 2: Language Model Graph Construction
+
+Relationship Value Calculation From each conversation
+history C;,;, we compute a relationship value, r;,;, that
+quantifies the semantic similarity of their interaction.
+
+First, we use a pre-trained sentence embedding function,
+f :U — RY%, to map each utterance u € U, where U/ is the
+space of all possible utterances, to a d-dimensional vector.
+
+The relationship 7;,; is defined as the sum of cosine simi-
+larities between the vector embeddings of the utterance pairs
+from each complete turn. Let Kj; = ||Ci,;|/2| be the num-
+ber of complete turns in the conversation C;,;. The relation-
+ship is then calculated as:
+
+Ki,j
+rig = S- simeos(f(U2n—1), f(U2k)),
+k=l
+
+where t2;,—1 and we, are the utterances in the k-th com-
+plete turn, and sim,.os(a, b) is the cosine similarity between
+two vectors a and b. This process is repeated for all pairs
+(M;, M;) € S to obtain the set of all relationships.
+
+Graph Construction We construct an _ undirected,
+weighted graph G = (M,€,r) to represent the significant
+relationships among the language models. The set of
+vertices M consists of the language models. To focus our
+analysis on the most substantial connections, the edge set €
+includes only those pairs of models (M;,.M;) whose rela-
+tionship value r;,; meets or exceeds a predefined threshold
+T. The weight of each edge is its corresponding relationship
+value. Thus, the edge set € is formally defined as:
+
+
+===== PAGE BREAK =====
+
+# | Model                                                                      Type
+1         mistralai/Mistral-7B-Instruct-v0.2                   (i)
+2        meta-llama/Meta-Llama-3-8B-Instruct           (i)
+3        Qwen/Qwen2-7B-Instruct                                  (i)
+4        Qwen/Qwen2-0.5B-Instruct                              (ii)
+5        google/gemma-3-1b-it                                    (ii)
+6         mistralai/Mathstral-7B-v0. 1                                   (iii)
+7        Qwen/Qwen2-Math-7B-Instruct                      (iii)
+8        BioMistral/BioMistral-7B                                  (iv)
+9        ContactDoctor/Bio-Medical-Llama-3-8B | (iv)
+10 | google/medgemma-4b-it                                 (iv)
+
+Table 1: List of models.
+
+This method filters out weak or noisy interactions, thereby
+constructing a sparse graph that highlights the strongest re-
+lational structures. The threshold 7 is a tunable hyperparam-
+eter that controls the sparsity of the graph.
+
+Phase 3: Cluster Extraction via Community
+Detection
+
+In the final phase, we analyze the language model graph G
+using a community detection algorithm to identify densely
+connected subgroups of models. These communities rep-
+resent clusters of models that are functionally similar and
+likely to collaborate effectively.
+
+For this task, we employ the Louvain method, a widely-
+used hierarchical clustering algorithm known for its effi-
+ciency and effectiveness (Blondel et al. 2008).
+
+Experiments
+
+We conducted a series of experiments to validate our pro-
+posed method. First, we tested whether the language model
+graph could reveal latent model specializations by evaluat-
+ing its ability to cluster models according to their known
+capabilities. Second, to validate the effectiveness of our
+team composition approach, we benchmarked the collective
+downstream task performance of teams constructed from the
+identified clusters against several baselines.
+
+Models and Implementation
+
+Our experiments were conducted using a diverse set of ten
+language models, detailed in Table 1. The collection in-
+cludes four types: (i) relatively small-scale, general-purpose
+models (Jiang et al. 2023; Grattafiori et al. 2024; Yang et al.
+2024); (ii) small-scale, general-purpose models (Yang et al.
+2024; Team et al. 2025); (iii) models fine-tuned for mathe-
+matics (Yang et al. 2024; Jiang et al. 2023); and (iv) models
+fine-tuned for the medical domain (Labrak et al. 2024; Con-
+tactDoctor 2024; Sellergren et al. 2025). All models were
+served using the vLLM (Kwon et al. 2023) and the multi-
+agent conversations were managed by the AutoGen package
+(Wt et al. 2023).
+
+Key hyperparameters are listed in Table 2. To investigate
+the effect of topical context, we initiated conversations using
+three distinct prompts: (a) a general, open-ended prompt; (b)
+a mathematics-focused prompt; and (c) a medical-focused
+
+Parameter | Value
+
+Part         (a) Let’s discuss a topic of your expertise or
+interest. Can you propose a question or con-
+cept that could spark deep discussions or ex-
+ploration?
+
+(b, c) Let’s discuss about <topic>. Can you
+propose a <topic> question or concept that
+could spark deep discussions or exploration?
+Psys        Continue the debate, each response should
+be concise and as negative or critical as
+possible, while remaining logically sound.
+Show evidence of your reasoning and avoid
+repeating the same point unless absolutely
+necessary. If you feel the discussion has
+exhausted the available information and if
+the conversation becomes unclear, inappro-
+priate, or non-contributive responses, please
+say “END DISCUSSION’.
+
+Tstop          END DISCUSSION
+max          5
+T                Median of all relationship values
+
+Table 2: Parameters.
+
+prompt. The system prompt was designed to elicit critical
+debate and mitigate model sycophancy (Sharma et al. 2024).
+Following generation, conversations were embedded using
+the multilingual-e5-large (Wang et al. 2024). We set thresh-
+old 7 to the median of all relationship values to focus on
+the significant interactions. To minimize sequential bias, re-
+lationship values were calculated by averaging the outcomes
+of five conversation runs for each model pair. Finally, com-
+munities were identified using the Louvain algorithm, as im-
+plemented in the NetworkX package (Hagberg, Schult, and
+Swart 2008).
+
+Evaluation Setup
+
+To evaluate the performance of our method, we used a
+suite of benchmark datasets under a zero-shot inference
+setting. We selected subsets of MMLU (Hendrycks et al.
+2021) to assess mathematical ability (abstract_algebra, col-
+lege_mathematics, college_physics) and medical knowledge
+(clinical_knowledge, college_biology, college_medicine).
+We further assessed mathematical and medical expertise us-
+ing GSM8K (Cobbe et al. 2021) and MATH-500 (Lightman
+et al. 2023), and MedQA (Jin et al. 2021) and MedMCQA
+(Pal, Umapathi, and Sankarasubbu 2022) respectively. For
+latter reasoning-intensive datasets, we utilized a Chain-of-
+Thought (CoT) prompt (Wei et al. 2023), with an exception
+for BioMistral-7B and Bio-Medical-Llama-3-8B. CoT
+prompting was omitted for these two models as it led to a
+collapse in their responses. Performance was measured by
+overall accuracy on each dataset. The collective answer for a
+team was determined by a majority vote on the final answers
+from each model. To ensure robustness, all reported scores
+are the average of five independent trials. We benchmarked
+the performance of our community-based teams against
+four baselines:
+
+
+===== PAGE BREAK =====
+
+Peart                  Com. # | Models
+(a) General           1           Mistral-7B-Instruct-v0.2 (i), Meta-Llama-3-8B-Instruct (1), Qwen2-7B-Instruct (i),
+BioMistral-7B (iv), medgemma-4b-it (iv)
+2             Qwen2-0.5B-Instruct (ii), Mathstral-7B-v0.1 (iii), Qwen2-Math-7B-Instruct (iii), Bio-
+Medical-Llama-3-8B (iv)
+3            gemma-3-1b-it (ii)
+
+(b) Mathematical | 1
+
+Mistral-7B-Instruct-v0.2 (i) , Meta-Llama-3-8B-Instruct (1), BioMistral-7B (iv), Bio-
+Medical-Llama-3-8B (iv)
+
+Qwen2-7B-Instruct (i), Qwen2-0.5B-Instruct (ii), Mathstral-7B-v0.1 (ii), Qwen2-
+Math-7B-Instruct (iii)
+
+gemma-3-1b-it (ii), medgemma-4b-it (iv)
+
+(c) Medical            1
+
+Meta-Llama-3-8B-Instruct (1), Qwen2-7B-Instruct (i), Qwen2-0.5B-Instruct (ii),
+Mathstral-7B-v0.1 (iii), BioMistral-7B (iv)
+
+gemma-3-1b-it (ii)
+
+2           Mistral-7B-Instruct-v0.2 (i), medgemma-4b-it (iv), Bio-Medical-Llama-3-8B (iv)
+3
+
+Table 3: Detected model communities for each topic. The parentheses indicate the model type listed in Table 1.
+
+neral topi
+(a) General topic      @ Community 1
+
+e@    Community 2
+@ Community 3
+
+Mistral-7B-Instruct-v0.2
+
+BioMistral-7B
+Mathstral-7B-v0.1
+
+medgengiha-Abat        Meta-Llama-3-8B-Instruct
+@ Bio-MeditalLiéma-34B
+Qwen2-7BAnstruct
+
+gemma-3-1b-it
+
+Qwen2*0.5B-Instruct
+iit "eal ®
+
+Figure 3: Language model graph constructed under the (a)
+general topic condition.
+
+Single-model: The performance of the best-performing
+model, Qwen2-7B-Instruct with self-consistency (Wang
+et al. 2023). For each question, the model generated ten
+independent responses, and the most frequent answer was
+selected as the final output.
+
+All-models: The collective performance of all ten models
+voting together. This baseline measures the performance of
+a naive, non-selective ensemble.
+
+Random @3models: The average performance of teams
+composed of three randomly selected models. The reported
+score is the average accuracy over five randomly composed
+teams. This represents the expected performance without
+any intelligent team selection.
+
+Type-based: Teams constructed by grouping models ac-
+cording to their predefined specialization type as listed in
+Table 1. This baseline serves as a practical upper bound,
+representing the performance achievable with prior knowl-
+edge.
+
+(b) Mathematical topic
+medgemma-4b-it
+
+Qwen2-0.5B-Instruct
+
+Mathstral-7B-v0.1
+Qwen2-Math-7B-Instruct.
+
+gemma-3-1b-it
+Qwen2#(B=lustruct
+BioMistyale7B
+Méta-Llama-3-8B-Instruct
+id2Medical-Llamia=3°8B
+
+@ Community 1
+@ Community 2
+@ Community 3
+
+Mistral-7B-Iusttuct-v0.2
+
+Figure 4: Language model graph constructed under the (b)
+mathematical topic condition.
+
+Results
+Graph Analysis and Community Detection
+
+The structure of the language model graph and the result-
+ing communities under each topic are shown in Figures 3-5,
+with the model composition of each community detailed in
+Table 3. In Figures 3-5, each node represents a model and the
+edges show the strength of their relationships, with thicker
+lines indicating stronger connections. The analysis reveals
+that topic-specific priming is crucial for identifying model
+groups that are consistent with prior knowledge.
+
+(a) General topic: Without a guiding topic, the commu-
+nity detection yields heterogeneous clusters that do not align
+strongly with the models’ predefined specializations. For in-
+stance, community | and community 2 are both mixtures of
+general-purpose, mathematical, and medical models. How-
+ever, the method successfully isolates one of the smallest
+models, gemma-3-1b-it, into its own cluster (community 3),
+suggesting it identifies models with significantly different
+scale or capability.
+
+(b) Mathematical topic: Priming the conversations with
+
+
+===== PAGE BREAK =====
+
+MMLU
+
+Med
+
+Math-
+
+Med-
+
+Overall
+
+Model Group                             Math Med    GSM8K MATH MedQA    MCOA | Avg. Avg.      Avg.
+Single-model           -                45.2 74.9      86.0        58.9        57.6        53.0       56.1      67.1      61.6
+(1) General | 41.6 74.4       82.2        47.6        62.0        54.4       50.9 67.9       59.4
+Type-based              (iii) Math      440 614       89.5        62.8        49.5        47.0       56.9 56.1       56.5
+(iv) Med       40.0 80.7       43.5         33.1        71.9        67.9       39.3 76.4       57.9
+All-models              -                41.1 76.5       83.1        52.5        63.3        57.8       51.8 = 70.1      60.9
+Random@3models | -                          37.9 66.7          81.1            46.2            54.1            49.4          48.2 60.7          54.4
+Com. |       40.77 744     80.4      50.2      63.5      55.7     50.5 68.5     59.5
+(a) General              Com. 2         45.1 77.0       84.6        41.2        58.9        59.1        52.2 69.8       61.0
+Com. 3        27.6 40.6      56.6       42.9       33.9       34.0      36.5 37.9      37.2
+Com. |       37.5 78.0     61.8      12.9      65.9      61.1      37.4 72.2     54.8
+(b) Mathematical      Com. 2         449 71.2      88.6       60.0       53.8        50.8       56.7 63.7      60.2
+Com. 3        28.5 46.0      68.0       52.8       58.1        53.0      41.3 49.8      45.5
+(c) Medical            Com. |        44.1 73.8      87.1       54.7       57.3       52.8      54.8 66.3      60.5
+Com. 2         39.6 77.0      63.9        39.8        70.7        67.6       445 73.8      59.1
+
+Table 4: Performance evaluation of model teams on downstream benchmarks. Bold indicates the best performance, and under-
+line indicates the second best. Results for (c) Com. 3 are omitted as they are identical to (a) Com. 3.
+
+(c) Medical topic
+Mistral-7B-Instruct-v0.2       @ Community 1
+@ Community 2
+medgemma-4b-it                                             aarti
+BioMistral-7B                              Mathstral-7B-v0.1
+
+Bio-Medical Llamae3-8B              Qweni2~Math-7B-Insteuct
+
+Mete-Llama-3-8Bethstruct
+
+.                                                       gemma-3-1b-it
+Qwen2-7B-Ihstfict
+
+Qwen2°0,5B-Instruct
+
+Figure 5: Language model graph constructed under the (c)
+medical topic condition.
+
+a mathematical context significantly improves the quality
+of the clustering. Community 2 emerges as a highly con-
+sistent group of math-proficient models, containing both
+math-specialized models (Mathstral-7B-v0.1, Qwen2-Math-
+7B-Instruct) and Qwen family models. This demonstrates
+the method can group models by functional capability and
+their lineage. Conversely, community 1 groups the non-
+mathematical models, primarily the medical-specialized
+ones. Community 3 also consists of the Gemma family, em-
+phasizing the validity of the method. The conversation anal-
+ysis further validates these groupings. The dialogue within
+community 2 remains topically focused on a specific math-
+ematical problem, reflecting a shared knowledge base (see
+Figure 6 in the Appendix). In contrast, the dialogue be-
+tween a model from community 2 and one from commu-
+nity 3 quickly deviates into a high-level philosophical dis-
+cussion, indicating a mismatch in their specialized knowl-
+
+edge domains.
+
+(c) Medical topic: Similarly, a medical topic prompt leads
+to a meaningful clustering. Community 2 becomes the med-
+ical cluster, grouping two of the three medical-specialized
+models with a general-purpose model. We observed that the
+single performance of BioMistral-7B on medical tasks was
+lower than the other two medical-specialized models, which
+is likely reflected in its clustering. Community 1 forms a
+larger, more general cluster containing a mix of models,
+including the remaining math-specialized one. As with the
+general topic scenario, the small-scale model is again iso-
+lated in community 3. Although conversation examples are
+not shown, the pattern was consistent with the mathemati-
+cal case: dialogues within the medical community (commu-
+nity 2) were clinically focused, while inter-community dia-
+logues were more general, discussing artificial intelligence
+in medicine rather than on specific medical issues.
+
+Performance Evaluation of Model Collaboration
+
+The performance of our automatically-formed model com-
+munities and the baseline groups is presented in Table 4.
+The results clearly demonstrate that our interaction-based
+method, when primed with a relevant topic, can identify
+functionally specialized model teams whose performance
+approaches that of manually-curated groups based on known
+model specializations.
+
+As expected, the “Type-based’ teams served as a strong
+upper bound on performance. The math specialized team
+excelled on mathematical benchmarks, while the medical
+specialized team dominated medical tasks. In contrast, the
+naive ‘All-models’ and ‘Random@3models’ baselines per-
+formed significantly worse, highlighting the need for intelli-
+gent team selection.
+
+Our method’s strength lies in its ability to discover syner-
+gistic model combinations automatically. When primed with
+a (b) mathematical topic, our method extracted a community
+(‘(b) Com. 2’) that achieved the second-highest performance
+on all mathematical benchmarks, closely rivaling the ‘Math’
+
+
+===== PAGE BREAK =====
+
+type-based team. Similarly, when primed with a (c) medi-
+cal topic, a distinct community (“(c) Com. 2’) emerged that
+scored second-highest on medical datasets, again approach-
+ing the performance of the corresponding type-based team.
+
+Notably, even when conversations were initiated with a
+(a) general topic, the extracted community ‘(a) Com. 2’
+achieved an overall average that was comparable to both
+the strong ‘Single-model’ and ‘All-models’ baselines, and
+substantially better than random selection. This indicates
+that our method successfully identifies generally competent
+model groupings even without a strong domain signal.
+
+These results confirm that our method, without any prior
+knowledge of model architecture or training data, can ef-
+fectively identify latent model specializations and construct
+high-performing teams.
+
+Discussions and Limitations
+
+Conversation Topic and Hyperparameter
+Sensitivity
+
+Our experiments suggest that the thematic context of conver-
+sations is a critical factor for success. As shown in Table 3,
+topic-specific priming with mathematical or medical starters
+led to functionally coherent clusters that approached the
+performance of teams curated by specialization, supporting
+our hypothesis that such conversations elicit latent special-
+izations. Notably, even general-topic conversations yielded
+communities that outperformed random baselines, suggest-
+ing the interaction analysis captures a meaningful signal of
+general capability even without a specific target domain.
+
+The methodology’s outcome is also dependent on several
+other key hyperparameters, including the embedding model,
+the threshold 7, and the community detection algorithm.
+While our choices proved effective, a comprehensive sen-
+sitivity analysis is required to fully understand their impact
+and provide guidance for applying the method in different
+contexts.
+
+Furthermore, the definition of a ’good” conversation re-
+quires deeper exploration. In this study, we defined the
+relationship value r;,; as the cumulative cosine similarity
+between utterance embeddings. However, this metric may
+have limitations; for instance, it could assign a high score
+to a conversation where models simply agree with each
+other. Developing measures that can capture the construc-
+tive progress in conversation based on geometric analysis in
+embedded spaces could identify more synergistic teams.
+
+Scalability and Computational Cost
+
+The primary limitation of our approach is its computational
+cost, which scales quadratically (O(.N*)) with the number of
+models due to pairwise conversation generation. This could
+be a clear bottleneck for scaling to hundreds or thousands of
+models. Future work could adapt algorithms from approx-
+imate nearest neighbor search, such as NN-Descent (Dong,
+Moses, and Li 2011), to reduce the number of conversations.
+Our preliminary explorations with an NN-Descent-like algo-
+rithm indicate that this approach can not only reduce compu-
+tational complexity but also yield clustering results similar
+to those obtained with topic priming.
+
+Collaboration Protocol
+
+This study evaluated team performance using a simple ma-
+jority vote. While this was sufficient to demonstrate the ef-
+fectiveness of our team composition method, it represents
+only one of many possible collaborative strategies. A sig-
+nificant avenue for future research is to investigate how
+communities identified by our approach perform when inte-
+grated with more sophisticated collaboration protocols, such
+as multi-round debates.
+
+Use of Detected Communities
+
+In this study, we focused on evaluating the performance of
+individual communities extracted from the language model
+graph. However, an alternative approach could involve uti-
+lizing these detected communities as knowledge to build
+more sophisticated teams. For instance, one could form a ca-
+pable interdisciplinary team by combining a community spe-
+cialized in mathematics with one specialized in medicine.
+This leverages our data-driven insights into model relation-
+ships to construct teams with a targeted blend of expertise.
+
+Furthermore, our interaction-centric discovery process
+could be integrated with existing task-centric frameworks.
+While current top-down approaches first decompose a task
+into required roles and then select agents, our method could
+enhance this by providing a catalog of promising subteams.
+This hybrid approach would combine the goal-oriented
+strengths of task-driven planning with the bottom-up in-
+sights of our interaction-based analysis.
+
+Conclusion
+
+In this paper, we propose a method for forming effective
+teams by extracting relationships from conversations be-
+tween models. By constructing and analyzing a language
+model graph from pairwise conversations, our method maps
+the latent relational structure of models, identifying syn-
+ergistic clusters without any prior knowledge. Our experi-
+ments empirically demonstrate that: (1) the interaction graph
+successfully captures latent model specializations, a pro-
+cess that is strongly guided by the thematic context of the
+conversations, and (2) the resulting teams outperform ran-
+dom baselines and approach the performance of manually-
+curated teams. More than just a selection tool, this research
+provides a methodology to reveal the relationships that form
+the basis of effective collaboration. This opens a path toward
+hybrid frameworks that combine the task-centric planning
+with our map of model relationships. To realize this poten-
+tial, future work could focus on scaling this approach and
+integrating these discovered communities with sophisticated
+collaborative protocols.
+
+Appendix
+Example Conversations
+
+We provide example conversations to illustrate the dynamics
+between models from the same and different communities.
+Figure 6 shows two conversations initiated with a mathemat-
+ical topic prompt. The left panel features a dialogue between
+two models from the same community, which is community
+
+
+===== PAGE BREAK =====
+
+Within community 2,
+M;:Qwen2-Math-7B-Instruct, M;:Mathstral-7B-v0.1.
+
+Qwen2-Math-7B-Instruct : Let's discuss about
+Mathematics. Can you propose a mathematics question
+or concept that could spark deep discussions or
+exploration?
+
+Mathstral-7B-v0.1 : Sure, here's a question that could
+lead to some interesting discussions: "What is the
+relationship between complex numbers and their
+arguments (angles)?" This question delves into the
+intricacies of trigonometry and complex number
+manipulation, and can be explored from various angles,
+including the geometric interpretation of complex
+numbers.
+
+Qwen2-Math-7B-Instruct : That's a great question! The
+relationship between complex numbers and their
+arguments (angles) is indeed a fascinating topic. [...]
+
+Between community 2 and 3,
+M;:Qwen2-Math-7B-Instruct, Mj: gemma-3-1b-it.
+
+Qwen2-Math-7B-Instruct : Let's discuss about
+Mathematics. Can you propose a mathematics question
+or concept that could spark deep discussions or
+exploration?
+
+gemma-3-1b-it : A mathematical question that could
+spark deep discussion is: **How can we definitively
+prove the existence of a ‘true’ mathematical reality,
+separate from human interpretation?**
+
+This isn’t just about proving theorems; it's about
+grappling with the nature of objectivity. [...]
+
+Qwen2-Math-7B-Instruct : I'm sorry, but I cannot
+engage in discussions regarding political matters. My
+primary function is to provide assistance on a wide
+range of non-political subjects. If you have any other
+inquiries, please feel free to ask.
+
+Figure 6: Example conversations between models from same/different communities with (b) mathematical topic. Left: conver-
+sation between two models from community 2 (Qwen2-Math-7B-Instruct and Mathstral-7B-v0.1). Right: conversation between
+models from community 2 and community 3 (Qwen2-Math-7B-Instruct and gemma-3-1b-it).
+
+2 in the mathematical topic scenario. This conversation re-
+mains focused on a specific mathematical problem, demon-
+strating a shared understanding and expertise in the domain.
+In contrast, the right panel presents a conversation between
+models from different communities which are community 2
+and community 3. Here, the dialogue quickly diverges into
+a high-level philosophical discussion, indicating a mismatch
+in their specialized knowledge domains.
+
+References
+Al Falahi, K.; Atif, Y.; and Elnaffar, S. 2010. Social
+networks: Challenges and new opportunities. In 20/0
+
+IEEE/ACM Int’l Conference on Green Computing and Com-
+munications & Int’l Conference on Cyber, Physical and So-
+cial Computing, 804-808. IEEE.
+
+Blondel, V. D.; Guillaume, J.-L.; Lambiotte, R.; and Lefeb-
+vre, E. 2008. Fast unfolding of communities in large net-
+works. Journal of statistical mechanics: theory and experi-
+
+ment, 2008(10): P10008.
+
+Brown-Schmidt, S.; and Duff, M. C. 2016. Memory and
+common ground processes in language use. Topics in Cog-
+nitive Science, 8(4): 722-736.
+
+Chen, G.; Dong, S.; Shu, Y.; Zhang, G.; Sesay, J.; Karls-
+son, B.; Fu, J.; and Shi, Y. 2024. AutoAgents: a frame-
+work for automatic agent generation. In Proceedings of the
+Thirty-Third International Joint Conference on Artificial In-
+telligence (IJCAI’24). IJCAI Organization.
+
+Chen, J.; Saha, S.; and Bansal, M. 2024. ReConcile:
+Round-Table Conference Improves Reasoning via Consen-
+sus among Diverse LLMs. In Proceedings of the 62nd An-
+nual Meeting of the Association for Computational Linguis-
+
+tics (ACL’24), 7066-7085. Association for Computational
+Linguistics.
+
+Cobbe, K.; Kosaraju, V.; Bavarian, M.; Chen, M.; Jun, H.;
+Kaiser, L.; Plappert, M.; Tworek, J.; Hilton, J.; Nakano, R.;
+Hesse, C.; and Schulman, J. 2021. Training Verifiers to
+Solve Math Word Problems. arXiv:2110.14168.
+
+ContactDoctor. 2024.   ContactDoctor-Bio-Medical:
+A High-Performance Biomedical Language Model.
+https://huggingface.co/ContactDoctor/Bio-Medical-Llama-
+3-8B.
+
+Dong, W.; Moses, C.; and Li, K. 2011. Efficient k-nearest
+neighbor graph construction for generic similarity mea-
+sures. In Proceedings of the 20th international conference
+on World wide web (WWW’11), 577-586. Association for
+Computing Machinery.
+
+Du, Y.; Li, S.; Torralba, A.; Tenenbaum, J. B.; and Mordatch,
+I. 2024. Improving factuality and reasoning in language
+models through multiagent debate. In Forty-first Interna-
+tional Conference on Machine Learning (ICML’24). Journal
+of Machine Learning Research.
+
+Grattafiori, A.; Dubey, A.; Jauhri, A.; Pandey, A.; Kadian,
+A.; Al-Dahle, A.; Letman, A.; Mathur, A.; Schelten, A.;
+Vaughan, A.; et al. 2024. The llama 3 herd of models.
+arXiv:2407.21783.
+
+Gu, Z.; Zhu, X.; Cai, Y.; Shen, H.; Chen, X.; Wang, Q.; Li,
+J.; Shi, X.; Guo, H.; Huang, W.; Feng, H.; Xiao, Y.; Ye, Z.;
+Hu, Y.; and Cao, S. 2025. AgentGroupChat-V2: Divide-and-
+Conquer Is What LLM-Based Multi-Agent System Need.
+arXiv:2506.15451.
+
+Hagberg, A. A.; Schult, D. A.; and Swart, P. J. 2008. Ex-
+ploring Network Structure, Dynamics, and Function using
+
+
+===== PAGE BREAK =====
+
+NetworkX. In Proceedings of the 7th Python in Science
+Conference (SciPy2008), 11 — 15.
+
+Hendrycks, D.; Burns, C.; Basart, S.; Zou, A.; Mazeika,
+M.; Song, D.; and Steinhardt, J. 2021. Measuring Mas-
+sive Multitask Language Understanding. In Proceedings of
+the International Conference on Learning Representations
+(ICLR’21).
+
+Jiang, A. Q.; Sablayrolles, A.; Mensch, A.; Bamford, C.;
+Chaplot, D. S.; de las Casas, D.; Bressand, F.; Lengyel,
+G.; Lample, G.; Saulnier, L.; et al. 2023. Mistral 7B.
+arXiv:2310.06825.
+
+Jin, D.; Pan, E.; Oufattole, N.; Weng, W.-H.; Fang, H.; and
+Szolovits, P. 2021. What disease does this patient have? a
+large-scale open domain question answering dataset from
+medical exams. Applied Sciences, 11(14): 6421.
+Kirkpatrick, J.; Pascanu, R.; Rabinowitz, N.; Veness, J.; Des-
+jardins, G.; Rusu, A. A.; Milan, K.; Quan, J.; Ramalho, T.;
+Grabska-Barwinska, A.; et al. 2017. Overcoming catas-
+trophic forgetting in neural networks. Proceedings of the
+national academy of sciences, 114(13): 3521-3526.
+
+Kwon, W.; Li, Z.; Zhuang, S.; Sheng, Y.; Zheng, L.; Yu,
+C. H.; Gonzalez, J.; Zhang, H.; and Stoica, I. 2023. Efficient
+Memory Management for Large Language Model Serving
+with PagedAttention. In Proceedings of the 29th Symposium
+on Operating Systems Principles (SOSP ’23), 611-626. As-
+sociation for Computing Machinery.
+
+Labrak, Y.; Bazoge, A.; Morin, E.; Gourraud, P.-A.; Rou-
+vier, M.; and Dufour, R. 2024. BioMistral: A Collection of
+Open-Source Pretrained Large Language Models for Med-
+ical Domains. In Findings of the Association for Compu-
+tational Linguistics (ACL’24), 5848-5864. Association for
+Computational Linguistics.
+
+Li, Y.; Naito, A.; and Shirado, H. 2025. HiddenBench: As-
+sessing Collective Reasoning in Multi-Agent LLMs via Hid-
+den Profile Tasks. arXiv:2505.11556.
+
+Lightman, H.; Kosaraju, V.; Burda, Y.; Edwards, H.; Baker,
+B.; Lee, T.; Leike, J.; Schulman, J.; Sutskever, I.; and Cobbe,
+K. 2023. Let’s Verify Step by Step. arXiv:2305.20050.
+
+Liu, Z.; Zhang, Y.; Li, P.; Liu, Y.; and Yang, D. 2024. A
+dynamic Ilm-powered agent network for task-oriented agent
+collaboration. In First Conference on Language Modeling
+(COLM’24).
+
+Maynez, J.; Narayan, S.; Bohnet, B.; and McDonald, R.
+2020. On Faithfulness and Factuality in Abstractive Summa-
+rization. In Proceedings of the 58th Annual Meeting of the
+Association for Computational Linguistics (ACL’20), 1906—
+1919. Association for Computational Linguistics.
+
+Pal, A.; Umapathi, L. K.; and Sankarasubbu, M. 2022.
+MedMCQA: A Large-scale Multi-Subject Multi-Choice
+Dataset for Medical domain Question Answering. In Pro-
+ceedings of the Conference on Health, Inference, and Learn-
+ing (CHIL’22), 248-260. Proceedings of Machine Learning
+Research.
+
+Sellergren, A.; Kazemzadeh, S.; Jaroensri, T.; Kiraly, A.;
+Traverse, M.; Kohlberger, T.; Xu, S.; Jamil, F; Hughes,
+C.; Lau, C.; et al. 2025. MedGemma Technical Report.
+arXiv:2507.05201.
+
+Sharma, M.; Tong, M.; Korbak, T.; Duvenaud, D.; Askell,
+A.; Bowman, S. R.; DURMUS, E.; Hatfield-Dodds, Z.;
+Johnston, S. R.; Kravec, S. M.; Maxwell, T.; McCandlish, S.;
+Ndousse, K.; Rausch, O.; Schiefer, N.; Yan, D.; Zhang, M.;
+and Perez, E. 2024. Towards Understanding Sycophancy in
+Language Models. In Proceedings of the International Con-
+ference on Learning Representations (ICLR’24).
+
+Song, L.; Liu, J.; Zhang, J.; Zhang, S.; Luo, A.; Wang, S.;
+Wu, Q.; and Wang, C. 2025. Adaptive In-conversation Team
+Building for Language Model Agents. arXiv:2405.19425.
+
+Team, G.; Kamath, A.; Ferret, J.; Pathak, S.; Vieillard,
+N.; Merhej, R.; Perrin, S.; Matejovicova, T.; Ramé, A.;
+Riviere, M.; et al. 2025. Gemma 3 technical report.
+arXiv:2503.19786.
+
+Tran, K.-T.; Dao, D.; Nguyen, M.-D.; Pham, Q.-V.;
+O’Sullivan, B.; and Nguyen, H. D. 2025.  Multi-
+Agent Collaboration Mechanisms: A Survey of LLMs.
+arXiv:2501.06322.
+
+Wang, L.; Yang, N.; Huang, X.; Yang, L.; Majumder, R.; and
+Wei, F. 2024. Multilingual ES Text Embeddings: A Techni-
+cal Report. arXiv:2402.05672.
+
+Wang, X.; Wei, J.; Schuurmans, D.; Le, Q. V.; Chi, E. H.;
+Narang, S.; Chowdhery, A.; and Zhou, D. 2023.  Self-
+Consistency Improves Chain of Thought Reasoning in Lan-
+guage Models. In Proceedings of the International Confer-
+ence on Learning Representations (ICLR’23).
+
+Wei, J.; Wang, X.; Schuurmans, D.; Bosma, M.; Ichter, B.;
+Xia, F.; Chi, E.; Le, Q.; and Zhou, D. 2023. Chain-of-
+Thought Prompting Elicits Reasoning in Large Language
+Models. arXiv:2201.11903.
+
+Wu, Q.; Bansal, G.; Zhang, J.; Wu, Y.; Li, B.; Zhu, E.; Jiang,
+L.; Zhang, X.; Zhang, S.; Liu, J.; et al. 2023. AutoGen: En-
+abling Next-Gen LLM Applications via Multi-Agent Con-
+versation. arXiv:2308.08155.
+
+Yang, A.; Yang, B.; Hui, B.; Zheng, B.; Yu, B.; Zhou, C.; Li,
+C.; Li, C.; Liu, D.; Huang, F.; et al. 2024. Qwen2 technical
+report. arXiv:2407.10671.
+
+Zhao, W. X.; Zhou, K.; Li, J.; Tang, T.; Wang, X.; Hou, Y.;
+Min, Y.; Zhang, B.; Zhang, J.; Dong, Z.; et al. 2025. A sur-
+vey of large language models. arXiv:2303.18223.

@@ -1,0 +1,1953 @@
+arXiv:2510.24295v1 [cs.CL] 28 Oct 2025
+
+MERGE: Minimal Expression-Replacement GEneralization
+Test for Natural Language Inference
+
+Madilina Zegreaban!
+
+Tejaswini Deoskar!
+
+Lasha Abzianidze!
+
+‘Utrecht Institute of Linguistics OTS, Utrecht University, The Netherlands
+
+{b.m.zgreaban,
+
+Abstract
+
+In recent years, many generalization bench-
+marks have shown language models’ lack of
+robustness in natural language inference (NLI).
+However, manually creating new benchmarks
+is costly, while automatically generating high-
+quality ones, even by modifying existing bench-
+marks, is extremely difficult. In this paper,
+we propose a methodology for automatically
+generating high-quality variants of original
+NLI problems by replacing open-class words,
+while crucially preserving their underlying rea-
+soning. We dub our generalization test as
+MERGE (Minimal Expression-Replacements
+GEneralization), which evaluates the correct-
+ness of models’ predictions across reasoning-
+preserving variants of the original problem.
+Our results show that NLI models’ perform
+4—20% worse on variants, suggesting low gen-
+eralizability even on such minimally altered
+problems. We also analyse how word class of
+the replacements, word probability, and plausi-
+bility influence NLI models’ performance.
+
+1 Introduction
+
+Generalizability is models’ ability to reliably
+adapt to new scenarios, especially important in real-
+life deployment (Hupkes et al., 2023; Budnikov
+et al., 2025; Dutt et al., 2024; Yang et al., 2023). To
+evaluate it, held-out test sets — e.g. in-distribution
+evaluation — might be insufficent, as they still might
+contain similar heuristics the models learned dur-
+ing training (Gardner et al., 2020; Hupkes et al.,
+2023; Dutt et al., 2024). Better options are out-of-
+distribution (OOD) benchmarks which introduce
+different text genres or slightly changed training
+data items (Hupkes et al., 2023). For example, for
+tasks like Natural Language Inference (NLI), where
+models classify the entailment between a premise
+(P) and a hypothesis (H), OOD benchmarks with
+either adverserial items (ANLI, Nie et al., 2019)
+or minimally changed training items (Verma et al.,
+2023) have
+
+t.deoskar,
+
+l.abzianidze}@uu.nl
+
+Original/seed NLI problem
+
+P: A small Ba eresat carries a girl.
+
+H: The Ba eresat is small.
+
+Pattern accuracy
+with a threshold
+Acctn=0.5 = 1
+AcCth=0.75 = 1
+AcCtn=0.95 = 0
+
+Variant
+Accuracy
+Accy = 0.75
+
+P: A small boy carries a boy.
+H: The boy is small.
+
+:
+P: A small man carries a man.     G
+
+H: The man is small.
+
+P: A little girl carries a girl.
+H: The girl is little.
+
+P: A happy girl carries a girl.        fe)
+H: The girl is happy.
+
+Figure 1: MERGE vs. standard sample-based evalua-
+tions: while in the former each variant is an independent
+example, in MERGE performance is measured as the
+proportion of correctly classified variants for an NLI
+seed problem, i.e. whether a model classifies at least x
+amount of variants (the threshold number) for each NLI
+problem.
+
+shown models’ poor generalization more effec-
+tively than traditional in-distribution ones such as
+SNLI (Bowman et al., 2015) or MNLI (Williams
+et al., 2018). However, previous OOD NLI bench-
+marks have confounds: building them by exten-
+sive modifications can shift data distributions and
+can cause decreased performance by breaking well-
+known model-used heuristics (e.g., (inverse) word
+overlap, Rajaee et al., 2022), rather than for true
+reasoning failures. Thus, new OOD NLI bench-
+marks are needed, but according to previous ac-
+counts, constructing them presupposes a trade-off
+(Gardner et al., 2020) between ensuring the correct-
+ness of their entailments (done manually) or their
+efficiency and scalability (done automatically).
+
+We propose the Minimal  Expression-
+
+
+===== PAGE BREAK =====
+
+Replacement GEneralization (MERGE) test
+for NLI, a methodology with which we test
+generalization by reliably and automatically
+altering NLI problems (henceforth named seed
+problems) to actually create minimally changed
+variants of them, henceforth named variants. As
+shown in Figure 1, we construct these variants by
+automatically replacing open-class words shared
+between P and H — usually irrelevant for the seed
+problems’ underlying reasoning in NLI datasets —
+with contextually probable replacements suggested
+by masked language models (MLMs). As variants
+preserve (i) the underlying reasoning of the seed
+problem; and ii) model exploited-heuristics such
+as sentence lengths and word overlap size (Naik
+et al., 2018; McCoy et al., 2019; Bernardy and
+Chatzikyriakidis, 2019; Rajaee et al., 2022), our
+generalization test should enable strong model
+performance by allowing them to leverage these
+well-known shortcuts, provided they have good
+reasoning skills. We also automatically filter out
+replacements considering strict quality criteria to
+ensure highly plausible variants, without requiring
+large-scale human validation, further preventing
+score changes from implausibility artifacts.
+
+Importantly, as shown in Figure 1, generaliz-
+ability is evaluated on amounts of variants rather
+than on individual ones (Abzianidze et al., 2023;
+Srikanth et al., 2024).
+
+We aim to answer the following questions:
+
+1. Are NLI models robust against minimal vari-
+ants of NLI problems?
+
+2. How reliable is our methodology for automat-
+ically obtaining variants of NLI problems?
+
+3. Do factors such as the likelihood, word class,
+semantic plausibility, or the MLM of replace-
+ment words influence performance?
+
+Our contributions are the following:
+
+1. We present a model- and dataset-agnostic
+methodology to test generalizability using the
+simplest, model-friendliest minimal changes
+to create reasoning-preserving NLI variants.
+
+2. We evaluate multiple models on our vari-
+ants, with results of poor generalization and
+oversensitivity to label-preserving minimal
+changes.
+
+3. We show that data generation with MLMs
+does not favor the same NLI models when
+
+evaluated, and that the number of unique vari-
+ants in a variant dataset affects models’ scores
+more than other quality control criteria.
+
+We review previous works in §2, while present-
+ing our methodology in §3, experiments -in 4, and
+results in §5. The conclusions are in §6.
+
+2 Related Work
+
+Generalizability in NLI OOD benchmarks ob-
+tained by minimal alterations (or contrasts sets
+in Petrov, 2025; Li et al., 2020) suggest models
+severely lack NLI generalization abilities, given
+their decreased performance (Li et al., 2020; Gard-
+ner et al., 2020; Kaushik et al., 2020, among others).
+We review previous NLI variant datasets studies,
+considering aspects such as their modification strat-
+egy, and the (non)automatic approach for creating
+variants.
+
+Modification Strategy To construct variant
+datasets, previous studies have used various mod-
+ification strategies, such as replacing words, de-
+composing, or paraphrasing problems, or a com-
+bination of multiple operations, described in the
+Column Strategy in Table 1.
+
+Creation Type Operations were achieved auto-
+matically, manually, or by using a mix of au-
+tomatic and manual methods, shown in Column
+Creation in Table 1.
+
+Validation The variants have been either vali-
+dated by i) human validation, namely partially
+(HVal,), fully (HVal/), or combined (HValp¢)
+where only a randomly chosen subset, the full set,
+or a combination thereof are manually validated;
+ii) by a mix of automatic and manual validation
+methods (Mix.); or iii) not validated at all (V/A),
+described under Column Validation.
+
+Meaning, Reasoning, Word Overlap and Syntax
+The meaning (M), underlying reasoning (R), syntax
+(s), or word overlap (WO) of P & H ' can be
+preserved (Y), changed (NV), or a mix of both,
+shown in Columns M, R, S and WO of Table 1.
+
+Modified Sentence The update (U), premise
+(P) and the hypothesis (H), both of them separately
+(P/H), and both of them together (P&H) can be
+
+‘Note that word overlap preservation requires modifying
+P&H at the same time.
+
+?Some NLI datasets evaluate how new information, i.e.,
+updates, might change the entailment label between P & H.
+
+
+===== PAGE BREAK =====
+
+Study                        Strategy     Creation Val.     Sentence    M R    Ny    WO Evaluation     Dataset
+Mod.
+Li et al. (2020)                      Multiple       Auto.     HVal,,     P             Mix. Mix. N     N     Vs-G; Vs-O      SNLI; MNLI
+Glockner et al. (2018)               Replace        Auto.      HValp              N     Mix. Y     N     V-G                SNLI
+Verma et al. (2023)                 Paraphrase Auto.      HValp  P/H;         Y     Y     N     N     Vs-O              Pascal RTE1-3 (Dagan et al.,
+P&H                                                           2005)
+Srikanth et al. (2024)             Paraphrase Mix.      HValpp H;U        Y     Y     N     N     Vs-Vs; Vs-G     a-NLI (Bhagavatula et al.,
+2020); 6-NLI (Rudinger et al.,
+2020)
+Arakelyan et al. (2024)             Paraphrase Auto.      HVal,,     A              Y     Y     N     N     V-O               SNLI; MNLI; ANLI
+Petrov (2025)*                       Multiple       Auto.      N/A       HA              N     N     N     N     V-G                SNLI
+Kaushik et al. (2020)                Multiple       Man.      HValp  P; HH          N     N     N     N     V-G                SNLI
+Srikanth and Rudinger (2025)      Decompose Auto.      Mix.       A              Y      Y     N     N     V-G; Vs-O        SNLI; 6-NLI
+MERGE                              Replace        Auto.      LMVal P&H         N      Y     Y      Y     V-G; Vs-G        SNLI
+
+Table 1: Overview of minimal generalizability tests. Strategy: Replacing words, Paraphrasing, Decomposing
+sentences, or a combination of Multiple operations; Creation: Auto. — automatic; Man. — manual; Mix. — mixing
+methods; Val.: HVal,, — a subset, HVal, — the full set, or a combination HVal,, of variants is human-validated; Mix —
+automatic and human validation; LMVal — LM validated. Sentence Mod: only the premise (P), hypothesis (H), or
+update (U); or both P and H at the same time (P&H) or separately (P/H) are modified; M/R/S/WO: meaning,
+reasoning, syntax, or word overlap between P&H are (Y), or are not (NV) preserved, or a mix of these two (Mix.);
+Eval.: individual comparison — the gold label (V-G) or prediction of the original problem (V-O) vs. the variant;
+group comparison — the gold label (Vs-G), prediction of original sentence (Vs-O), or other variants (Vs-Vs) vs.
+variants. Dataset: modified dataset(s); * in Study column: variant datasets used for fine-tuning models. All studies
+
+use labels: entailment, contradiction, neutral.
+
+modified, shown under Column Sentence Mod. in
+Table 1.
+
+Evaluation Predictions on variants are evaluated
+by comparing them (i) individually — with the gold
+label (V-G) or the prediction of the original NLI
+problem (V-O); (ii) as a group — with the prediction
+on the original NLI problem (Vs-O), the gold label
+(Vs-G), or with each other (Vs-Vs). See column
+Eval. in Table 1 for their classification.
+
+Results of previous studies Models were shown
+to overall decrease in performance on variant
+datasets with 14 to 30% (Kaushik et al., 2020;
+Petrov, 2025; Glockner et al., 2018), being as incon-
+sitent as changing their original NLI predictions in
+10-16% of variants (Verma et al., 2023; Arakelyan
+et al., 2024).
+
+Shortcomings of previous variant datasets
+Overall, previous lower scores of models on variant
+datasets cannot be attributed fully to poor gener-
+alizability, as they could also be due to: i) new
+syntactic constructions — syntactic non-preserving
+changes might be more challenging for models
+(Li et al., 2020); or ii) changed lexical overlap of
+P&H — caused by paraphrased or decomposed
+NLI problems. Preserving the word overlap of
+P&H by using replacement words has been par-
+tially explored previously (Glockner et al., 2018)
+but with non-preserving label changes, where vari-
+ants’ plausibility was prioritized at the expanse of
+their lexical diversity. Other shortcomings of previ-
+
+ous studies concern their creation type, with auto-
+matic methods having been criticized due to their
+potential (i) to bias variants in favor of models de-
+ployed (Li et al., 2020; Gardner et al., 2020), with
+some authors arguing for full manual creation of
+new datasets to prevent data contamination (Gard-
+ner et al., 2020); and (ii) to construct implausible
+variants (Dutt et al., 2024). However, manual cre-
+ation is time-consuming, and cannot be faster than
+the rate at which new models might learn variants.
+
+MERGE = automatically creates plausible vari-
+ants by replacing shared words of P&H with fe-
+licitous alternatives. Thus, the lexical overlap of
+P&H, their syntax, and underlying logical reason-
+ing are preserved, while avoiding the implausibility
+of constructed variants, unlike in previous stud-
+ies (Arakelyan et al., 2024; Srikanth et al., 2024;
+Verma et al., 2023). Lexical diversity is not fixed
+but can also be increased, for instance, by con-
+sidering more suggestions from more MLMs, un-
+like in previous list-restricted replacement studies
+(Abzianidze et al., 2023; Glockner et al., 2018).
+
+3 Methodology
+
+For a seed NLI problem (P, H,/) and a label J,
+open-class words w shared between P and H, w €
+Pd, are replaced with new words to obtain
+variant NLI problems (P;, Hi, 1).
+
+The new words are collected from a set of MLMs
+M = {Mi,..., Mn}, as follows: for a sentence
+S = (s1,...,8%),an MLM M,;, and a word posi-
+
+
+===== PAGE BREAK =====
+
+H: The girl is small.
+
+Model 1
+P: A small [M], carries a [M],.
+
+v,: [boy, running, man, old, woman, ...]
+lip
+
+Model n
+(P: A small [M], carries a [M],.
+
+yA: [boy, child, man, student, ...]
+vy: [letter, basket, child, girl, ...]
+
+(H: The [M] is small.
+v: [world, tree, house, ..., girl]
+
+v: [world, treehouse, ..., gift]
+
+Model 1
+
+P: A small [M], carries a [M].,.
+d
+
+3
+
+All models
+ P: A small [M], carries a [M].,.
+
+[H: The [M] is m
+
+Venu: (girl, boy...]
+
+P: A small [M], carries a [M],.
+
+Vi pz: [boy, sibling, running, ...]
+
+v: [world, tree, house, ..., girl]
+
+Figure 2: Generating NLI problem variants with MLMs.
+The suggestions of a shared word between P&H are
+excluded if they have different classes (teen for little)
+than w,, or if they are already part of the problem (girl).
+
+tion 1 <i < k, where s; is an open-class word,
+W;(S, i) is the set of words that (i) are more
+probable than s;, under M;, in the masked con-
+text S[s;:=Mask], marked with 5; (ii) do not occur
+in S1 and (iii) belong to the same word class? as 5;
+in S, marked with ¢.
+
+With constraints (i) and (iii), suggested words
+are more felicitous than the original w;, while pre-
+serving syntactic structure and WO. For instance,
+‘girl’ from Figure 2 as a replacement for ‘running’
+results in an implausible variant, with different syn-
+tax, and a possible non-preserved original label.
+Similarly, low probability suggestions might affect
+fluency and cause a similar effect of non-preserving
+the original label. (ii) excludes potential cases in
+which substituting a shared word like boy with one
+like dog in ‘two dogs and a boy swim’, changes the
+initial entailment relation from entailing ‘only one
+boy swims’ to contradicting it.*
+
+Note that the suggestion set from M; for a word
+w, with multiple occurrences in S, is defined as:
+
+1<i<k
+s{=W
+
+where the suggested words should comply with
+
+3The possible word classes are nouns, verbs, adjectives, or
+adverbs; note that if s; is not part of the 14; vocabulary, the
+set of suggestions will be empty.
+
+4However, variants with incorrect inference labels are still
+possible, although improbable. For example, replacing ‘boy’
+with ‘animal’ in the aforementioned sentence results in an
+incorrect entailment label.
+
+constraints (i), (ii), (iii) at each occurrence position
+of w in S. When considering a set of MLMs M,
+we define their suggestions set for a word w in S
+as:
+
+Wal(S, ws) =   U  W;(S, ws)
+
+MjeM
+
+where suggested words should be validated by the
+same MLM at each occurrence position of w in
+S. Finally, for an NLI problem (P, H,1) and w €
+P 1 H, we define a set of suggestions from a set
+of MLMs M as:
+Se{P,H}
+
+and the variant NLI problems (P;;, Hi;,!) are
+obtained by replacing the original shared words
+w; € PMH with corresponding suggested words
+Pig = Pluj/vig], Hig = A[wi/viy]
+We will use W4=" to denote a random subset of
+size m of the suggestion set W. We call d a degree
+of inflation. If there are & words shared between P
+and H, and for each word we have a set of sugges-
+tions with the inflation degree of d, then the total
+number of generated variants will be k x d.
+
+4 Experimental Setup
+
+We will now describe the various experimental
+choices made in building our variant dataset.
+
+Suggestion generation For all shared nouns,
+verbs, adverbs and adjectives between P&H from
+SNLI test problems, illustrated in Table 4, we gener-
+ated 200 suggestions v; with the following MLMs:
+BERT (Devlin et al., 2019), RoBERTa (Liu et al.,
+2019), ALBERT (Lan et al., 2019), Electra (Clark
+et al., 2020), and BART (Lewis et al., 2019). Their
+sizes, fully described in Table 5, were base and
+large, except for ALBERT (base and xxl).
+
+Suggestion filtering Suggestions were kept if
+they were: i) same class as the original w,; ii)
+higher probability than w,; iii) different from words
+already in P&H, w; included; iv) validated by at
+least one model; vi) word tokens (i.e. excluding
+punctuation marks or subwords). Across open-
+classes, v; had more often the same class as w;
+(40-80% of v;) than a bigger probability (10% of
+v;), as Shown in the Appendix Table 6.
+
+We also excluded SNLI test problems that had
+
+
+===== PAGE BREAK =====
+
+F+R scores averaged across nouns, verbs, & adjectives.
+
+— Weighted Average
+lm Bad (<9)
+80                                                    ll Good (>9)
+
+Percentage (%)
+u
+°o
+
+Figure 3: Averaged Fluency and Reasoning scores
+with normalized counts for 100 random variants for
+Nouns, Verbs, and Adjectives. The red lines are the bar
+plots weighted considering the distribution of classes in
+the seed NLI problems (N=67%, V=23%, ADJ=10%).
+Good variants have a score of F' + R >= 9.
+
+fewer than 20° v; suggestions (d = 20) after fil-
+tering, from all their summed w 1, meaning each
+remaining seed problem had to yield at least 20
+potential variants.
+
+Variants Manual Annotation We formed vari-
+ants by replacing w, with v;°, which we partially
+annotated manually by checking 100 randomly sub-
+sampled variants per class. The variants were an-
+notated by two authors independently on a scale
+from 1-5 (1 — good; 5 — poor) considering their: a)
+replacement’s plausibility; and b) preservation of
+the original seed label, with subsection A.2 show-
+ing the full annotation guidelines. Good variants
+had a+ b > 9, with few variants (5%) receiving
+scores lower than 3 on b) due to ungrammaticalities
+and one lack of label preservation.’. In Figure 3
+we show the proportions of good and bad variants
+per model averaged across classes. Given BART
+models had more bad scores assigned, they were
+excluded, which led to a minor reduction of 318
+seed problems. The confusion matrix in Figure 9,
+showing model-specific suggestions on the diago-
+nal, also supports the inclusion of all models’ sizes
+as they generated more unique than overlapping
+suggestions, with only some (e.g., BERT, Electra)
+showing nearly equal proportions of both. To check
+
+>Number more interpretable for evaluating across variants
+(e.g., 95% correct variants of 20 is 19 vs. 9.5 out of 10).
+
+°We limit the replaced classes to nouns, verbs, and adjec-
+tives, as few seed problems were sharing adverbs between P
+& A.
+
+TDue to the replacement ‘short’ in ‘The short player is
+tall’ which changed the problem to contradiction from neutral.
+Despite SNLI having grammatical errors that might justify
+accepting some in our variants, we penalized any that could
+
+Class Seed Average N(%) C(%) E(%) Uni
+Nvar     1808    90.8    29.4     20.2 50.3 4121
+V Var          506         86.8        30.6          18.6 50.8 1115
+
+Avar       259      771.6     32.8       22.4 448 460
+
+ALLyar 2222 77.4 30.0       20.4 49.5 5781
+Table 2: Total number of variants after filtering across
+classes: Seed— number of seed problems; Averaged —
+number of variants per seed problem across classes, not
+computed as Subs/Seed, since variant counts vary by
+the latter; N/C/E (%) — percentages per label across
+seed problems: neutral, contradiction, and entailment;
+Uni — average of unique variants subsampled 10 times,
+i.e. variants that appear in only one subsample.
+
+the final quality level of our variants, we manually
+annotate again variants post-BART exclusion with
+100 randomly chosen ones across all classes out of
+which 91% had a good score, plotted in Figure 10.
+
+Final Variant Dataset For each seed problem we
+randomly selected 20 of all its variants per class,
+to balance variants across seed problems, repeating
+subsampling 10 times to reduce randomization ar-
+tifacts. We refer to this dataset as Ally. Table 2
+shows the overall distribution of variants across
+classes, their seed counts and labels. As some
+problems share more than one word with differ-
+ent classes, e.g. the P&H in Figure 2 share both
+the noun ‘girl’ and adjective ‘small’, the total seed
+count is non-summative.
+
+Evaluation Metrics To capture models’ gener-
+azability across variants we used two metrics: 1)
+standard accuracy — hereby referred to as Sam-
+ple Accuracy (SA); and 2) Pattern Accuracy (PA)
+(Abzianidze et al., 2023) — a problem (P, H) is
+correct only if at least an x threshold amount of
+its variants (Pi,, Hix) are as well (i.e. the Accu-
+racy threshold). For Allyar, each reported PA score
+for a threshold is the average of the corresponding
+threshold score across all subsamples, with models
+being expected to get at least 90%* of variants cor-
+rectly (i.e. the quality threshold, QT). See Figure 1
+for a visualization of the differences between the
+two metrics.
+
+NLI Models We evaluated several models fine-
+tuned for NLI: BERT, ROoBERTa, DeBERTa (He
+et al., 2021), BART, ALBERT, Electra, XLNet
+(Yang et al., 2019), OPT (Zhang et al., 2022) and
+
+affect reasoning.
+’While 91% of variants are qualitative, we use 90% for
+interpretability (e.g. 90% is 18 of 20 variants).
+
+
+===== PAGE BREAK =====
+
+GPT-2 (Radford et al., 2019), with the sizes and
+training datasets from Table 3, and model cards
+shown in Table 8 of the Appendix. Note that we
+examined models trained on a different number of
+NLI datasets (only SNLI or more) to test whether
+broader NLI training improves performance.
+
+5 Results
+
+5.1 Are models robust against variants?
+
+Models’ SA scores on SNLItes, ALLsceg, and
+ALLyar in Table 3 were further compared via a
+paired t-test, which resulted in a significant differ-
+ence between the last two datasets, where the latter
+was rendered more difficult than the former. At QT,
+scores decrease by 49% (Column QT), and con-
+tinue to decrease thereafter (see Figure 4). Most
+importantly, obtaining PA scores on Allya, compa-
+rable to the SA scores on ALL geeg requires setting
+the accuracy threshold for most models at around
+60% (see Column MT in Table 3).
+
+Overall, models’ scores decrease considerably
+after the 80% accuracy threshold, showing less
+generalization the more variants are considered (see
+the full Figure 11 in the Appendix). To investigate
+if the observed differences between models’ PA
+scores are significant at QT, we conducted a paired
+t-test. While initially BERT-L-S performs worst
+and OPT-1-3b-S among the best, beyond the 86%
+threshold OPT-1-B drops to the lowest rank, with
+BERT scoring significantly better at QT. In line
+
+Model               SNL I test ALL geea ALL yar QT MT
+BERT-B-S         90.5   89.6   88.9 -4.9 59
+BERT-L-S         87.1   87.2   87.4 -4.5 47
+RoBERTa-B-S       90.1   90.1   89.2 -4.5 47
+DeBERTa-v3-B-S     91.7   92.1   90.7 -4.9 58
+DeBERTa-v3-L-S     91.7   91.9   91.0 -4.9 54
+BART-B-S         90.6   90.2   89.4 -4.3 57
+OPT-1-3b-S        91.0   90.5   89.1 -8.6 58
+GPT-2-L-S         90.9   90.9   89.5 -7.7 55
+RoBERTa-L-SMFA    91.8   91.4   90.5 -5.0 59
+BART-L-SMFA      92.0   91.9   90.5 -6.0 55
+Electra-L-SMFA     91.1   90.6   90.0 -6.5 56
+XLNet-L-SMFA      91.7   91.4   90.6 -5.4 55
+ALBERT-XXL-SMFA 91.9   92.2   91.2 -4.8 57
+
+Table 3: SA scores of models on SNLIjes;, seed problems
+(ALL seeq) and their variants (ALLya,). First acronym
+of models— their size; second acronym— NLI datasets
+used for fine-tuning, i.e. S— only SNLI; SMFA — SNLI,
+MNLI, FEVER (Thorne et al., 2018), and ANLI. QT:
+SA on ALL geeq— PA on ALLy,; at threshold 90; MT:
+nearest matching threshold where PA on Allyar © SA
+on Allseed:
+
+Pattern Accuracy for ALL data.
+
+>
+U
+oO
+£
+p=)
+U
+g      -- BERT-L-S
+£ 0.80 7 — RoBERTa-B-S
+g      — _ DeBERTa-v3-B-S
+£      == DeBERTa-v3-L-S
+0.78 | — BART-B-S
+— OPT 1-3b-S
+— GPT-2-LS
+0.75 7 —- RoBERTa-L-SMFA
+== BART-L-SMFA
+— Electra-L-SMFA
+0.73 7 —— XLNet-L-SMFA
+
+—— ALBERT-XXL-SMFA
+
+T      T      T      T      T      T      T
+80.0    82.5    85.0    87.5    90.0    92.5    95.0    97.5 100.0
+Accuracy threshold (%)
+
+Figure 4: PA scores of models on ALLy,, from 80%
+threshold on. The red dots are PA scores at QT of
+ALL yar (90%).
+
+with previous studies (Li et al., 2020; Srikanth
+and Rudinger, 2025), both RoBERTa NLI mod-
+els significantly outperform BERT, though only
+RoBERTa-L-SMFA surpasses both of its versions.
+Partially consistent with the findings of the afore-
+mentioned studies are also the scores of ROBERTa-
+B-S which are significantly worse than DeBERTa-
+v3-L-S. Note that ROBERTa-L-SMFA even has the
+highest thresholds in Column MT, suggesting its
+degradation in generalizability is slower.
+
+In terms of best-performing models, ALBERT-
+XXL-SMFA scores significantly better than the
+other models at QT, except DeBERTa, being also
+the model with the highest scores on ALL geeg.
+Models trained on more NLI data tend to do bet-
+ter, as generally they rank among the highest-
+performing models with the exception of Electra-
+L-SMFA. We also tested if they improve given the
+majority label, similar to Madaan et al. (2024), by
+replacing variant labels with the majority baseline
+in ALLseeg. However, models scores decrease to ~
+50% on QT, indicating a weaker majority baseline
+on variants than in previous studies.
+
+Overall, such results indicate models are sen-
+sitive to minimal word-level changes that are ir-
+relevant for reasoning, in line with previous stud-
+ies showing their lack of robustness and general-
+izability to variant datasets (Verma et al., 2023;
+Arakelyan et al., 2024; Glockner et al., 2018, etc).
+
+
+===== PAGE BREAK =====
+
+Pattern Accuracy of models on variants with
+different replacement classes.
+
+>      ———————=———
+ie]
+o                              =
+5                                         —
+8                                             a ~
+c
+o                 Dataset Type
+i      —  NVar — Adj_Var
+a       — V Var
+20.0        40.0        60.0        80.0       100.0
+
+Accuracy threshold (%)
+
+Figure 5: Averaged PA scores on Nyar, Vvar, and Avar.
+
+5.2. Which word classes are more difficult?
+
+We test models on the ALLy,; and its classes from
+Table 2: Nyar, Vvar, and Avar, to observe their ef-
+fect on models’ scores. Figure 5 shows averaged
+model scores across classes. Until around the 80%
+threshold, adjectives (in green) are the hardest, after
+which nouns become most difficult (in blue). Verbs
+remain the easiest throughout (in red), as indicated
+by their higher scores. To test the significance of
+such differences, we conduct an individual t-test?
+across the class datasets at QT, which shows only
+nouns to be significantly different than verbs.
+
+To better isolate the effect of classes from their
+imbalanced number of seed problems shown in
+Table 2, we only select variants of those seed prob-
+lems that share at least two out of the three open-
+class words!?,
+
+For example, the seed problem ‘A small girl car-
+ries a girl’ is sharing both an adjective and a noun
+across P&H. The averaged scores across mod-
+els are plotted in Figure 6, where dataset names
+indicate by their first letter which variants from
+the two classes were considered, e.g. V_N — in-
+cludes variants formed only by replacing verbs in
+seeds sharing at least a verb and a noun. In the
+figure, nouns are initially easier when compared
+to verbs (in red), similarly to adjectives (in green).
+On very high accuracy thresholds, nouns and ad-
+jectives become more difficult than verbs, with the
+nouns being most difficult. However, when consid-
+ering their differences at QT, none of the datasets
+is significantly different than the others.
+
+5.3. Do MLMs favor the same NLI models?
+
+We averaged the scores of NLI models with a
+MLM. -base counterpart (i.e. BERT-B-S, BERT-L-
+S, RoBERTa-B-S, ROBERTa-L-SMFA, Electra-L-
+SMFA, and ALBERT-XXL-SMFA) to test whether
+
+°We chose here an individual t-test given the seed problems
+across class datasets are different.
+
+‘Sharing N-V=202; N-A = 130, and V-A =46.
+
+Pattern Accuracy of models on seed problems sharing
+at least 2 different open-class words.
+
+Il
+I
+I                                        —Se
+&                                 SS
+0.90 | =%.                                     SY"
+>        Ay                                     q
+©             ee re Te =
+3                      a yer
+g 0.88                           oe              [\:
+ott        W
+c                                      Salo      i
+o                                          =e,   W
+& 0.86                             ea I
+a                                             SQ   y
+Vr,  |
+“t
+0.84 | ~- NV                                 Y
+—vN                                          1
+= Adj_N                                     1
+0.82 | —- N_Adj                                 1
+— V Adj
+“ Adj_V
+0.80
+0        20        40        60        80       100
+
+Accuracy threshold (%)
+
+Figure 6: Averaged PA curves of all models on variants
+of seed problems sharing at least two out of the three
+open-class words.
+
+NLI models perform better on variants generated by
+their corresponding MLM (suggested previously by
+Li et al., 2020; Gardner et al., 2020), which we plot-
+ted in Figure 7. Dataset names reflect averaged NLI
+scores on variants validated by: 1) Equiv-MLM
+— the same MLM; 2) Size-MLM — a MLM of
+similar architecture, but different size (e.g., BERT-
+B-S evaluated on BERT-L-generated variants); 3)
+Multi-MLM — any two MLMs, potentially includ-
+ing the evaluated model; 4) Arch-MLM — a model
+of different architecture'!. Models’ performance
+stays constantly good on Equiv-MLM and Size-
+MLM. Comparatively, higher scores are achieved
+on Multi-MLM and Arch-MLM until around the
+70% accuracy threshold (blue and black curves),
+which decrease after the 80% accuracy threshold.
+Thus, Multi-MLM variants indicate that size of
+the dataset might influence models’ scores more,
+as their lower scores on the QT threshold are on
+variants they have also possibly validated.
+
+5.4 Which filtering criteria matter?
+
+To test if different filtering criteria for vj; affect
+NLI models’ scores, we selected new variants for
+the seed problems of ALLvar forming datasets with:
+i) uj of the union of P&H, instead of their inter-
+section in Equation | — pyy; ii) viz only having
+
+'IMILMs can contribute with variants to both Equiv-MLM
+and Size-MLM (e.g., scores on BERT-B are averaged in Equiv-
+MLM for BERT-B-S and in Size-MLM for BERT-L-S). Also
+
+note that the Multi-MLM dataset is disproportionately bigger
+than others, shown in Table 9.
+
+
+===== PAGE BREAK =====
+
+Pattern Accuracy of BERT, RoBERTa, Electra
+and ALBERT considering variants' origin MLMs.
+0.95 5
+
+0.93 4
+
+0.90 5
+
+0.88 4
+
+0.85 4
+
+Pattern accuracy
+
+0.83 4
+
+0.80 4
+
+—— Equiv-MLM
+0.78 4 — Size-MLM
+— Multi-MLM
+—  Arch-MLM
+
+0.75
+
+0                    20                  40                   60                   80                  100
+Accuracy threshold (%)
+
+Figure 7: Averaged PA curves for BERT, RoBERTa,
+Electra and ALBERT, all sizes tested, on variants di-
+vided by their origin MLM.
+
+w* — pos; ili) vj; only having ws — prob; IV) Vij
+of any class or probability — None; V) vj; with their
+letters randomly scrambled — s.¢;. Except for ge,
+the datasets are more diverse given the less strict
+filtering, while still excluding punctuation signs
+and vj; already part of P&H. We plot the averaged
+PA scores of all models in Figure 8, highest perfor-
+mance being achieved on g¢;, followed by ALLyar,
+Prob; Poss None, And puy.
+
+While s.; starts as the lowest curve (in green), it
+ends up as the one with the highest scores on very
+high thresholds. The other variant datasets seem to
+follow a constant downward trend where the more
+variants are considered, the lower the scores get.
+Out of these, pu, pos, ANd None have the lowest
+scores, which might be caused by the higher num-
+ber of unique variants!” per dataset, which enlarges
+its overall lexical diversity. Thus, the number of
+variants seems more important than controlling for
+factors such as probability, or plausibility.
+
+5.5. What the hard NLI problems look like
+
+We analyzed how successfully on average the NLI
+models classified the NLI original seed problems
+(2222). We found that 1.4% (31) problems had no
+variants classified correctly by any NLI model. Af-
+ter careful inspection, we found out that only 29%
+of them have a correct gold inference label (see
+the problems in Table 10), adding evidence to the
+
+ All three datasets have around ~ 380k unique variants
+each, while each of the others have ~ 190k.
+
+Pattern Accuracy of models on datasets formed
+with different quality filtering criteria.
+
+°
+io
+3°
+
+°
+00
+a
+
+°
+oo
+°
+
+Dataset Type
+
+— ALL_Var
+—— PUH
+— POS
+
+— Prob
+— Scr
+— None
+
+Pattern accuracy
+
+°
+N
+a
+
+0.0          20.0          40.0          60.0          80.0         100.0
+Accuracy threshold (%)
+
+Figure 8: Averaged PA curves of all models on datasets
+formed with v;; having any class or probability — None,
+being scrambled — ¢,,, with higher probability than the
+original word — p;op, with the same class — pos, suggested
+in either P and A — pyy, and ALLyar.
+
+well-known issue of annotation variation in NLI
+(Pavlick and Kwiatkowski, 2019; Weber-Genzel
+et al., 2024). If we consider problems that were
+classified with <5% average accuracy by all mod-
+els, we found that out of these 32 problems, only 6
+had a correct gold label. For variants of correctly
+predicted seed problems, models score 93 on aver-
+age at the 90% threshold, compared to only 0.01
+for variants of incorrectly predicted seed, showing
+they are more consistent in the case of the first,
+a well-known trend remarked by previous stud-
+ies (Miralles-Gonzalez et al., 2025). Occasionally,
+models do correctly predict variants of originally
+misclassified seeds (an average of 90 seed prob-
+lems per model). In such cases, for models only
+trained on SNLI, the replacement words of correct
+variants occurred, on average, about 2,000 times
+more often in the SNLI train dataset than the origi-
+nal replaced words, pointing out to a link between
+models’ prediction and the frequency of tokens in
+their training data (Razeghi et al., 2022).
+
+6 Conclusions
+
+We presented MERGE, a methodology for minimal
+generalization testing that automatically constructs
+variants of NLI problems, while preserving reason-
+ing and word overlap. Its strength lies in minimal,
+controlled replacements: through quality filters for
+fluency and consistency, MERGE tests models un-
+der the simplest generalization conditions.
+
+We show models do not generalize well even un-
+der the best conditions, as they drop with 4-6% one
+the quality level of our variant dataset to be 90%,
+and by up to © 20% in high accuracy thresholds.
+Even more, achieving a pattern accuracy compara-
+ble to that obtained on the seed problems entails
+lowering the accuracy threshold by 60% for most
+
+
+===== PAGE BREAK =====
+
+models, indicating their generalizability extends
+only this far. Our results also show variants formed
+from replacing nouns are more difficult than those
+from verbs, while NLI models are not favored by
+the use of any MLM to achieve higher scores. In
+fact, we have highlighted how the overall unique
+variant number might affect models’ scores more.
+When it comes to important filtering criteria for
+suggestions, them being equally plausible in both
+the premise and the hypothesis seems to be the
+most important one.
+
+Given we have developed MERGE to create min-
+imally altered variants of sentences, this strategy
+can be extended to test generalizability in other
+NLI benchmarks and NLU tasks (e.g. reading com-
+prehension), especially as many can be framed as
+NLI (Demszky et al., 2018), which we are planning
+to do in the future.
+
+Limitations
+
+One limitation of our methodology is the lack of ac-
+count for original words that are split into subwords
+by tokenizers, which we are excluding by default.
+Additionally, our suggestions are obtained by mask-
+ing one occurrence of a word at a time. However,
+when one occurrence is masked, the other ones
+are still part of the sentence, which might bias the
+suggestions of models. Future studies could also
+consider evaluating prompt-based models, to ob-
+serve if different prompt strategies might help the
+models perform better on variants.
+
+Acknowledgments
+
+This research was supported by NWO.
+
+References
+
+Lasha Abzianidze, Joost Zwarts, and Yoad Winter. 2023.
+SpaceNLI: Evaluating the consistency of predict-
+ing inferences in space. In Proceedings of the 4th
+Natural Logic Meets Machine Learning Workshop,
+pages 12-24, Nancy, France. Association for Com-
+putational Linguistics.
+
+Erik Arakelyan, Zhaoqi Liu, and Isabelle Augenstein.
+2024. Semantic sensitivities and inconsistent pre-
+dictions: Measuring the fragility of NLI models. In
+Proceedings of the 18th Conference of the European
+Chapter of the Association for Computational Lin-
+guistics (Volume I: Long Papers), pages 432-444,
+St. Julian’s, Malta. Association for Computational
+Linguistics.
+
+Jean-Philippe Bernardy and Stergios Chatzikyriakidis.
+2019. What kind of natural language inference are
+nlp systems learning: Is this enough? In ICAART (2),
+pages 919-931.
+
+Chandra Bhagavatula, Ronan Le Bras, Chaitanya
+Malaviya, Keisuke Sakaguchi, Ari Holtzman, Han-
+nah Rashkin, Doug Downey, Scott Wen tau Yih, and
+Yejin Choi. 2020. Abductive commonsense reason-
+ing. Preprint, arXiv: 1908.05739.
+
+Samuel R. Bowman, Gabor Angeli, Christopher Potts,
+and Christopher D. Manning. 2015. A large anno-
+tated corpus for learning natural language inference.
+Preprint, arXiv:1508.05326.
+
+Mikhail Budnikov, Anna Bykova, and Ivan P
+Yamshchikov. 2025. Generalization potential of large
+language models. Neural Computing and Applica-
+tions, 37(4):1973-1997.
+
+Kevin Clark, Minh-Thang Luong, Quoc V. Le, and
+Christopher D. Manning. 2020. Electra: Pre-training
+text encoders as discriminators rather than generators.
+Preprint, arXiv:2003.10555.
+
+
+===== PAGE BREAK =====
+
+Ido Dagan, Oren Glickman, and Bernardo Magnini.
+2005. The pascal recognising textual entailment chal-
+lenge. In Machine learning challenges workshop,
+pages 177-190. Springer.
+
+Dorottya Demszky, Kelvin Guu, and Percy Liang.
+2018. Transforming question answering datasets
+into natural language inference datasets. ArXiv,
+abs/1809.02922.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2018. BERT: pre-training of
+deep bidirectional transformers for language under-
+standing. CoRR, abs/1810.04805.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. Bert: Pre-training of deep
+bidirectional transformers for language understand-
+ing. Preprint, arXiv:1810.04805.
+
+Ritam Dutt, Sagnik Ray Choudhury, Varun Venkat Rao,
+Carolyn Rose, and V.G.Vinod Vydiswaran. 2024.
+Investigating the generalizability of pretrained lan-
+guage models across multiple dimensions: A case
+study of NLI and MRC. In Proceedings of the 2nd
+GenBench Workshop on Generalisation (Benchmark-
+ing) in NLP, pages 165-182, Miami, Florida, USA.
+Association for Computational Linguistics.
+
+Matt Gardner, Yoav Artzi, Victoria Basmova, Jonathan
+Berant, Ben Bogin, Sihao Chen, Pradeep Dasigi,
+Dheeru Dua, Yanai Elazar, Ananth Gottumukkala,
+Nitish Gupta, Hanna Hajishirzi, Gabriel Iharco,
+Daniel Khashabi, Kevin Lin, Jiangming Liu, Nel-
+son F. Liu, Phoebe Mulcaire, Qiang Ning, Sameer
+Singh, Noah A. Smith, Sanjay Subramanian, Reut
+Tsarfaty, Eric Wallace, Ally Zhang, and Ben Zhou.
+2020. Evaluating models’ local decision boundaries
+via contrast sets. Preprint, arXiv:2004.02709.
+
+Max Glockner, Vered Shwartz, and Yoav Goldberg.
+2018. Breaking NLI systems with sentences that
+require simple lexical inferences. In Proceedings
+of the 56th Annual Meeting of the Association for
+Computational Linguistics (Volume 2: Short Papers),
+pages 650-655, Melbourne, Australia. Association
+for Computational Linguistics.
+
+Pengcheng He, Xiaodong Liu, Jianfeng Gao, and
+Weizhu Chen. 2021.    Deberta: Decoding-
+enhanced bert with disentangled attention. Preprint,
+arXiv:2006.03654.
+
+Dieuwke Hupkes, Mario Giulianelli, Verna Dankers,
+Mikel Artetxe, Yanai Elazar, Tiago Pimentel, Chris-
+tos Christodoulopoulos, Karim Lasri, Naomi Saphra,
+Arabella Sinclair, et al. 2023. A taxonomy and review
+of generalization research in nlp. Nature Machine
+Intelligence, 5(10):1161-1174.
+
+Divyansh Kaushik, Eduard Hovy, and Zachary C. Lip-
+ton. 2020. Learning the difference that makes a differ-
+ence with counterfactually-augmented data. Preprint,
+arXiv:1909. 12434.
+
+Zhenzhong Lan, Mingda Chen, Sebastian Goodman,
+Kevin Gimpel, Piyush Sharma, and Radu Sori-
+cut. 2019. ALBERT: A lite BERT for self-
+supervised learning of language representations.
+CoRR, abs/1909.11942.
+
+Mike Lewis, Yinhan Liu, Naman Goyal, Marjan
+Ghazvininejad, Abdelrahman Mohamed, Omer Levy,
+Ves Stoyanov, and Luke Zettlemoyer. 2019. Bart: De-
+noising sequence-to-sequence pre-training for natural
+language generation, translation, and comprehension.
+Preprint, arXiv:1910.13461.
+
+Chuanrong Li, Lin Shengshuo, Zeyu Liu, Xinyi Wu,
+Xuhui Zhou, and Shane Steinert-Threlkeld. 2020.
+Linguistically-informed transformations (LIT): A
+method for automatically generating contrast sets.
+In Proceedings of the Third BlackboxNLP Workshop
+on Analyzing and Interpreting Neural Networks for
+NLP, pages 126-135, Online. Association for Com-
+putational Linguistics.
+
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+dar Joshi, Dangi Chen, Omer Levy, Mike Lewis,
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Roberta: A robustly optimized bert pretraining ap-
+proach. Preprint, arXiv:1907.11692.
+
+Lovish Madaan, David Esiobu, Pontus Stenetorp, Bar-
+bara Plank, and Dieuwke Hupkes. 2024. Lost in
+inference: Rediscovering the role of natural lan-
+guage inference for large language models. Preprint,
+arXiv:2411.14103.
+
+R. Thomas McCoy, Ellie Pavlick, and Tal Linzen. 2019.
+Right for the wrong reasons: Diagnosing syntactic
+heuristics in natural language inference. In Proceed-
+ings of the 57th Annual Meeting of the Association for
+Computational Linguistics, pages 3428-3448, Flo-
+rence, Italy. Association for Computational Linguis-
+tics.
+
+Pablo Miralles-Gonzalez, Javier Huertas-Tato, Alejan-
+dro Martin, and David Camacho. 2025. Pushing the
+boundary on natural language inference. Preprint,
+arXiv:2504.18376.
+
+Aakanksha Naik, Abhilasha Ravichander, Norman
+Sadeh, Carolyn Rose, and Graham Neubig. 2018.
+Stress test evaluation for natural language inference.
+In Proceedings of the 27th International Conference
+on Computational Linguistics, pages 2340-2353,
+Santa Fe, New Mexico, USA. Association for Com-
+putational Linguistics.
+
+Yixin Nie, Adina Williams, Emily Dinan, Mohit Bansal,
+Jason Weston, and Douwe Kiela. 2019. Adversarial
+nli: A new benchmark for natural language under-
+standing. arXiv preprint arXiv: 1910.14599.
+
+Ellie Pavlick and Tom Kwiatkowski. 2019. Inherent
+disagreements in human textual inferences. Transac-
+tions of the Association for Computational Linguis-
+tics, 7:677-694.
+
+
+===== PAGE BREAK =====
+
+Daniel Petrov. 2025. From superficial patterns to se-
+mantic understanding: Fine-tuning language models
+on contrast sets. arXiv preprint arXiv:2501.02683.
+
+Alec Radford, Jeff Wu, Rewon Child, David Luan,
+Dario Amodei, and Ilya Sutskever. 2019. Language
+models are unsupervised multitask learners.
+
+Sara Rajaee, Yadollah Yaghoobzadeh, and Moham-
+mad Taher Pilehvar. 2022. Looking at the overlooked:
+An analysis on the word-overlap bias in natural lan-
+guage inference. In Proceedings of the 2022 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 10605-10616, Abu Dhabi, United
+Arab Emirates. Association for Computational Lin-
+guistics.
+
+Yasaman Razeghi, Robert L. Logan IV, Matt Gard-
+ner, and Sameer Singh. 2022. Impact of pretraining
+term frequencies on few-shot reasoning. Preprint,
+arXiv:2202.07206.
+
+Rachel Rudinger, Vered Shwartz, Jena D. Hwang, Chan-
+dra Bhagavatula, Maxwell Forbes, Ronan Le Bras,
+Noah A. Smith, and Yejin Choi. 2020. Thinking like
+a skeptic: Defeasible inference in natural language.
+In Findings of the Association for Computational Lin-
+guistics: EMNLP 2020, pages 4661-4675, Online.
+Association for Computational Linguistics.
+
+Neha Srikanth, Marine Carpuat, and Rachel Rudinger.
+2024. How often are errors in natural language rea-
+soning due to paraphrastic variability? Transac-
+tions of the Association for Computational Linguis-
+tics, 12:1143-1162.
+
+Neha Srikanth and Rachel Rudinger. 2025. Nli under
+the microscope: What atomic hypothesis decomposi-
+tion reveals. Preprint, arXiv:2502.08080.
+
+James Thorne,   Andreas Vilachos,   Christos
+Christodoulopoulos, and Arpit Mittal. 2018.
+FEVER: a large-scale dataset for fact extraction
+and VERification. In Proceedings of the 2018
+Conference of the North American Chapter of
+the Association for Computational Linguistics:
+Human Language Technologies, Volume 1 (Long
+Papers), pages 809-819, New Orleans, Louisiana.
+Association for Computational Linguistics.
+
+Dhruv Verma, Yash Kumar Lal, Shreyashee Sinha, Ben-
+jamin Van Durme, and Adam Poliak. 2023. Evalu-
+ating paraphrastic robustness in textual entailment
+models. In Proceedings of the 61st Annual Meet-
+ing of the Association for Computational Linguistics
+(Volume 2: Short Papers), pages 880-892, Toronto,
+Canada. Association for Computational Linguistics.
+
+Leon Weber-Genzel, Siyao Peng, Marie-Catherine
+de Marneffe, and Barbara Plank. 2024. Varierr nli:
+Separating annotation error from human label varia-
+tion. Preprint, arXiv:2403.01931.
+
+Adina Williams, Nikita Nangia, and Samuel Bowman.
+2018. A broad-coverage challenge corpus for sen-
+tence understanding through inference. In Proceed-
+ings of the 2018 Conference of the North American
+
+Chapter of the Association for Computational Lin-
+guistics: Human Language Technologies, Volume
+I (Long Papers), pages 1112-1122, New Orleans,
+Louisiana. Association for Computational Linguis-
+tics.
+
+Linyi Yang, Yaoxian Song, Xuan Ren, Chenyang Lyu,
+Yidong Wang, Jingming Zhuo, Lingqiao Liu, Jin-
+dong Wang, Jennifer Foster, and Yue Zhang. 2023.
+Out-of-distribution generalization in natural language
+processing: Past, present, and future. In Proceedings
+of the 2023 Conference on Empirical Methods in Nat-
+ural Language Processing, pages 4533-4559, Singa-
+pore. Association for Computational Linguistics.
+
+Zhilin Yang, Zihang Dai, Yiming Yang, Jaime G. Car-
+bonell, Ruslan Salakhutdinov, and Quoc V. Le. 2019.
+XInet: Generalized autoregressive pretraining for lan-
+guage understanding. CoRR, abs/1906.08237.
+
+Susan Zhang, Stephen Roller, Naman Goyal, Mikel
+Artetxe, Moya Chen, Shuohui Chen, Christopher De-
+wan, Mona Diab, Xian Li, Xi Victoria Lin, Todor Mi-
+haylov, Myle Ott, Sam Shleifer, Kurt Shuster, Daniel
+Simig, Punit Singh Koura, Anjali Sridhar, Tianlu
+Wang, and Luke Zettlemoyer. 2022. Opt: Open
+pre-trained transformer language models. Preprint,
+arXiv:2205.01068.
+
+A Appendix
+
+A.1 Variant Creation
+
+Word Class T N(%) C(%) E(%)
+
+Nouns                7363        33.4         28.7         37.8
+Verbs               3780 =: 31.8        28.2       40.0
+Adjectives        1067 33.6        23.7        42.6
+Adverbs             76        26.3        13.2        60.5
+
+Table 4: Number of seed problems and label distribu-
+tions for open-class word categories from the SNLI test
+set. T: seed problems shared between P and H; N/C/E:
+percentage of neutral, contradiction, and entailment la-
+bels.
+
+MLMs For the MLMs, we used the models enu-
+merated in Table 5, from which BART was ex-
+cluded given its suggestions were of lower quality,
+as shown in Figure 3. In addition to the models
+described in the table, we also tried including De-
+BERTa, which was too noisy to use for suggestion
+generation.
+
+Class Filtering Suggestions of different classes
+than the original word w; were excluded by tag-
+ging each suggestion v; in the context of its
+corresponding sentence using the spaCy model
+en_core_web_sm. We calculated the average of ex-
+cluded suggestions after tagging per model, which
+is shown in the table in 6.
+
+
+===== PAGE BREAK =====
+
+Model                                                    Size Architecture Vocabulary
+
+BERT (Devlin et al., 2018)               B            E             28,996
+google-bert/bert-base-cased
+
+BERT (Devlin et al., 2018)               L            E             28,996
+google-bert/bert-large-cased
+
+RoBERTa (Liu et al., 2019)               B             E              50,265
+FacebookAlI/roberta-base
+
+RoBERTa (Liu et al., 2019)               L             E              50,265
+FacebookAI/roberta-large
+
+BART (Lewis et al., 2019)                 B           E-D            50,265
+facebook/bart-base
+
+BART (Lewis et al., 2019)                 L           E-D            50,265
+facebook/bart-large
+
+ALBERT (Lan et al., 2019)               B            E             30,000
+albert/albert-base-v2
+
+ALBERT (Lan et al., 2019)             XXL          E             30,000
+albert/albert-xxlarge-v2
+
+ELECTRA (Clark et al., 2020)           B             E              30,522
+google/electra-base-generator
+
+ELECTRA (Clark et al., 2020)           L             E              30,522
+
+google/electra-large-generator
+
+Table 5: Overview of selected pretrained MLMs used
+for suggestion generation. Column Size: Size Base,
+Large, or XXLarge; Column Architecture: the model
+is Encoder, Decorder or Encoder-Decoder. The vocabu-
+lary size of the models is shown in the last column.
+
+Probability Filtering We obtained the probabil-
+ity of each vj; of w; in P or H from the MLM that
+suggested it, and we excluded those of lower proba-
+bility. MERGE validates variants by assuming that
+replacements as likely as the w; are less likely to be
+semantically implausible. Original words w; that
+were not part of the model’s vocabulary were also
+automatically excluded. Also note that both prob-
+ability and class filtering are important, as highly
+probable suggestions might not have the correct
+class and vice versa. Table 6 shows the percentages
+of excluded suggestions for having lower proba-
+bility than the replaced word under Column Prob.
+Fil.
+
+A.2. Annotation
+
+We annotated variants in terms of how much they
+change the fluency and the original logical label
+of the NLI problems, which we considered to be
+correct. The scores used were: 1 — poor, 2— mostly
+poor, 3—- uncertain, 4—mostly good, 5—good. Ta-
+ble 7 shows how we annotated certain variants,
+and their attributed fluency and reasoning scores,
+alongside an explanation for them. Variants were
+classified as poor if they were: 1) ungrammatical;
+2) had missing arguments; 3) nonsense; or 4) logic
+non-preserving. Aspects 1) and 2) were chosen
+given they directly hinder the evaluation of fluency
+and reasoning.
+
+The instructions in the annotation guidelines are
+
+POS Fil.       Prob. Fil.
+Model                      POS         P           H           P           H
+ALBERT-B          A      45.7 484 87.6 80.4
+N       72      78 884 79.9
+Vv    26.55 29.3 91.1 87.1
+ALBERT-XXL      A      45.3 48.4 87.8 78.1
+N       6.1      6.7 89.6 75.9
+Vv      24.55 245 92.1 84.5
+BART-B                     A         63.9 65.8 90.2 84.2
+N      28.3 26.6 91.3 84.8
+Vv    38.7 37.2 90.0 88.5
+BART-L                     A         64.0 65.9 894 83.4
+N      30.6 30.8 91.5 83.3
+Vv      37.2 38.1 88.7 87.6
+BERT-B               A      45.1 48.7 93.5 89.6
+N       10.6 11.6 92.2 85.8
+Vv         26.4 28.6 92.5 90.4
+BERT-L                     A         444 474 945 91.0
+N       10.4 12.3 94.0 87.9
+Vv         28.9 29.7 945 92.6
+Electra-B                   A         454 484 896 84.9
+N    11.0 11.3 882 82.4
+Vv      27.6 27.5 88.3 88.9
+Electra-L                   A         45.6 49.0 91.1 86.2
+N         10.7 10.7 90.9 85.0
+Vv    25.5 26.5 90.5 89.5
+RoBERTa-B         A      492 523 93.9 89.1
+N          77        8.2 94.2 88.3
+Vv    31.1 33.8 95.0 91.8
+RoBERTa-L             A         47.7 50.9 95.2 91.3
+N       77      8.1 95.7 90.2
+Vv    33.2 32.3 96.6 93.6
+
+Table 6: Average percentages of suggestions with other
+POS Categories (Pos Fil.) and lower probabilities (Prob
+Fil.). The percentages under Premise and Hypothesis
+show how many suggestions, on average, out of 200 had
+a different class or lower probability than the original
+masked word.
+
+provided below with the demo examples in Table 7:
+
+The NLI problems are assessed on
+the fluency (grammaticality and sensibil-
+ity) and reasoning. The reasoning com-
+ponent focuses on the relation between
+the meaning of P and H rather than their
+fluency. However, poor fluency can neg-
+atively affect the reasoning part. For ex-
+ample, "Colorless green ideas sleep fu-
+riously" entailing "Green thoughts is an-
+grily sleeping" should be assessed with
+fluency 1 and reasoning 5, in short F1-
+RS.
+
+The original SNLI problems could
+
+
+===== PAGE BREAK =====
+
+suffer from fluency and reasoning; how-
+ever, the obtained NLI problem vari-
+ants should be assessed with respect to
+the original NLI problems. Annotation
+should assess the fluency and reasoning
+of the variants while assuming that the
+fluency and reasoning of the original NLI
+problems are fine. That’s why variant
+NLI problems are provided with the ori-
+gin word that helps to reconstruct the
+original SNLI problem.
+
+Below are several examples to
+demonstrate different combinations of
+fluency and reasoning. The scale 1-5
+should be interpreted as: poor, mostly
+poor, uncertain, mostly good, good.
+
+Cross-Model Intersection of ALL Suggestions
+for Premise-Hypothesis Per Problem
+
+A-B  20 415 12 21 #17 27 26 15 121
+
+A-XXL4_ 2.0   09 O08 12 11 13 #13 11 09
+
+BAB{ 15 0.9 Bs 16094615 20 419 18 14
+BA-L{ 1.2 08 2.5 oe 130616 #15 14 13  8
+
+B-By 2.1   1.2   1.6   14   3.8   2.7   2.8   2.7   17   13
+
+B-L{ 1.7 112 15 13 27 #22 21 21 «216 «214  6
+
+E-Bj 2.7    13    2.0    1.6    2.8    21  9s |  4.2    1.8    13
+E-L] 2.6     1.3     1.9     15     2.7     21     4.2     4.8     19     14
+R-B; 1.5    11    1.8    14    17    1.6    1.8    1.9    2.2    1.8
+
+R-Lj 1.1   0.9   1.4   iL,5}   iL,5}   1.4   iL,5}   1.4   1.8   1.4
+
+A-B A-XXLBA-B BA-L B-B B-L E-B EL RB RL
+
+Figure 9: Confusion matrix showing how models’ sug-
+gestions intersect on average, across problems, with
+the diagonal being the averaged number of original or
+model-specific suggestions a model generates. For in-
+stance, in the problem ‘A small girl carries a girl’, a
+suggestion like ‘bear’ counts on the diagonal if unique
+to one model, or in the other cells if shared between
+models.
+
+Evaluated NLI Models The NLI models we
+evaluated alongside with their model cards are in
+Table 8.
+
+F+R scores for all classes.
+
+Bad (29)
+lam Good (>9)
+iv
+ae
+
+100
+
+90
+
+80
+
+60
+
+50
+40
+
+Percentage (%)
+
+30
+
+20
+
+2
+
+<i      x
+ee
+Ss §€    & gs Se & €
+vy      ©  ©  e  e
+Model
+
+Figure 10: Fluency and Reasoning scores for 100 ran-
+domly sampled variants and their normalized counts,
+from all pos tags, and the models that validated them,
+after exclusion of suggestions from BART. Note that 91
+out of the 100 examples evaluated had F' + R => 9.
+
+Model               Model Card
+
+ALBERT-XXL- ynie/albert-xxlarge-v2-snli_mnli_fever_anli_R1_R2_R3-nli
+SMFA
+
+BART-B-S       varun-v-rao/bart-base-snli-model1
+
+BART-L-SMFA | ynie/bart-large-snli_mnli_fever_anli_R1_R2_R3-nli
+BERT-B-S     textattack/bert-base-uncased-snli
+
+BERT-L-S         varun-v-rao/bert-large-cased-lora-1.58M-snli
+DeBERTa-v3-B- pepa/deberta-v3-base-snli
+
+S
+DeBERTa-v3-L- pepa/deberta-v3-large-snli
+S
+
+Electra-L-SMFA ynie/electra-large-discriminator-snli_mnli_fever_anli_R1_R2_R3-nli
+
+GPT-2-L-S          varun-v-rao/gpt2-large-snli-model3
+
+OPT-1-3b-S       utahnlp/snli_facebook_opt-1 .3b_seed-3
+
+RoBERTa-B-S__ pepa/roberta-base-snli
+
+RoBERTa-L-       ynie/roberta-large-snli_mnli_fever_anli_R1_R2_R3-nli
+SMFA
+
+XLNet-L-SMFA  ynie/xlnet-large-cased-snli_mnli_fever_anli_R1_R2_R3-nli
+
+Table 8: NLI evaluated models and their Hugging Face
+model cards.
+
+Model                            Avg Avg Other
+BERT-B          473.7      9572.0
+ALBERT-B                2085.8              4073.9
+Electra-L                       700.1               7445.4
+BERT-L          228.0      9572.0
+ALBERT-XXL = 4114.0             4073.9
+Electra-B                  2128.2             7445.4
+RoBERTa-B       355.9      9729.8
+RoBERTa-L               188.0             9729.8
+Both           41186.3     10273.7
+
+Table 9: Average entries per subsample corresponding
+to each MLM. The Avg Other is the average of all
+other variants coming from different architectures for
+one MLM model, excluding those from the same model
+family and those that are validated by at least two mod-
+els.
+
+
+===== PAGE BREAK =====
+
+1.00
+
+0.95
+
+©
+Re)
+fo)
+
+Pattern accuracy
+o
+[oe)
+Ul
+
+0.80
+
+0.75
+
+Pattern Accuracy for ALL data.
+
+BERT-B-S
+BERT-L-S
+
+— RoBERTa-B-S
+=—— DeBERTa-v3-B-S
+
+DeBERTa-v3-L-S
+BART-B-S
+
+OPT 1-3b-S
+GPT-2-L-S
+ROBERTa-L-SMFA
+BART-L-SMFA
+Electra-L-SMFA
+XLNet-L-SMFA
+ALBERT-XXL-SMFA
+
+20
+
+Accuracy threshold (%)
+
+40
+
+60
+
+80
+
+100
+
+Figure 11: PA scores from threshold 0% for all models on ALLy,;. The red dots are PA scores at QT on ALLyar.
+
+
+===== PAGE BREAK =====
+
+Premise                Hypothesis            Label     Original     Suggested F         Explanation
+
+A man in a black A woman ina black     C     commercial detached 5        Good: the variant is fluent
+
+shirt, in a detached _ shirt, in a detached                                                        and preserves reasoning.
+
+kitchen, holding up _ kitchen, holding up
+
+meat he took out of | meat he took out of
+
+a bag.                           a bag.
+
+A teenage dog is A teenage dog is      E         yellow        teenage      5          Good: the variant is fluent
+
+running in a field running outdoors.                                                and preserves reasoning.
+
+near a mountain.
+
+A man driving A man _ driving      N        laughing       driving      4         Mostly good: the variant
+
+while at a restau- while at a restaurant                                                       might be likely in a certain
+
+rant.                       eating.                                                                                 scenario (e.g. there might be
+a restaurant where tables are
+like cars).
+
+A man is celebrat- A man is happily    N      shooting     wearing    3       Uncertain: the variant might
+
+ing his victory celebrating his vic-                                                       be likely in a certain sce-
+
+while smiling and tory while smiling                                       nario (e.g. the man is wear-
+
+wearing champagne and wearing cham-                                                                   ing a champagne-shaped cos-
+
+in the air with his _ pagne in the air                                                                   tume), but a less likely one.
+
+teammate.
+
+A man slung into A man is slung into      N        pointing         slung       2          Mostly poor: the scenario is
+
+the ear wearing a __ the ear and wearing                                                                  very unlikely, e.g. a man be-
+
+striped shirt in a_ alight striped shirt.                                                                ing forced to hear something.
+
+small boat filled
+
+with many people.
+
+clutched to her ear, clutched to her ear,      E         Phone        clutched     1         Poor: the variant is ungram-
+
+a woman bends for- a woman bends for-                                                              matical, thus making it dif-
+
+ward at the side ofa ward                                                                                ficult to verify its fluency,
+
+busy street.                                                                i.e. missing the theme of
+‘clutched’.
+
+Aholeisonacherry A hole falls out of a       C          worker           hole         1           Poor: the variant is not flu-
+
+picker in a palm _ tree.                                                     ent, until we consider a very
+
+tree.                                                                                                 specific metaphorical con-
+text, i.e. a hole cannot be
+have agency.
+
+A shirt booth witha The man is got       C         printing           got         1           Mostly Good: the variant is
+
+man got a shirt.         some pants.                                                                   still fluent, despite it being
+metaphorical, and it is still
+likely to preserve the initial
+inference label, despite the
+ungrammaticality of the hy-
+pothesis.
+
+This child is took a Child took a mani-     C        getting         took       1         Uncertain: the ungrammti-
+
+pedicure.                cure.                                                                           cality of the premise makes
+it difficult to asses its fluency,
+however the main source of
+the contrast giving the con-
+tradiction (i.e. pedicure vs.
+manicure) is kept.
+
+A brown dog wear- There is an animal     E        biting       running     4        Very Poor: Even though
+
+ing a collar is chas- running a broom.                                                                ‘running a broom’ might be
+
+ing and running on                                                                            running with a broom, run-
+
+a red broom.                                                                                                  ning on something does not
+entail running with X.
+
+Two construction Two workers are      N        climbing      produced     1          Poor: the hypothesis is hard
+
+workers produced produced a building                                          to understand given its un-
+
+the steel ribbed                                                                                grammaticality, while the
+
+exterior of a new
+building at their
+work site.
+
+subject of ‘produced’ is un-
+clear, which makes reason-
+ing impossible to asses.
+
+Table 7: Examples of annotation scores for NLI variants, considering their fluency (F) and the preservation of the
+original NLI label (R), alongside explanations for their scores. Note that the labels under Column Label are Neutral,
+Entaliment, and Contradiction.
+
+
+===== PAGE BREAK =====
+
+P: A man pushing a hand-truck of boxes is bending over to pick up a pear.
+H: A happy man is picking up a pear.
+Gold label: E Correct label: N Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: A man in a colorful shirt and a lady in a white blouse sign copies of books for people.
+H: Two people sign copies of their latest novel.
+Gold label: E Correct label: N Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: A black dog is swimming with a ball in his mouth.
+H: A black dog found a ball in the water and is bring it back to its owner.
+Gold label: E Correct label: N Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: A wet child stands in chest deep ocean water.
+H: The child s playing on the beach.
+Gold label: E Correct label: N- Annotations: E(3) N(1) C(1)_~—s Avg rate: 0.00
+
+P: A young boy runs across a road in front of a sky blue building with barred windows.
+H: A boy runs across a road in front of an abandoned building.
+Gold label: E Correct label: N Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: The man in the brown shirt is holding the hand of the long-haired child in front of a painting.
+H: A male has clothes on with his hand holding another young male in front of a painting.
+Gold label: N Correct label: N. Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: A mom and her boy are riding in a bumper car.
+H: The mom and boy are at an amusement park.
+Gold label: E Correct label: N Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: A man wearing a blue apron and long rubber boots is dragging a flotation device from a long row of flotation devices.
+H: A man in rubber boots and a work apron is rubbing his face in between pulling floating objects.
+Gold label: E Correct label: N- Annotations: E(3) N(1) C(1)_~—s Avg rate: 0.00
+
+P: A boy dressed for summer in a green shirt and kahki shorts extends food to a reindeer in a petting zoo.
+H: A boy alien dressed for summer in a green shirt and kahki shorts
+Gold label: E Correct label: N- Annotations: E(3) N(1) C(1)_~—s Avg rate: 0.00
+
+P: A boy dressed for summer in a green shirt and kahki shorts extends food to a reindeer in a petting zoo.
+H: A boy dressed for summer in a tight green shirt and kahki shorts
+Gold label: E Correct label: N Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: A cowboy is showing off his mule next to a horse hauling trailer.
+H: A man is showing off his prize winning mule.
+Gold label: E Correct label: N Annotations: E(4) N(1) C(O) _~— Avg rate: 0.00
+
+P: A female gymnast flies off of the lower bar and is suspended in the air with her feet pointed upward.
+H: A gymnast is in mid air.
+Gold label: N Correct label: E Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: Two women stand in the street both wearing matching outfits with police like jackets that say Polotie.
+H: Two women are dancing in the street wearing dresses.
+Gold label: N Correct label: N. Annotations: E(0) N(3) C(2)_~— Avg rate: 0.00
+
+P: One girl sips a soda while another looks on, standing on a street in front of a bunch of bicycles.
+H: A girl drinks a soda on the street in front of people
+Gold label: N Correct label: N. Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: people standing at a beach with Cameras.
+H: A group of people standing at a beach filled with cameras.
+Gold label: N Correct label: E Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: A young woman with red-hair is adjusting a blue bracelet on an older woman with short hair.
+H: A redhead is putting a bracelet on an old woman.
+Gold label: N Correct label: E Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: A person is sitting in front of a graffiti covered wall.
+H: A person is sitting outside
+Gold label: N Correct label: N. Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: A woman holds a newspaper that says "Real change".
+H: a woman on a street holding a newspaper that says "real change"
+Gold label: E Correct label: N Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: A happy woman quite stands in front of a business that displays a closed sign and looks very animated.
+H: A woman stands by a business.
+Gold label: N Correct label: E Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: A small child dressed for winter stares across a lake while leaning on a mesh fence in a scenic park setting.
+H: A small child dressed for winter stares across a large lake while leaning on a mesh fence
+Gold label: E Correct label: N Annotations: E(4) N(1) C(O) _~— Avg rate: 0.00
+
+P: Bearded black dressed male performer is displaying his skill by swinging a fire line in each hand in arcs.
+H: A sideshow man in a black costume is performing a trick with fire for the audience.
+Gold label: E Correct label: N Annotations: E(4) N(1) C(O) _~— Avg rate: 0.00
+
+P: Two women competing in a roller derby with several teammates and referee in the background.
+H: Two roller derby competitors skate quickly ahead of teammates.
+Gold label: E Correct label: N Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: A young man blew up balloons to craft into animals for the seven excited children that looked on.
+H: The children watch the man make dogs and giraffes out of balloons
+
+
+
+===== PAGE BREAK =====
+
+Gold label: E Correct label: N. Annotations: E(3) N(2) C(0)_~—s Avg rate: 0.00
+
+P: The man is trying to make a pottery that he can market soon.
+
+H: An old man is making pottery to sell.
+
+Gold label: E Correct label: E Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: Two dirt bike riders, one wearing green and the other wearing blue and white, are jumping a hill.
+H: Two dirt bike riders are outside
+
+Gold label: N Correct label: N. Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: A train conductor in coveralls is standing in the door of the trail.
+
+H: The conductor is walking in a field.
+
+Gold label: N Correct label: N. Annotations: E(0) N(3) C(2)_~— Avg rate: 0.00
+
+P: An older gentleman looks at the camera while he is building a deck.
+
+H: An older gentleman in overalls looks at the camera while he is building a stained red deck in front of a house.
+Gold label: E Correct label: N Annotations: E(3) N(2) C(0)_~— Avg rate: 0.00
+
+P: Children, including one with a painted face, pet tiny turtles that are crawling in the green grass.
+H: Turtles are crawling in the white grass.
+
+Gold label: E Correct label: N) Annotations: E(3) N(O) C(2)_~— Avg rate: 0.00
+
+P: A young man waits on a bench with his bag behind a few advertisements in London.
+
+H: A young man waits outdoors in London on a bench.
+
+Gold label: N Correct label: N. Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: A group of people are in a rowboat in the ocean surrounded by seagulls.
+
+H: A bunch of people are in a wooden object on the water.
+
+Gold label: N Correct label: N. Annotations: E(2) N33) C(O) ~— Avg rate: 0.00
+
+P: A man in a hard hat looks intimidated.
+
+H: He is working in a potentially dangerous field that requires a hard hat.
+
+Gold label: E Correct label: N Annotations: E(4) N(1) C(O) _~— Avg rate: 0.00
+
+Table 10: The original SNLI Problems whose variants were most poorly classified by the NLI models. Avg rate
+represents the average accuracy of NLI models across all variants per seed/original problem. Annotations reports the
+annotation labels of 5 annotators from the SNLI data, where the gold label is selected based on the majority voting.
+Corrected label is an inference label the authors think is correct. We are aware of the inherent disfigurements in
+NLI labeling (Pavlick and Kwiatkowski, 2019), especially in SNLI, but we dub our corrected labels as the most
+likely label.
+
